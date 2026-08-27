@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "songstress",
+  "productName": "Songstress",
   "version": "0.1.0",
   "identifier": "com.yossi.songstress",
   "build": {
@@ -29,12 +29,26 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "homepage": "",
+    "category": "Music",
+    "license": "MIT",
+    "shortDescription": "Songstress \u2014 album-grid music player for KDE",
+    "longDescription": "Songstress is an album-grid-centric local music player for\nFedora KDE (Wayland). It scans your music folders, builds a library in\nSQLite, and plays everything through MPV (gapless, ReplayGain, 10-band\nequalizer, shuffle/repeat, play-next queue) with full MPRIS + Plasma\nGlobal Menu integration.\n",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "rpm": {
+        "release": "1",
+        "depends": [
+          "mpv",
+          "kdialog"
+        ]
+      }
+    }
   }
 }

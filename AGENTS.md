@@ -1,8 +1,8 @@
 # AGENTS.md — Songstress
 
 Instructions for AI agents (and humans) working on this codebase. Read this fully
-before changing anything. Current implementation status lives in **PROGRESS.md** —
-read that too, and update it when you finish work.
+before changing anything. The roadmap + full implementation record lives in
+**PLAN.md** — read that too, and update it when you finish work.
 
 ## What this is
 
@@ -38,7 +38,7 @@ Closing the app window kills `tauri dev` by design — restart the unit.
 src/
   App.svelte              shell: titlebar / stage (grid+sidebar+playbar overlay) 
   app.css                 theme tokens, .glass, scrollbar, noise garnish
-  components/             TitleBar, Sidebar, AlbumGrid, ExpandedPanel, PlayBar
+  components/             TitleBar, Sidebar, AlbumGrid, ExpandedPanel, PlayBar, TagEditor, MusicFolders, ContextMenu, EmptyState
   lib/
     types.ts              Artist/Album/Track/PlaybackContext/Theme
     buildRows.ts          row-model grid (pure, vitest-covered)
@@ -47,6 +47,8 @@ src/
     artColors.ts          invoke wrapper -> Rust album_colors
     stores/*.svelte.ts    runes stores: ui, library, playback
     window.ts             isTauri guard + window control helpers
+src-tauri/src/library/    db, scan, artwork, tags, import, settings (Rust)
+src-tauri/src/watcher.rs  inotify live watching (Step 7d; multi-root Step 7c)
 src-tauri/src/lib.rs      commands: album_colors (dominant-color extraction)
 public/covers/            album art for the fake library (real folder.jpg files)
 ```
@@ -66,7 +68,7 @@ public/covers/            album art for the fake library (real folder.jpg files)
   and check every selector carries a `.s-…` hash.
 - **Debug Rust panics on integer overflow** and a panic inside a Tauri command
   aborts the whole app. Use `u16`/`saturating_*` for pixel math (see the `+8`
-  bucket-center incident in git-less history / PROGRESS.md).
+  bucket-center incident in git-less history / PLAN.md).
 - **Covers live in `public/covers/`** (plain Vite — `static/` is a SvelteKitism).
   `tauri.conf.json` `frontendDist` is `../dist`.
 - **mpv must be spawned with `--no-config`** — the user's `~/.config/mpv/mpv.conf`
@@ -84,6 +86,14 @@ public/covers/            album art for the fake library (real folder.jpg files)
   incremental scans SKIP unchanged files entirely (they never re-enter
   grouping). After changing grouping/tag-consensus logic, use Library →
   Full Rescan (rebuild) or nudge `tracks.mtime_ns` in the DB.
+- **The inotify watcher must ignore read traffic.** notify's inotify backend
+  watches IN_OPEN too, so the scan's own walkdir reads arrive as
+  Access(Open)/Access(Close(Read)) events — counting them made the watcher
+  feed on itself (one 60ms rescan every 5s, 24h straight; 7723 in a day).
+  Filter through `watcher::marks_library_dirty`: Access is noise; Create/
+  Remove/Name/Data/Metadata count (a plain `touch` = Metadata, and the scan
+  keys on mtime+size). Also: DROPping a WatchHandle stops its thread (the
+  channel Disconnect IS the stop signal) — `rewatch` relies on exactly that.
 - **NEVER await IPC commands in the mpv reader task** (mpv.rs `spawn_reader`).
   It is the task that reads responses off the socket — awaiting a command
   there stalls all reads until the 10s timeout fires (mpv executed instantly;
@@ -123,4 +133,4 @@ public/covers/            album art for the fake library (real folder.jpg files)
 3. `cargo test --lib` (in src-tauri) → all green
 4. `npm run build` → succeeds
 5. Visual pass if UI touched (raise window, screenshot, actually look)
-6. Update PROGRESS.md
+6. Update PLAN.md (status table + implementation log)

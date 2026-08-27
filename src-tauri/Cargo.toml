@@ -20,6 +20,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [profile.dev.package."*"]
 opt-level = 2
 
+# Step 7b release profile (DECIDED 2026-08-25): small, fast binary for the
+# RPM. lto=thin + codegen-units=1 for whole-crate optimization without the
+# full-LTO build-time hit; strip kills debug symbols (dev builds keep them).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -99,6 +99,7 @@
     <PlayBar />
   </div>
   <TagEditor />
+  <MusicFolders />
   <ContextMenu />
 </div>
 

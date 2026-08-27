@@ -81,7 +81,9 @@ export async function addMusicFolderRoot(): Promise<void> {
     const updated = await invoke<string[] | null>("add_music_folder", { path: null });
     if (updated) ui.musicFolders = updated;
   } catch (err) {
-    console.error("add music folder failed", err);
+    // validate_new_root rejections (duplicate / nested root) are user-facing,
+    // and a console line is invisible in the webview.
+    notifyError(err);
   } finally {
     scanner.running = false;
   }
@@ -96,7 +98,7 @@ export async function removeMusicFolderRoot(path: string): Promise<void> {
     const updated = await invoke<string[]>("remove_music_folder", { path });
     ui.musicFolders = updated;
   } catch (err) {
-    console.error("remove music folder failed", err);
+    notifyError(err);
   } finally {
     scanner.running = false;
   }

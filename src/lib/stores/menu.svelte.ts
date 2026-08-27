@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { library, LIVE_LIBRARY } from "./library.svelte";
 import { playback } from "./playback.svelte";
-import { scanner, addMusicFiles, addMusicFolder, rescan, rescanFull, saveImports, openMusicFolders, addMusicFolderRoot, removeMusicFolderRoot } from "./scanner.svelte";
+// NOTE: roots (Step 7c) are managed inside the Music folders modal, not from
+// the menu — library.add-folder is the Step 2a IMPORT path, unrelated to it.
+import { scanner, addMusicFiles, addMusicFolder, rescan, rescanFull, saveImports, openMusicFolders } from "./scanner.svelte";
 import { cycleShuffle, cycleRepeat, albumSkip, setEqEnabled, cycleEqPreset } from "./playback.svelte";
 import { cycleTheme, resolvedTheme, ui } from "./ui.svelte";
 

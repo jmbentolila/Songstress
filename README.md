@@ -1,6 +1,6 @@
 # Songstress
 
-> Agent instructions: [AGENTS.md](AGENTS.md) · implementation tracker: [PROGRESS.md](PROGRESS.md)
+> Agent instructions: [AGENTS.md](AGENTS.md) · roadmap + implementation record: [PLAN.md](PLAN.md)
 
 Album-grid music player for Fedora KDE (Wayland). Tauri 2 + Svelte 5 frontend, Rust backend,
 MPV (JSON IPC) as audio engine, SQLite library, lofty tags.

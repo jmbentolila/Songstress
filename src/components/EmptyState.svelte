@@ -1,11 +1,22 @@
 <script lang="ts">
   import { library } from "../lib/stores/library.svelte";
-  import { chooseMusicFolder, rescan, scanner } from "../lib/stores/scanner.svelte";
+  import { addMusicFolderRoot, rescan, scanner } from "../lib/stores/scanner.svelte";
   import { ui } from "../lib/stores/ui.svelte";
 
   const pct = $derived(
     scanner.total > 0 ? Math.round((scanner.done / scanner.total) * 100) : 0,
   );
+
+  // Step 7c: the library can have several roots, so the headline names the
+  // folder only while there is exactly one — a 4-path list here is noise.
+  const headline = $derived.by(() => {
+    const folders = ui.musicFolders;
+    if (folders.length === 0) {
+      return "Pick the folder that holds your music to build your library.";
+    }
+    if (folders.length === 1) return `No albums found in ${folders[0]}`;
+    return `No albums found in your ${folders.length} music folders`;
+  });
 </script>
 
 <div class="empty">
@@ -24,16 +35,14 @@
     {/if}
   {:else}
     <h2>Welcome to Songstress</h2>
-    <p class="dim">
-      {ui.musicDir
-        ? `No albums found in ${ui.musicDir}`
-        : "Pick the folder that holds your music to build your library."}
-    </p>
-    <button class="primary" onclick={() => void chooseMusicFolder()}>
-      Choose music folder…
+    <p class="dim">{headline}</p>
+    <button class="primary" disabled={scanner.running} onclick={() => void addMusicFolderRoot()}>
+      {scanner.running ? "Scanning…" : "Add music folder…"}
     </button>
-    {#if ui.musicDir}
-      <button class="ghost" onclick={() => void rescan()}>Rescan</button>
+    {#if ui.musicFolders.length > 0}
+      <button class="ghost" disabled={scanner.running} onclick={() => void rescan()}>
+        Rescan
+      </button>
     {/if}
   {/if}
 </div>
@@ -83,6 +92,17 @@
 
   .primary:hover {
     filter: brightness(1.1);
+  }
+
+  /* roots can be added while a scan is already running elsewhere (watcher,
+     menu rescan) — the buttons go quiet rather than lying about being usable */
+  button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .primary:disabled:hover {
+    filter: none;
   }
 
   .ghost {

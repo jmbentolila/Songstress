@@ -6,16 +6,23 @@
     scanner,
   } from "../lib/stores/scanner.svelte";
 
-  function remove(path: string) {
-    if (
-      !confirm(
-        `Remove "${path}" from your music folders?\n\n` +
-          "Its tracks will be dropped from the library. Files on disk are kept.",
-      )
-    ) {
-      return;
-    }
-    void removeMusicFolderRoot(path);
+  /** Which row is currently asking "remove this?" — destructive confirms live
+   *  INSIDE the glass; native confirm() would render a GTK dialog, which
+   *  AGENTS.md forbids. */
+  let pendingRemove = $state<string | null>(null);
+
+  // Closed modal, or the list changed under us (root added/removed elsewhere)
+  // → never leave a stale confirmation armed.
+  $effect(() => {
+    void ui.musicFoldersOpen;
+    void ui.musicFolders.length;
+    pendingRemove = null;
+  });
+
+  function confirmRemove() {
+    const path = pendingRemove;
+    pendingRemove = null;
+    if (path) void removeMusicFolderRoot(path);
   }
 
   function add() {
@@ -36,6 +43,7 @@
     role="presentation"
     onclick={(e) => e.target === e.currentTarget && (ui.musicFoldersOpen = false)}
   >
+    <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mf-modal glass" role="dialog" aria-modal="true" aria-label="Music folders">
       <header class="mf-head">
         <h2>Music folders</h2>
@@ -48,18 +56,37 @@
         {:else}
           <ul class="mf-list">
             {#each ui.musicFolders as folder (folder)}
-              <li class="mf-row">
-                <span class="mf-path" title={folder}>{folder}</span>
-                <button
-                  class="mf-remove"
-                  aria-label={`Remove ${folder}`}
-                  disabled={scanner.running}
-                  onclick={() => remove(folder)}
-                  title="Remove this folder (tracks drop from the library)"
-                >
-                  ✕
-                </button>
-              </li>
+              {#if pendingRemove === folder}
+                <li class="mf-row mf-ask-row">
+                  <span class="mf-ask" role="alert">
+                    Drop this folder’s tracks from the library? Files on disk are
+                    kept.
+                  </span>
+                  <button
+                    class="mf-yes"
+                    disabled={scanner.running}
+                    onclick={confirmRemove}
+                  >
+                    Remove
+                  </button>
+                  <button class="mf-no" onclick={() => (pendingRemove = null)}>
+                    Cancel
+                  </button>
+                </li>
+              {:else}
+                <li class="mf-row">
+                  <span class="mf-path" title={folder}>{folder}</span>
+                  <button
+                    class="mf-remove"
+                    aria-label={`Remove ${folder}`}
+                    disabled={scanner.running}
+                    onclick={() => (pendingRemove = folder)}
+                    title="Remove this folder (tracks drop from the library)"
+                  >
+                    ✕
+                  </button>
+                </li>
+              {/if}
             {/each}
           </ul>
         {/if}
@@ -187,6 +214,50 @@
   .mf-remove:hover {
     background: var(--hover);
     color: #ff8f8f;
+  }
+
+  .mf-ask-row {
+    gap: 10px;
+    background: var(--panel-bg-strong);
+    border: 1px solid #ff8f8f55;
+  }
+
+  .mf-ask {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--text-dim);
+  }
+
+  .mf-yes,
+  .mf-no {
+    flex: none;
+    padding: 5px 11px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .mf-yes {
+    border-color: #ff8f8f88;
+    color: #ff8f8f;
+  }
+
+  .mf-yes:hover:not(:disabled) {
+    background: #ff8f8f22;
+  }
+
+  .mf-no:hover {
+    background: var(--hover);
+  }
+
+  .mf-yes:disabled {
+    opacity: 0.55;
+    cursor: default;
   }
 
   .mf-foot {
