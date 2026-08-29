@@ -1171,7 +1171,7 @@ would need a spring-driven drag layer).
 
 ---
 
-### Step 8c — PlayBar critique fixes — ⬜ (from the 2026-08-27 critique, 30/40)
+### Step 8c — PlayBar critique fixes — ✅ (from the 2026-08-27 critique, 30/40; re-critiqued 35/40)
 
 Snapshot: `.impeccable/critique/2026-08-28T00-36-27Z__src-components-playbar-svelte.md`.
 Work top-down, one gate pass after each:
@@ -1242,6 +1242,39 @@ playbar's three glyph sources (pixel-cropped evidence) and landed:
   and the no-typographic-glyph rule.
 Gates: check 0/0, vitest 53, build OK, detector exit 0, cropped screenshot
 verified (incl. a live red-gradient-album playbar state).
+
+**Grid critique pass (impeccable, 2026-08-29, commit 18d141d)**: album
+grid + expansion panel critiqued as ONE surface (the expanded panel is a
+grid row, not an overlay). First run 32/40 (Good); all five findings
+landed same day:
+- P2 selection without consequence (user-shaped as "b" + Enter): the
+  row WAS a button that selected and then did nothing. Now: single
+  click selects (wash + tooltip "Click again to play (or press
+  Enter)"), a SECOND click on the selected row plays it, and Enter
+  plays the selection from anywhere. The two paths can't double-fire
+  (focused row's native Enter = click = second-click path; the window
+  handler ignores interactive targets) and both stand down for inputs,
+  the tag editor, and open context menus; a selected MISSING track
+  locates on Enter instead. Selection clears when playback starts.
+  A visible ▶-on-selected was rejected: button-in-button is invalid
+  HTML and the per-row layout pop was ugly.
+- P2 press convention skipped by the app's largest pressable families:
+  tiles + track rows now `cursor: pointer` and take the documented
+  `--active` `:active` wash (tile = a `::after` overlay, NEVER a
+  filter/transform on the cover — WebKit layer churn = blank-cover
+  flash).
+- P2 inert grid empty state → clear-search action, same voice as the
+  sidebar's `.empty`.
+- P3 `.edit-album` 26 → 28px (PRODUCT.md hit-target bar); play-all
+  gained `title="Play"`.
+- P3 a11y: alert-triangle SVGs + the ▶/❚❚ status glyphs are
+  `aria-hidden` with an sr-only "Now playing" sibling (new `.sr-only`
+  utility in app.css).
+Detector: the panel's `transition: height` is the documented WebKit
+dual-clock fix — registered as a file-scoped exception
+(layout-transition=* for ExpandedPanel.svelte); detector back to
+exit 0. Snapshot: .impeccable/critique/2026-08-29T19-41-14Z__src-components-albumgrid-svelte.md.
+Gates: check 0/0, vitest 53, build OK.
 
 **Remaining: RPM rebuild (user installs) — deliberate pause 2026-08-29,
 other work takes the queue.**
