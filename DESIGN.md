@@ -317,6 +317,21 @@ lucid and quiet.
 - **Focus:** inset 2px accent ring (`outline-offset: -2px`) — the app's
   only focus language.
 
+### Iconography
+
+Two families, split by role — every glyph in the chrome belongs to one:
+- **Media family** (transport, volume): 16×16 viewBox, **filled shapes**
+  (play/skip triangles, speaker body) plus **1.6 round-cap strokes** (skip
+  bars, speaker waves, mute cross). Rendered 15–17px. 1.6 is the one stroke
+  weight in this family — arcs and bars must not drift thinner or heavier.
+- **Utility family** (mode buttons, popover close X, queue-row X):
+  Lucide-style 24×24, **pure stroke 2**, round caps/joins. Rendered 14–16px.
+- **Weight hierarchy inside the media family encodes jump size:**
+  bar+triangle = album-level jump, bare triangle = track-level step. The
+  icons differ in mass so the pair is distinguishable without tooltips.
+- No typographic glyphs (×, −, +) in interactive chrome — the old font ×
+  read as a third family beside the SVGs.
+
 ### Rows & Navigation
 - **Menu row (40px):** full-width, 8px radius, Glass hover wash, accent
   wash on press; check column (14px, accent ✓) for state items; disabled

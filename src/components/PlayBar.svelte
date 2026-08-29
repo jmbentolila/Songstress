@@ -152,10 +152,12 @@
         disabled={!track}
         onclick={() => albumSkip(-1)}
       >
-        <svg viewBox="0 0 16 16"><path d="M3 3 v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.5 3.5 v9 L6.5 8 Z" fill="currentColor"/></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3 v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.5 3.5 v9 L6.5 8 Z" fill="currentColor"/></svg>
       </button>
       <button aria-label="Previous track" disabled={!track} onclick={() => skip(-1)}>
-        <svg viewBox="0 0 16 16"><path d="M4 3 v10 M12.5 3 L6.5 8 l6 5 Z" fill="currentColor" stroke="none" /></svg>
+        <!-- Bare triangle on purpose: track-level step. Bar+triangle is
+         *reserved* for album-level jumps (the weight diff encodes it). -->
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 3 L6.5 8 l6 5 Z" fill="currentColor" /></svg>
       </button>
       <button
         class="playpause"
@@ -164,13 +166,13 @@
         onclick={togglePlay}
       >
         {#if playback.isPlaying}
-          <svg viewBox="0 0 16 16"><rect x="4" y="3" width="2.8" height="10" rx="1" fill="currentColor"/><rect x="9.2" y="3" width="2.8" height="10" rx="1" fill="currentColor"/></svg>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="2.8" height="10" rx="1" fill="currentColor"/><rect x="9.2" y="3" width="2.8" height="10" rx="1" fill="currentColor"/></svg>
         {:else}
-          <svg viewBox="0 0 16 16"><path d="M5 3 L13 8 L5 13 Z" fill="currentColor"/></svg>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 L13 8 L5 13 Z" fill="currentColor"/></svg>
         {/if}
       </button>
       <button aria-label="Next track" disabled={!track} onclick={() => skip(1)}>
-        <svg viewBox="0 0 16 16"><path d="M12 3 v10 M3.5 3 L9.5 8 l-6 5 Z" fill="currentColor" stroke="none"/></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3 L9.5 8 l-6 5 Z" fill="currentColor" /></svg>
       </button>
       <button
         aria-label="Next album"
@@ -178,7 +180,7 @@
         disabled={!track}
         onclick={() => albumSkip(1)}
       >
-        <svg viewBox="0 0 16 16"><path d="M13 3 v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M2.5 3.5 v9 L9.5 8 Z" fill="currentColor"/></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 3 v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M2.5 3.5 v9 L9.5 8 Z" fill="currentColor"/></svg>
       </button>
     </div>
     <div class="seek">
@@ -288,12 +290,14 @@
       {#if playback.volume === 0}
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M2.5 6 H4.8 L8 3 v10 L4.8 10 H2.5 Z" fill="currentColor" />
-          <path d="M10.5 6 l4 4 M14.5 6 l-4 4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          <!-- 1.6 = media-family stroke weight (skip bars); the old 1.3 read
+           * visibly thinner two clusters over. -->
+          <path d="M10.5 6 l4 4 M14.5 6 l-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
       {:else}
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M2.5 6 H4.8 L8 3 v10 L4.8 10 H2.5 Z" fill="currentColor" />
-          <path d="M10.5 5.5 a3.4 3.4 0 0 1 0 5 M12.3 4 a5.8 5.8 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          <path d="M10.5 5.5 a3.4 3.4 0 0 1 0 5 M12.3 4 a5.8 5.8 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
       {/if}
     </button>
@@ -332,7 +336,9 @@
             <option value={p.name}>{p.name}</option>
           {/each}
         </select>
-        <button class="close" aria-label="Close" onclick={() => (ui.eqOpen = false)}>×</button>
+        <button class="close" aria-label="Close" onclick={() => (ui.eqOpen = false)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18 M6 6 l12 12"/></svg>
+        </button>
       </header>
       <div class="bands">
         <label class="band preamp">
@@ -390,7 +396,9 @@
             Clear
           </button>
         {/if}
-        <button class="close" aria-label="Close" onclick={() => (ui.queueOpen = false)}>×</button>
+        <button class="close" aria-label="Close" onclick={() => (ui.queueOpen = false)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18 M6 6 l12 12"/></svg>
+        </button>
       </header>
       {#if queueRows.length === 0 && upNextRows.length === 0}
         <p class="q-empty">Nothing queued. Right-click a track → “Play next” or “Add to queue”.</p>
@@ -403,7 +411,9 @@
                   <span class="q-name">{row.title}</span>
                   <span class="q-sub">{row.sub}</span>
                 </button>
-                <button class="q-x" aria-label="Remove from queue" onclick={() => void queueRemove(row.pos)}>×</button>
+                <button class="q-x" aria-label="Remove from queue" onclick={() => void queueRemove(row.pos)}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18 M6 6 l12 12"/></svg>
+                </button>
               </li>
             {/each}
           </ul>
@@ -740,12 +750,21 @@
     border: none;
     background: transparent;
     color: var(--text-dim);
-    /* On-ramp: body 14px was the closest step to the old off-ramp 16px
-     * glyph — and reads closer to the 12px preset select beside it. */
-    font-size: 14px;
-    line-height: 1;
     cursor: pointer;
     padding: 0 2px;
+  }
+
+  /* Utility-family stroked X replaces the old font × (a third family in
+   * an SVG bar). 14px keeps the old footprint. */
+  .eq-pop .close svg,
+  .q-pop .close svg,
+  .q-x svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
   }
 
   .eq-pop .close:hover {
@@ -871,8 +890,6 @@
     border: none;
     background: transparent;
     color: var(--text-dim);
-    font-size: 14px;
-    line-height: 1;
     cursor: pointer;
     padding: 0 2px;
   }
@@ -952,8 +969,6 @@
     border: none;
     background: transparent;
     color: var(--text-dim);
-    font-size: 14px;
-    line-height: 1;
     cursor: pointer;
     padding: 4px 8px;
     opacity: 0;
