@@ -116,3 +116,18 @@ button {
   }
 }
 
+/* Screen-reader-only text: visual footprint of nothing, present to
+ * assistive tech (e.g. the tracklist "Now playing" status, which the
+ * visible ▶/❚❚ glyphs must not be allowed to read out). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+

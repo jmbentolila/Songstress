@@ -139,7 +139,9 @@
     {#if library.live && (!library.ready || library.albums.length === 0)}
       <EmptyState />
     {:else if searchActive && sections.length === 0}
-      <p class="no-match">No albums or songs match “{searchQuery}”.</p>
+      <button class="no-match" onclick={() => (ui.search = "")} title="Clear search">
+        No albums or songs match “{searchQuery}” — clear search
+      </button>
     {:else}
       {#each sections as section (section.key)}
         {#if section.label}
@@ -207,10 +209,28 @@
       calc(var(--sidebar-width) + var(--gap));
   }
 
+  /* Same voice as the sidebar's zero-match action (Sidebar .empty): the
+   * surface that owns the results offers the remedy. */
   .no-match {
+    display: block;
+    width: 100%;
     margin: 24px 4px;
+    padding: 4px 0;
+    border: none;
+    background: transparent;
     font-size: 13px;
     color: var(--text-dim);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .no-match:hover {
+    color: var(--text);
+  }
+
+  .no-match:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .section-label {
@@ -239,6 +259,7 @@
   }
 
   .tile {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 13px;
@@ -246,7 +267,26 @@
     border: none;
     background: transparent;
     text-align: left;
-    cursor: default;
+    cursor: pointer;
+  }
+
+  /* Press wash (the app's documented :active convention). A ::after overlay,
+   * never a filter/transform on the cover: layer churn on the image is what
+   * WebKitGTK paints as the blank-cover flash. --active is already the
+   * translucent 0.18 accent, so text under it stays readable. */
+  .tile::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    background: var(--active);
+    opacity: 0;
+    transition: opacity 100ms ease;
+    pointer-events: none;
+  }
+
+  .tile:active::after {
+    opacity: 1;
   }
 
   .cover {

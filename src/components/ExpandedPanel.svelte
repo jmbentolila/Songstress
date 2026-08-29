@@ -6,7 +6,11 @@
   import { extractArtColors } from "../lib/artColors";
   import { artGradient, gradientFromColors } from "../lib/gradient";
   import { resolvedTheme, ui } from "../lib/stores/ui.svelte";
-  import { openContextMenu, type MenuItem } from "../lib/stores/contextMenu.svelte";
+  import {
+    openContextMenu,
+    contextMenu,
+    type MenuItem,
+  } from "../lib/stores/contextMenu.svelte";
   import {
     saveImports,
     discardImports,
@@ -73,6 +77,19 @@
     openContextMenu(e.clientX, e.clientY, items);
   }
 
+  // Single click selects; a second click on the ALREADY-selected row plays
+  // it (the selection gains a consequence; double-click still plays from
+  // unselected, and missing rows keep double-click = locate).
+  function onTrackClick(track: Track) {
+    if (selectedId === track.id) {
+      if (track.missing) return;
+      selectedId = null; // the current-track styling takes over
+      void playTrack(displayAlbum.id, indexById.get(track.id) ?? 0);
+      return;
+    }
+    selectedId = track.id;
+  }
+
   function onTrackDblClick(track: Track) {
     selectedId = track.id;
     if (track.missing) {
@@ -83,14 +100,34 @@
   }
 
   // Delete key on a selected staged track = discard that import; on a
-  // selected missing track = remove it from the library.
+  // selected missing track = remove it from the library. Enter on a
+  // selected track = play it. Both need the panel open (it stays mounted
+  // while collapsed, so a hidden selection must not act) and both stand
+  // down while the tag editor or a context menu is up. Enter also ignores
+  // interactive targets: a focused row already plays on native Enter
+  // (keydown → click → second-click path), so this only covers focus on
+  // the body — no double-fire.
   function onKeydown(e: KeyboardEvent) {
-    if (e.key !== "Delete" || ui.tagEditor.open) return;
+    if (e.key !== "Delete" && e.key !== "Enter") return;
+    if (!open || ui.tagEditor.open || contextMenu.open) return;
     const id = selectedId;
     if (!id) return;
     const track = tracks.find((t) => t.id === id);
-    if (track?.staged) void discardImports(undefined, id);
-    else if (track?.missing) void removeTrack(id);
+    if (!track) return;
+    if (e.key === "Enter") {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest("input, select, textarea, button, a, [contenteditable]"))
+        return;
+      if (track.missing) {
+        void locateMissingTrack(id);
+        return;
+      }
+      selectedId = null;
+      void playTrack(displayAlbum.id, indexById.get(id) ?? 0);
+      return;
+    }
+    if (track.staged) void discardImports(undefined, id);
+    else if (track.missing) void removeTrack(id);
   }
 
   // Height is driven in px on .inner (never grid-template-rows: WebKitGTK
@@ -353,6 +390,7 @@
               <button
                 class="play-all"
                 aria-label={`Play ${displayAlbum.title}`}
+                title="Play"
                 onclick={() => playTrack(displayAlbum.id, 0)}
               >
                 <svg viewBox="0 0 16 16"><path d="M5 3 L13 8 L5 13 Z" fill="currentColor" /></svg>
@@ -381,15 +419,21 @@
                           class="track"
                           class:current={isCurrent(track.id)}
                           class:selected={selectedId === track.id}
-                          onclick={() => (selectedId = track.id)}
+                          title={
+                            selectedId === track.id && !track.missing
+                              ? "Click again to play (or press Enter)"
+                              : undefined
+                          }
+                          onclick={() => onTrackClick(track)}
                           ondblclick={() => onTrackDblClick(track)}
                           oncontextmenu={(e) => trackMenu(e, track)}
                         >
                                                     <span class="num" class:missing={track.missing} title={track.missing ? "File missing — double-click to locate it" : undefined}>
                             {#if isCurrent(track.id)}
-                              {playback.isPlaying ? "▶" : "❚❚"}
+                              <span aria-hidden="true">{playback.isPlaying ? "▶" : "❚❚"}</span
+                              ><span class="sr-only">Now playing</span>
                             {:else if track.missing}
-                              <svg class="alert" viewBox="0 0 16 16"><path d="M8 2.2 L14.6 13.4 H1.4 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /><path d="M8 6.6 V9.6 M8 11.4 V11.5" stroke="currentColor" stroke-linecap="round" /></svg>
+                              <svg class="alert" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 L14.6 13.4 H1.4 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /><path d="M8 6.6 V9.6 M8 11.4 V11.5" stroke="currentColor" stroke-linecap="round" /></svg>
                             {:else}
                               {track.track}
                             {/if}
@@ -417,15 +461,21 @@
                     class="track"
                     class:current={isCurrent(track.id)}
                     class:selected={selectedId === track.id}
-                  onclick={() => (selectedId = track.id)}
+                    title={
+                      selectedId === track.id && !track.missing
+                        ? "Click again to play (or press Enter)"
+                        : undefined
+                    }
+                  onclick={() => onTrackClick(track)}
                   ondblclick={() => onTrackDblClick(track)}
                   oncontextmenu={(e) => trackMenu(e, track)}
                 >
                                         <span class="num" class:missing={track.missing} title={track.missing ? "File missing — double-click to locate it" : undefined}>
                       {#if isCurrent(track.id)}
-                        {playback.isPlaying ? "▶" : "❚❚"}
+                        <span aria-hidden="true">{playback.isPlaying ? "▶" : "❚❚"}</span
+                        ><span class="sr-only">Now playing</span>
                       {:else if track.missing}
-                        <svg class="alert" viewBox="0 0 16 16"><path d="M8 2.2 L14.6 13.4 H1.4 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /><path d="M8 6.6 V9.6 M8 11.4 V11.5" stroke="currentColor" stroke-linecap="round" /></svg>
+                        <svg class="alert" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 L14.6 13.4 H1.4 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /><path d="M8 6.6 V9.6 M8 11.4 V11.5" stroke="currentColor" stroke-linecap="round" /></svg>
                       {:else}
                         {track.track}
                       {/if}
@@ -563,8 +613,10 @@
   /* Always-visible album tag editor entry point (Step 1). */
   .edit-album {
     flex: none;
-    width: 26px;
-    height: 26px;
+    /* 28px: the PRODUCT.md minimum hit-target bar (was 26, tuned before
+     * the bar was written). */
+    width: 28px;
+    height: 28px;
     border: none;
     border-radius: 7px;
     background: transparent;
@@ -658,7 +710,13 @@
     color: var(--text);
     font-size: 13px;
     text-align: left;
-    cursor: default;
+    /* Clickable (select / play) — same cursor + :active wash as the other
+     * pressable families in the chrome. */
+    cursor: pointer;
+  }
+
+  .track:active {
+    background: var(--active);
   }
 
   .track:hover {
