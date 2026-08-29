@@ -33,6 +33,8 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Step 7d — live library watching | ✅ 2026-08-25 |
 | Step 7c — multi-library roots | ✅ 2026-08-26 |
 | Step 7b — packaging (RPM) | ✅ 2026-08-26 |
+| Step 8 — titlebar elimination (chrome into sidebar) | ✅ 2026-08-27 |
+| Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40; RPM rebuild pending) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -1065,6 +1067,166 @@ errors)**:
   hand: the confirm row (arms on ✕ click) and EmptyState with an empty
   library — user check: Music folders… → Remove all → EmptyState
   headline/buttons → re-add.
+
+---
+
+## Step 8 — Titlebar elimination: chrome moves into the sidebar 🔶 (2026-08-27)
+DECIDED (2026-08-27, supersedes the Step 3 "Global Menu XOR in-titlebar bar"
+row for the in-app surface): the 44px titlebar is gone. New arrangement:
+- Traffic lights (KWin-palette Klassy dots) → sidebar header, TOP-LEFT;
+  gear button TOP-RIGHT, lights and gear side by side.
+- App title ("Songstress") removed from the sidebar.
+- ONE search field ("Search library...") in the sidebar: filters the artist
+  list AND drives the grid's Songs/Albums sections (old `ui.filter` +
+  `ui.mediaFilter` merged into `ui.search`; clicking an artist row clears
+  it). Titlebar's media search deleted.
+- Menu: gear opens the app menu (Playback/Library/View/Help + Appearance
+  will live inside it). **Gear popover is a placeholder for now** — the real
+  menu UI is the next task. Plasma Global Menu stays the live menu and is
+  unaffected. The old in-titlebar menubar fallback rendering is gone.
+- Window drag regions: the sidebar header + a 20px strip over the grid's
+  top padding (`.drag-strip` in App.svelte) — covers the grid's 20px
+  content padding; scrolled content can't be grabbed in its top 20px.
+
+**Landed (2026-08-27)**: `TitleBar.svelte` deleted; its traffic-light /
+chromeVars/layout code moved into `Sidebar.svelte` (classes keep the
+`tb-*` namespace, styles re-scoped there); `Sidebar` header rebuilt
+(lights left, gear right, `data-tauri-drag-region` on the header, gear
+toggles a glass placeholder popover, closes on outside pointerdown /
+Escape); `App.svelte` loses `<TitleBar />`, gains `.drag-strip` (z-5 over
+the grid, below sidebar/playbar z-10); `ui.svelte.ts` merges `filter` +
+`mediaFilter` → `search`; `AlbumGrid` reads `ui.search`; `--titlebar-h`
+token dropped from `app.css`. Gates: check 0/0, vitest 53, build OK;
+cold-restart + screenshot verified (lights, gear, search, full-height
+grid).
+
+**Menu stack (Step 8b, 2026-08-27)**: the gear's placeholder popover is
+replaced by an iOS-Settings-style stack in the sidebar (apple-design skill:
+transform-only slide, standard curve, parallax recede). Three absolute
+layers in `Sidebar .stack`: home (search + artists) → root ("Menu" navrow +
+Appearance/Playback/Library/View/Help rows with chevrons) → detail (navrow
+with accent back-chevron + title; Appearance pane = the old gear-popover
+settings; other panes render the live Rust `menu.menus` model via
+`menu_activate`). Gear (icon flips to ✕) opens/closes; back-chevron or
+Escape pops one level. State: session-only `ui.menuOpen` / `ui.menuDetail`
+(`"appearance"` or a menu id). Root recedes -30% + 0.85 opacity behind an
+open detail. Gates: check 0/0, vitest 53; root + closed states verified by
+screenshot (detail-pane visuals + the push/pop motion are for the user's
+hands). Swipe-back gesture deferred (CSS transitions aren't grabbable;
+would need a spring-driven drag layer).
+
+**Menu iteration (user-feedback driven, same day)**:
+- parallax recede -30% → full push: on a flat glass sidebar the peeking
+  root items read as clutter ("I can still see Appearance").
+- root divider removed; left back-chevron added to the root title; right
+  chevrons removed from rows (user spec).
+- ✕ semantics: one-level pop → ALL levels; then two-phase pop (root
+  centered intermediate) → single conveyor: home in from left, root out
+  LEFT in parallel (same speed, no crossing), detail out right. Root
+  teleports -200%→+100% off-screen (one no-anim frame) so re-open always
+  enters from the right. Close timer 340ms.
+- **BUG (found by user): home layer had no pointer-events grant — the
+  artist list was click-dead.** `.layer` defaults to none; grant it to
+  every on-screen layer (`.layer:not(.off)`), not just menu `.active`s.
+- Polish batch (emil-design-eng audit): 400→320ms layers, `:active`
+  press wash on rows/chevrons/gear, gear↔✕ crossfade+90° rotate 160ms,
+  back-chevron hit target 18px→28px, explicit `:focus-visible` accent
+  rings, menu rows 38→40px (deliberate cadence), dead opacity transition
+  removed. Stagger-on-entry audited but deferred (could read busy at 236px).
+
+**Critique pass (impeccable, 2026-08-27): sidebar scored 25/36 Acceptable**
+(first run, snapshot in `.impeccable/critique/`). Fixed in sequence:
+- P1 search dead end: "All Artists" row is now ALWAYS visible (it's a
+  control, not a result) + clear (×) button in the field when non-empty
+  (old titlebar pattern; × glyph absolute-centered — WebKitGTK button
+  place-items drift, same fix as the traffic lights).
+- P2 diacritics: artist filter now uses `fold()` like the grid ("bjork"
+  finds Björk in both surfaces).
+- P2 a11y: search input `aria-label="Search library"`.
+- P2 gear IA: user chose option A + rename — the root pane is titled
+  "Settings" (not "Menu"); Appearance stays its first row; aria-labels
+  follow ("Open settings"/"Back to settings"); DESIGN.md updated.
+- P3 (landed): `.backchev` 6px→7px (on-scale); sidecar colorMeta gained
+  `traffic-light-border` (rgba(0,0,0,0.18), system-mirror chrome) and the
+  four `picker-spectrum-*` conic colors (functional rainbow) as documented
+  exceptions — detect.mjs on Sidebar is now clean (exit 0).
+- P3 (landed, round 2): keyboard accelerators — `/` focuses the library
+  search (inert while typing, while the Settings stack is open, or with
+  modifier keys), `s` toggles the Settings stack, Escape in the search
+  field clears the query then blurs (old titlebar behavior, preserved
+  through the merge). Re-critique: 25 → 33/36 (Good), detector 0 findings.
+- P3 (landed, round 3 — the re-critique's three items): accelerator hints
+  as `title` tooltips (search input: "/ to focus — Escape clears"; gear:
+  "Settings — press s to toggle"), "No artists match." upgraded from inert
+  caption to a clear-search action button (`.empty` voice), and a transient
+  11px dim "Updating library…" note under the field while `scanner.running`
+  with a populated library (aria-live polite). Sidebar re-critique: 33/36
+  (Good), detector 0 findings.
+- **PlayBar critique (2026-08-27, same evening)**: 30/40 (Good). Empty-state
+  copy fixed ("Pick a track"), then the critique ran. Findings carried into
+  Step 8c below — NOT yet fixed.
+- **RPM rebuild + install (user, 2026-08-27 20:47)**: rebuilt after the final
+  sidebar (20:29) and playbar (18:41) edits; user ran the dnf lines.
+  Step 8 complete.
+
+---
+
+### Step 8c — PlayBar critique fixes — ⬜ (from the 2026-08-27 critique, 30/40)
+
+Snapshot: `.impeccable/critique/2026-08-28T00-36-27Z__src-components-playbar-svelte.md`.
+Work top-down, one gate pass after each:
+1. ✅ **P2 popover mutual exclusion** (2026-08-29): EQ and play-next queue popovers share
+   the same anchor (`right:14px; bottom:calc(100%+10px)`) and toggle
+   independently → they overlap. Opening one must close the other.
+2. ✅ **P2 standard popover dismissal** (2026-08-29): Escape + outside-click
+   close the popovers — the ContextMenu idiom (`svelte:window` pointerdown +
+   `el.contains`). GOTCHA: the toggle button's own pointerdown must be
+   exempted or the popover becomes open-only (pointerdown closes, then the
+   click re-toggles it back open). Popovers now carry `role=dialog` +
+   aria-label.
+3. ✅ **P2 volume mute target** (2026-08-29): ~19px → 28px box (invisible at
+   rest; same bar as the sidebar back-chevron).
+4. ✅ **P2 in-app keyboard transport** (2026-08-29, shaped per impeccable
+   `shape` + apple-design): Space = play/pause, ←/→ = seek ±5s. NO ↑/↓
+   volume (restraint: critique's own scope; volume has slider + media keys).
+   Inert rule: acts only when focus is on the body — any interactive target
+   (input, select, textarea, button, a, [contenteditable]) keeps native key
+   behavior; Space ignores auto-repeat, arrows repeat on purpose (like
+   dragging the seekbar). Advertised via `title` tooltips ("Play — Space",
+   "Seek — ←/→ = ±5s"), same hover-only micro-help voice as the sidebar
+   hints. No collision with `/`/`s` (different keys; those stay inert in
+   inputs — same rule shape).
+5. ✅ **P3 document + drift** (2026-08-29): DESIGN.md gained the
+   "Instrument" type tier (400, 8–9.5px tabular — EQ dB/freq readouts and
+   mode-button badges only; smallest tier, nothing else may use it) in the
+   YAML frontmatter AND the prose hierarchy; EQ preset select radius
+   6px → 8px (the control rung — 6px was the last off-ladder radius in the
+   popovers).
+
+After the items land: re-critique the playbar (DONE 2026-08-29: 30 → 35/40,
+Good 87.5%, detector 0 findings/exit 0; snapshot in .impeccable/), then
+rebuild the RPM (user installs). The three surviving P3s all landed same
+day:
+6. ✅ **P3 popover materialize entrance** (2026-08-29, apple-design
+   "materialize, don't just fade"): 140ms scale 0.98→1 + opacity,
+   `cubic-bezier(0.22, 1, 0.36, 1)`, `transform-origin: 100% 100%` (popovers
+   sit above their trigger, so they grow from the shared bottom-right
+   corner); transform+opacity only; the global reduced-motion switch
+   collapses it. Entry only (unmount = instant exit, P3 scope).
+7. ✅ **P3 clear-queue-all** (2026-08-29): "Clear" text button in the queue
+   popover header when non-empty; new `playback_queue_clear` command
+   (mpv.rs `queue_clear` mirrors `queue_remove`: clear → rebuild tail while
+   playing → `queue-changed` mirror).
+8. ✅ **P3 "ALL" badge jargon** (2026-08-29): "ALL" → "All" (plain word, not
+   shouty jargon; the hover title carries the full explanation).
+Detector config: `design-system-font-size` ignore-values 8px + 8.5px =
+documented Instrument-tier exceptions (.impeccable/config.json, same route
+as the sidebar colorMeta exceptions); the two 16px close glyphs were fixed
+for real (→ 14px body, on-ramp) rather than ignored. Gates: check 0/0,
+vitest 53, cargo 65, build OK, detector exit 0, screenshot clean.
+
+**Remaining: RPM rebuild (user installs) — deliberate pause 2026-08-29,
+other work takes the queue.**
 
 ---
 

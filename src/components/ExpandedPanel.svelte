@@ -18,7 +18,7 @@
   let {
     album,
     open,
-    /** When set, only these track ids render (titlebar song search);
+    /** When set, only these track ids render (library song search);
      *  playback indices stay anchored to the FULL album track list. */
     visibleTrackIds = null,
   }: { album: Album; open: boolean; visibleTrackIds?: Set<string> | null } = $props();
@@ -176,8 +176,8 @@
     if (!el || !(scroller instanceof HTMLElement)) return;
     const er = el.getBoundingClientRect();
     const sr = scroller.getBoundingClientRect();
-    // The scroller's raw bottom sits behind the floating playbar; its
-    // padding-bottom (--playbar-h + gap) is the true usable limit.
+    // The scroller now clips at the playbar's top line (Step 8); its
+    // padding-bottom (--gap) is the small resting gap above that line.
     const padBottom =
       parseFloat(getComputedStyle(scroller).paddingBottom) || 0;
     const usableBottom = sr.bottom - padBottom;

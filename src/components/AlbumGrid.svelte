@@ -29,11 +29,11 @@
     });
   });
 
-  // Titlebar search splits results in two labeled sections: "Songs" (albums
+  // Library search splits results in two labeled sections: "Songs" (albums
   // containing matching tracks — expanding one shows ONLY the matching songs)
   // and "Albums" (albums matching by title or artist name). An album can
   // appear in both.
-  let searchQuery = $derived(ui.mediaFilter.trim());
+  let searchQuery = $derived(ui.search.trim());
   let searchActive = $derived(searchQuery !== "");
 
   let songAlbums = $derived.by(() => {
@@ -191,10 +191,19 @@
 <style>
   .content {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    /* Bottom clip ends at the playbar's top line: rows slide out UNDER
+       the shelf instead of passing behind its glass (where, at 0.7 alpha,
+       captions stayed readable). backdrop-filter can't frost in-window
+       content on this WebKitGTK, and a per-row `filter: blur()` smears
+       the whole row — so don't show the content behind the bar at all. */
+    bottom: var(--playbar-h);
     overflow-y: auto;
+    overflow-x: hidden;
     scrollbar-width: none;
-    padding: var(--gap) var(--gap) calc(var(--playbar-h) + 28px)
+    padding: var(--gap) var(--gap) var(--gap)
       calc(var(--sidebar-width) + var(--gap));
   }
 

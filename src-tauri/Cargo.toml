@@ -14,6 +14,13 @@ edition = "2021"
 name = "songstress_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# line-tables-only debuginfo (2026-08-28, after the 25GB target/ incident):
+# full debuginfo made every dev artifact 400MB+ across the GTK/WebKit tree,
+# and stale ones accumulated in deps/. This keeps stack traces usable in the
+# journal while cutting artifact size ~70-80%.
+[profile.dev]
+debug = "line-tables-only"
+
 # Optimize DEPENDENCIES in dev builds (lofty/image decode dominates artwork
 # scans) while our own code stays opt-level 0: fast incremental compiles,
 # full debuggability, overflow checks intact.

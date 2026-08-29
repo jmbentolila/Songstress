@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-27T23:44:08Z",
+  "title": "Design System: Songstress",
+  "extensions": {
+    "colorMeta": {
+      "slate-night": {
+        "role": "neutral",
+        "displayName": "Slate Night (grid tier, 0.8)",
+        "canonical": "rgba(22, 22, 28, 0.8)",
+        "tonalRamp": [
+          "oklch(15% 0.006 277)", "oklch(25% 0.006 277)", "oklch(35% 0.006 277)",
+          "oklch(45% 0.006 277)", "oklch(55% 0.006 277)", "oklch(65% 0.006 277)",
+          "oklch(80% 0.006 277)", "oklch(95% 0.006 277)"
+        ]
+      },
+      "slate-night-chrome": {
+        "role": "neutral",
+        "displayName": "Slate Night (chrome tier, 0.7)",
+        "canonical": "rgba(22, 22, 28, 0.7)",
+        "tonalRamp": [
+          "oklch(15% 0.006 277)", "oklch(25% 0.006 277)", "oklch(35% 0.006 277)",
+          "oklch(45% 0.006 277)", "oklch(55% 0.006 277)", "oklch(65% 0.006 277)",
+          "oklch(80% 0.006 277)", "oklch(95% 0.006 277)"
+        ]
+      },
+      "stock-orchid": {
+        "role": "primary",
+        "displayName": "Stock Orchid (dark)",
+        "canonical": "#a78bfa",
+        "tonalRamp": [
+          "oklch(15% 0.03 292)", "oklch(30% 0.06 292)", "oklch(45% 0.09 292)",
+          "oklch(58% 0.11 292)", "oklch(70% 0.13 292)", "oklch(78% 0.13 292)",
+          "oklch(88% 0.12 292)", "oklch(95% 0.10 292)"
+        ]
+      },
+      "stock-orchid-light": {
+        "role": "primary",
+        "displayName": "Stock Orchid (light theme)",
+        "canonical": "#7c58f0",
+        "tonalRamp": [
+          "oklch(15% 0.03 292)", "oklch(30% 0.06 292)", "oklch(45% 0.09 292)",
+          "oklch(58% 0.11 292)", "oklch(70% 0.13 292)", "oklch(78% 0.13 292)",
+          "oklch(88% 0.12 292)", "oklch(95% 0.10 292)"
+        ]
+      },
+      "chalk": {
+        "role": "neutral",
+        "displayName": "Chalk (dark-theme text)",
+        "canonical": "#f4f4f6",
+        "tonalRamp": [
+          "oklch(15% 0.004 277)", "oklch(25% 0.004 277)", "oklch(35% 0.004 277)",
+          "oklch(45% 0.004 277)", "oklch(55% 0.004 277)", "oklch(65% 0.004 277)",
+          "oklch(80% 0.004 277)", "oklch(95% 0.004 277)"
+        ]
+      },
+      "amber-caution": {
+        "role": "tertiary",
+        "displayName": "Amber Caution (missing files only)",
+        "canonical": "#f2a33c",
+        "tonalRamp": [
+          "oklch(15% 0.04 70)", "oklch(30% 0.08 70)", "oklch(45% 0.11 70)",
+          "oklch(58% 0.13 70)", "oklch(70% 0.15 70)", "oklch(78% 0.15 70)",
+          "oklch(88% 0.14 70)", "oklch(95% 0.12 70)"
+        ]
+      },
+      "traffic-light-border": {
+        "role": "neutral",
+        "displayName": "Klassy traffic-light dot border (system-mirror chrome, not palette)",
+        "canonical": "rgba(0, 0, 0, 0.18)",
+        "tonalRamp": [
+          "rgba(0, 0, 0, 0.05)", "rgba(0, 0, 0, 0.09)", "rgba(0, 0, 0, 0.13)",
+          "rgba(0, 0, 0, 0.18)", "rgba(0, 0, 0, 0.28)", "rgba(0, 0, 0, 0.42)",
+          "rgba(0, 0, 0, 0.62)", "rgba(0, 0, 0, 0.85)"
+        ]
+      },
+      "picker-spectrum-red": {
+        "role": "tertiary",
+        "displayName": "Custom-color picker spectrum (functional rainbow, deliberately off-palette)",
+        "canonical": "#e5484d",
+        "tonalRamp": ["#e5484d"]
+      },
+      "picker-spectrum-amber": {
+        "role": "tertiary",
+        "displayName": "Custom-color picker spectrum (functional rainbow, deliberately off-palette)",
+        "canonical": "#ffb224",
+        "tonalRamp": ["#ffb224"]
+      },
+      "picker-spectrum-green": {
+        "role": "tertiary",
+        "displayName": "Custom-color picker spectrum (functional rainbow, deliberately off-palette)",
+        "canonical": "#46a758",
+        "tonalRamp": ["#46a758"]
+      },
+      "picker-spectrum-cyan": {
+        "role": "tertiary",
+        "displayName": "Custom-color picker spectrum (functional rainbow, deliberately off-palette)",
+        "canonical": "#00a2c7",
+        "tonalRamp": ["#00a2c7"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "EmptyState page headlines only." },
+      "display": { "displayName": "Display", "purpose": "Expanded album title — the one large text in the app." },
+      "title": { "displayName": "Title", "purpose": "Nav-row titles (Menu, pane names)." },
+      "menu": { "displayName": "Menu", "purpose": "Sidebar menu rows; slightly above list size to mark the menu's own cadence." },
+      "body": { "displayName": "Body", "purpose": "Base UI text." },
+      "list": { "displayName": "List", "purpose": "Artist rows, captions, track titles, search." },
+      "label": { "displayName": "Label", "purpose": "Uppercase section labels and badges." },
+      "micro": { "displayName": "Micro (tabular)", "purpose": "Counts, times, durations — always tabular-nums." }
+    },
+    "shadows": [
+      { "name": "structural-anchor", "value": "0 10px 32px rgba(0, 0, 0, 0.45)", "purpose": "Expanded panels — the one surface that reads as an object on the glass." },
+      { "name": "cover-mass", "value": "0 4px 18px rgba(0, 0, 0, 0.35)", "purpose": "Album artwork at every scale; weight without lift." },
+      { "name": "popover-seat", "value": "0 8px 28px rgba(0, 0, 0, 0.35)", "purpose": "Menu and popover surfaces." },
+      { "name": "cast-light-top", "value": "linear-gradient(to bottom, rgba(0,0,0,0.22), transparent 26px)", "purpose": "Window top casting onto the grid." },
+      { "name": "cast-light-playbar", "value": "linear-gradient(to top, rgba(0,0,0,0.30), transparent 34px)", "purpose": "Playbar shelf casting onto the grid." }
+    ],
+    "motion": [
+      { "name": "stack-slide", "value": "transform 320ms cubic-bezier(0.32, 0.72, 0, 1)", "purpose": "Sidebar menu stack (home ↔ root ↔ pane); transform-only." },
+      { "name": "panel-expand", "value": "height 360ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Expanded album panel px-height animation." },
+      { "name": "album-switch-fade", "value": "opacity 160ms ease-out", "purpose": "New album content fades in on switch; the outgoing album never renders at the new row." },
+      { "name": "icon-morph", "value": "opacity+rotate 160ms ease-out", "purpose": "Gear↔✕ crossfade with 90° rotation." },
+      { "name": "hover-ring", "value": "outline-color 150ms ease", "purpose": "Tile hover: paint-only outline, no transforms (WebKit layer-promotion flash)." },
+      { "name": "reveal-tween", "value": "280ms rAF ease-out cubic", "purpose": "One-shot scroll-into-view nudges (JS-tweened; WebKitGTK drops stacked smooth-scroll requests)." },
+      { "name": "reduced-motion", "value": "all durations → 0.01ms", "purpose": "Global kill switch in app.css; instant states." }
+    ],
+    "breakpoints": [
+      { "name": "window-min", "value": "960px × 600px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Menu Row",
+      "kind": "nav",
+      "refersTo": "menu-row",
+      "description": "Sidebar menu-stack list item: 40px, hover wash, press accent wash, inset focus ring.",
+      "html": "<button class=\"ds-mrow\"><span class=\"ds-mrow-label\">Playback</span><svg width=\"10\" height=\"14\" viewBox=\"0 0 10 14\" aria-hidden=\"true\"><path d=\"M7 2 L3 7 L7 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" opacity=\"0.5\"/></svg></button>",
+      "css": ".ds-mrow{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:40px;padding:0 10px;border:none;border-radius:8px;background:transparent;color:#f4f4f6;font:13.5px Inter,'Segoe UI',system-ui,sans-serif;text-align:left;cursor:pointer;transition:background 100ms ease-out}.ds-mrow:hover{background:rgba(255,255,255,0.07)}.ds-mrow:active{background:rgba(167,139,250,0.18)}.ds-mrow:focus-visible{outline:2px solid #a78bfa;outline-offset:-2px}"
+    },
+    {
+      "name": "Menu Row (checked item)",
+      "kind": "nav",
+      "refersTo": "menu-row",
+      "description": "State item with accent check column; disabled items render dim with no wash.",
+      "html": "<button class=\"ds-irow\"><span class=\"ds-check\">✓</span><span class=\"ds-mrow-label\">Equalizer: On</span></button>",
+      "css": ".ds-irow{display:flex;align-items:center;gap:8px;width:100%;height:40px;padding:0 10px;border:none;border-radius:8px;background:transparent;color:#f4f4f6;font:13.5px Inter,'Segoe UI',system-ui,sans-serif;text-align:left;cursor:pointer;transition:background 100ms ease-out}.ds-irow:hover{background:rgba(255,255,255,0.07)}.ds-irow:active{background:rgba(167,139,250,0.18)}.ds-irow:disabled{color:rgba(244,244,246,0.64);cursor:default}.ds-irow:disabled:hover{background:transparent}.ds-check{width:14px;flex:none;color:#a78bfa}.ds-mrow-label{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}"
+    },
+    {
+      "name": "Artist Row (active)",
+      "kind": "nav",
+      "refersTo": "menu-row",
+      "description": "Sidebar artist list row: user-tunable height (36px default), tabular count, accent wash when selected.",
+      "html": "<button class=\"ds-arow ds-arow-active\"><span class=\"ds-name\">Ancient Bards</span><span class=\"ds-count\">5</span></button>",
+      "css": ".ds-arow{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:36px;padding:0 10px;border:none;border-radius:8px;background:transparent;color:#f4f4f6;font:13px Inter,'Segoe UI',system-ui,sans-serif;text-align:left;cursor:pointer;transition:background 100ms ease-out}.ds-arow:hover{background:rgba(255,255,255,0.07)}.ds-arow:focus-visible{outline:2px solid #a78bfa;outline-offset:-2px}.ds-arow-active{background:rgba(167,139,250,0.18);font-weight:600}.ds-name{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.ds-count{font-size:11px;color:rgba(244,244,246,0.64);font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "The single library search (artists + grid). 30px, glass stroke, hover-wash fill, accent stroke on focus.",
+      "html": "<div class=\"ds-search\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 16 16\" aria-hidden=\"true\"><circle cx=\"7\" cy=\"7\" r=\"4.4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/><path d=\"M10.4 10.4 L13.6 13.6\" stroke=\"currentColor\" stroke-width=\"1.4\" stroke-linecap=\"round\"/></svg><input type=\"text\" placeholder=\"Search library...\" spellcheck=\"false\"/></div>",
+      "css": ".ds-search{position:relative}.ds-search svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:rgba(244,244,246,0.64);pointer-events:none}.ds-search input{width:100%;height:30px;padding:0 10px 0 30px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.07);color:#f4f4f6;font:13px Inter,'Segoe UI',system-ui,sans-serif;outline:none;transition:border-color 120ms ease-out}.ds-search input::placeholder{color:rgba(244,244,246,0.64)}.ds-search input:focus{border-color:#a78bfa}"
+    },
+    {
+      "name": "Album Tile",
+      "kind": "card",
+      "refersTo": "play-all-button",
+      "description": "Grid tile: square cover with mass shadow + caption. Hover = outline ring only (no transforms — WebKit layer churn flashes covers).",
+      "html": "<button class=\"ds-tile\"><span class=\"ds-cover\"><span class=\"ds-art\"></span></span><span class=\"ds-caption\"><span class=\"ds-t\">Aspiral</span><span class=\"ds-sub\">Epica · 2011</span></span></button>",
+      "css": ".ds-tile{display:flex;flex-direction:column;gap:13px;padding:0;border:none;background:transparent;text-align:left;font-family:Inter,'Segoe UI',system-ui,sans-serif;cursor:default}.ds-cover{display:block;aspect-ratio:1;width:100%;border-radius:10px;overflow:hidden;box-shadow:0 4px 18px rgba(0,0,0,0.35);outline:2px solid transparent;outline-offset:1px;transition:outline-color 150ms ease}.ds-art{display:block;width:100%;height:100%;background:linear-gradient(135deg,#2a2440,#4a3b6b 55%,#20242e)}.ds-tile:hover .ds-cover{outline-color:rgba(244,244,246,0.64)}.ds-tile:focus-visible .ds-cover{outline-color:#a78bfa}.ds-caption{display:flex;flex-direction:column;gap:2px;min-width:0}.ds-t{font-size:13px;font-weight:600;color:#f4f4f6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-sub{font-size:11.5px;color:rgba(244,244,246,0.64);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+    },
+    {
+      "name": "Track Row (current)",
+      "kind": "nav",
+      "refersTo": "menu-row",
+      "description": "Expanded-panel track: number · title · duration, tabular throughout; current track in accent with play glyph.",
+      "html": "<button class=\"ds-track ds-track-current\"><span class=\"ds-num\">▶</span><span class=\"ds-title\">Aspiral</span><span class=\"ds-dur\">4:58</span></button>",
+      "css": ".ds-track{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:none;border-radius:7px;background:transparent;color:#f4f4f6;font:13px Inter,'Segoe UI',system-ui,sans-serif;text-align:left;cursor:pointer;transition:background 100ms ease-out}.ds-track:hover{background:rgba(255,255,255,0.07)}.ds-track:focus-visible{outline:2px solid #a78bfa;outline-offset:-2px}.ds-num{flex:none;width:22px;text-align:right;color:rgba(244,244,246,0.64);font-variant-numeric:tabular-nums;font-size:12px}.ds-title{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-dur{flex:none;color:rgba(244,244,246,0.64);font-size:12px;font-variant-numeric:tabular-nums}.ds-track-current{color:#a78bfa;font-weight:600}.ds-track-current .ds-num{color:#a78bfa}"
+    },
+    {
+      "name": "Play/Pause Button",
+      "kind": "button",
+      "refersTo": "play-pause-button",
+      "description": "Primary transport: 34px circle, translucent orchid wash, full-strength glyph (wash is translucent — Chalk text, never accent-on-accent).",
+      "html": "<button class=\"ds-pp\" aria-label=\"Pause\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 16 16\" aria-hidden=\"true\"><rect x=\"4\" y=\"3\" width=\"2.8\" height=\"10\" rx=\"1\" fill=\"currentColor\"/><rect x=\"9.2\" y=\"3\" width=\"2.8\" height=\"10\" rx=\"1\" fill=\"currentColor\"/></svg></button>",
+      "css": ".ds-pp{width:34px;height:34px;border:none;border-radius:999px;background:rgba(167,139,250,0.18);color:#f4f4f6;display:grid;place-items:center;cursor:pointer;transition:background 100ms ease-out,transform 100ms ease-out}.ds-pp:hover{background:rgba(167,139,250,0.28)}.ds-pp:active{transform:scale(0.96)}.ds-pp:focus-visible{outline:2px solid #a78bfa;outline-offset:2px}"
+    },
+    {
+      "name": "Mode Button (shuffle, active)",
+      "kind": "button",
+      "refersTo": "play-pause-button",
+      "description": "Playbar mode toggle: dim at rest (0.75 opacity), full Chalk when active plus an 8px accent micro-badge — the badge, not a glow, signals state.",
+      "html": "<button class=\"ds-mode ds-mode-on\" aria-label=\"Shuffle\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"16 3 21 3 21 8\"/><line x1=\"4\" y1=\"20\" x2=\"21\" y2=\"3\"/><polyline points=\"21 16 21 21 16 21\"/><line x1=\"15\" y1=\"15\" x2=\"21\" y2=\"21\"/><line x1=\"4\" y1=\"4\" x2=\"9\" y2=\"9\"/></svg><span class=\"ds-badge\">A</span></button>",
+      "css": ".ds-mode{position:relative;display:grid;place-items:center;width:30px;height:30px;border:none;border-radius:8px;background:transparent;color:rgba(244,244,246,0.64);opacity:0.75;cursor:pointer;transition:background 100ms ease-out,opacity 100ms ease-out}.ds-mode:hover{background:rgba(255,255,255,0.07);color:#f4f4f6;opacity:1}.ds-mode:focus-visible{outline:2px solid #a78bfa;outline-offset:-2px}.ds-mode-on{color:#f4f4f6;opacity:1}.ds-badge{position:absolute;right:2px;bottom:1px;font:700 8px Inter,'Segoe UI',system-ui,sans-serif;letter-spacing:0.02em;color:#a78bfa;line-height:1}"
+    },
+    {
+      "name": "Pill Badge (Imported)",
+      "kind": "chip",
+      "refersTo": "badge-pill",
+      "description": "Staging marker: orchid wash + orchid 10px/600 UPPERCASE. On artwork it flips to solid black-0.62 + white.",
+      "html": "<span class=\"ds-pill\">Imported</span>",
+      "css": ".ds-pill{display:inline-block;padding:3px 9px;border:1px solid rgba(255,255,255,0.1);border-radius:999px;background:rgba(167,139,250,0.18);color:#a78bfa;font:600 10px Inter,'Segoe UI',system-ui,sans-serif;letter-spacing:0.07em;text-transform:uppercase}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Listening Room",
+    "overview": "Songstress is a dim room behind glass. The album collection is displayed, not listed: artwork glows at tile scale, captions sit a step below it in volume, and every control dims until touched — then answers with a wash, never a glow. The interface recedes so the music's pictures lead. The aesthetic is lucid, tactile, and restrained; luminous over busy. If a screen makes you look at the buttons instead of the albums, it has failed.\n\nThe material is glass, and the glass is honest about where it comes from. The window is transparent; KWin's force blur frosts the wallpaper behind it, and every pane (grid 0.8, chrome 0.7, strong panels 0.94/0.95) is an alpha tier of that same frosted field. The app also mirrors the user's own system decoration — traffic-light palette, button order, and the Plasma Global Menu come from KWin, so the player reads as Plasma furniture rather than a guest with a skin.",
+    "keyCharacteristics": [
+      "Album grid is the interface; expanding a tile reveals its tracklist in place",
+      "Glass = alpha-tiered transparency over KWin-frosted wallpaper, never solid fills",
+      "Controls dim at rest, answer on press with a translucent accent wash",
+      "One accent (Stock Orchid, user-overridable) used sparingly: state, selection, focus",
+      "No titlebar: window chrome (traffic lights, menu gear) lives in the sidebar header",
+      "Motion explains spatial structure (stack slides, panel height) — never decoration"
+    ],
+    "rules": [
+      { "name": "The Two-Tier Glass Rule", "body": "Grid sits at 0.8 alpha, chrome at 0.7. Do not flatten the tiers or swap the alphas without the owner's sign-off — they are tuned, not derived.", "section": "colors" },
+      { "name": "The One Accent Rule", "body": "Stock Orchid appears on ≤10% of any screen. Washes carry selection and primary action; the solid accent carries text/icons only on its own wash. Never a gradient accent, never a second brand hue.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Anything that changes while you watch — positions, durations, track counts — is set tabular-nums so digits don't jitter.", "section": "typography" },
+      { "name": "The No-Lift Rule", "body": "Grid tiles never translateY, scale, or promote a compositor layer on hover — WebKit paints that churn as one-frame blank cover flashes. Hover = outline ring; press = wash.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do consume theme state through the --* custom properties (--accent, --active, --text-dim, tiers) so runtime accent and theme flips reach every surface.",
+      "Do keep chrome alphas at the tuned values (grid 0.8, chrome 0.7, expanded-panel gradient 0.36/0.30) and let KWin's force blur do the wallpaper frosting.",
+      "Do animate structure only: transform for the sidebar stack (320ms, cubic-bezier(0.32, 0.72, 0, 1)), px-height for panel expand (360ms, cubic-bezier(0.22, 1, 0.36, 1)), 160ms opacity for album switches — and respect the global prefers-reduced-motion kill switch.",
+      "Do give every pressable an instant :active wash and an inset :focus-visible accent ring.",
+      "Do mirror the system: KWin palette for traffic lights, button order from the decoration config, kdialog for pickers, Plasma Global Menu as the primary menu surface."
+    ],
+    "donts": [
+      "Don't trust backdrop-filter for in-window frost on this WebKitGTK — it is a no-op for content; use clipping and cast-light gradients instead.",
+      "Don't put transforms, scale, or layer promotion on grid tile hover — WebKit paints the churn as blank cover flashes.",
+      "Don't add a titlebar, a second brand hue, gradient text, glow shadows, or solid accent fills with accent-colored text on top (washes take Chalk text; solid accent takes white).",
+      "Don't use native dialogs or confirm() — everything renders inside the glass in the app's own language.",
+      "Don't drift the tuned alphas or the single-seam rule (sidebar has no bottom border; the playbar's top line is the only seam).",
+      "Don't namespace-less CSS in components — leaked global selectors have broken this app before; prefix what you add."
+    ]
+  }
+}

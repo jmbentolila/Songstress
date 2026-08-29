@@ -12,8 +12,8 @@ export interface SearchableAlbum {
   trackTitles: string[];
 }
 
-/** Album matches by its own title (titlebar search: artists have their own
- *  sidebar search — "hello" must not surface Helloween albums). */
+/** Album matches by its own title (artists are matched by the sidebar list
+ *  itself — "hello" must not surface Helloween albums in the grid). */
 export function albumTitleMatches(
   album: { title: string },
   query: string,

@@ -36,9 +36,9 @@ Closing the app window kills `tauri dev` by design — restart the unit.
 
 ```
 src/
-  App.svelte              shell: titlebar / stage (grid+sidebar+playbar overlay) 
+  App.svelte              shell: stage (grid+sidebar+playbar overlay + drag strip)
   app.css                 theme tokens, .glass, scrollbar, noise garnish
-  components/             TitleBar, Sidebar, AlbumGrid, ExpandedPanel, PlayBar, TagEditor, MusicFolders, ContextMenu, EmptyState
+  components/             Sidebar, AlbumGrid, ExpandedPanel, PlayBar, TagEditor, MusicFolders, ContextMenu, EmptyState
   lib/
     types.ts              Artist/Album/Track/PlaybackContext/Theme
     buildRows.ts          row-model grid (pure, vitest-covered)
@@ -61,8 +61,9 @@ public/covers/            album art for the fake library (real folder.jpg files)
   watched files (sed/python rewrite of app.css) make it worse. Fix = cold restart:
   `systemctl --user restart songstress-dev`. Don't debug phantoms before restarting.
 - **Component CSS can be emitted unscoped.** TitleBar once emitted a global sheet,
-  leaking `.title { text-align: center }` into every component. All TitleBar classes
-  are now `tb-*` namespaced. If styles leak again, namespace the classes — don't
+  leaking `.title { text-align: center }` into every component. (TitleBar was
+  deleted in Step 8 — its `tb-*` traffic lights now live in Sidebar; the
+  namespace lesson stands.) If styles leak again, namespace the classes — don't
   fight the compiler. Audit served sheets:
   `curl 'http://localhost:1420/src/components/X.svelte?svelte&type=style&lang.css'`
   and check every selector carries a `.s-…` hash.
@@ -116,6 +117,14 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **Screenshots lie when the game is fullscreen.** Raise our window first:
   WindowsRunner `Match` → `Run(matchId, "activate")`. Never minimize/kill the
   user's windows or change their wallpaper without asking.
+- **WebKitGTK backdrop-filter does NOT blur in-window content** (verified
+  2026-08-27, 2.52/DMABUF): a 32px-bold probe element under the playbar
+  stayed pixel-sharp through `blur(80px)` — radius changes are invisible.
+  All the visible frost is KWin's force blur on the wallpaper. Consequence:
+  don't try to make scrolling content blur under the playbar via
+  backdrop-filter; dim it with the `.grid-fade` veil in App.svelte instead.
+  If you ever test backdrop-filter again, probe with content UNDER the glass,
+  never with the wallpaper.
 - **UI alphas** (user-tuned): grid backdrop 0.8 (`--bg-grid`), chrome 0.7
   (`--bg-chrome`), expanded panel gradient alpha 0.36 dark / 0.30 light. Don't
   drift from these without being asked.

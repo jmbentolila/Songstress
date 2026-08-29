@@ -364,6 +364,12 @@ async fn playback_queue_jump(engine: tauri::State<'_, Engine>, pos: usize) -> Re
     engine.0.queue_jump(pos).await
 }
 
+/// Clear the entire user queue (popover "Clear").
+#[tauri::command]
+async fn playback_queue_clear(engine: tauri::State<'_, Engine>) -> Result<(), String> {
+    engine.0.queue_clear().await
+}
+
 /// Apply the equalizer (Step 6): push the lavfi chain onto mpv's `af` and
 /// persist the (clamped) state in settings — Rust re-applies it at launch,
 /// so this is the single write path. Returns the normalized state so the UI
@@ -1861,6 +1867,7 @@ pub fn run() {
             playback_queue,
             playback_queue_remove,
             playback_queue_jump,
+            playback_queue_clear,
             playback_eq,
             get_track_tags,
             get_album_tags,

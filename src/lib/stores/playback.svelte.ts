@@ -421,6 +421,15 @@ export async function queueJump(pos: number) {
   }
 }
 
+export async function queueClear() {
+  if (!LIVE_LIBRARY || !library.live) return;
+  try {
+    await invoke("playback_queue_clear");
+  } catch (err) {
+    console.error("queue clear failed", err);
+  }
+}
+
 // --- prev/next album (Step 5b) --------------------------------------------------
 // Global grid order (artist A→Z then year), wrap-around, no-op when stopped.
 // Frontend-only: compute the adjacent album, play it at track 0.

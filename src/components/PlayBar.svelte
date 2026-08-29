@@ -20,6 +20,7 @@
     applyEqPreset,
     queueRemove,
     queueJump,
+    queueClear,
   } from "../lib/stores/playback.svelte";
   import { artGradientContrast } from "../lib/gradient";
   import {
@@ -69,7 +70,66 @@
 
   let queueRows = $derived(toRows(playback.queue));
   let upNextRows = $derived(toRows(playback.upNext));
+
+  // Step 8c: the EQ and queue popovers share one anchor, so they are
+  // mutually exclusive — opening one closes the other (no overlap).
+  function toggleEq() {
+    ui.eqOpen = !ui.eqOpen;
+    if (ui.eqOpen) ui.queueOpen = false;
+  }
+  function toggleQueue() {
+    ui.queueOpen = !ui.queueOpen;
+    if (ui.queueOpen) ui.eqOpen = false;
+  }
+
+  // Step 8c: standard popover dismissal — outside click + Escape, the same
+  // idiom as ContextMenu (svelte:document pointerdown + el.contains).
+  let eqEl = $state<HTMLElement>();
+  let qEl = $state<HTMLElement>();
+  let eqBtn = $state<HTMLElement>();
+  let qBtn = $state<HTMLElement>();
+
+  function onDocPointerDown(e: PointerEvent) {
+    const t = e.target as HTMLElement;
+    // The toggle's own pointerdown must NOT close the popover here — the
+    // following click must still see the popover as open so it can toggle
+    // it CLOSED (otherwise the button becomes open-only).
+    if (eqBtn?.contains(t) || qBtn?.contains(t)) return;
+    if (ui.eqOpen && !eqEl?.contains(t)) ui.eqOpen = false;
+    if (ui.queueOpen && !qEl?.contains(t)) ui.queueOpen = false;
+  }
+  // Step 8c: in-app keyboard transport (shape: Space = play/pause,
+  // ←/→ = seek ±5s). Fires only when focus is on the body — any interactive
+  // element keeps its native key behavior (typing in search, arrows driving
+  // a focused slider, Space activating a focused button). Space ignores
+  // auto-repeat (held key would toggle play/pause in a loop); arrows repeat
+  // on purpose, like dragging the seekbar.
+  function isInteractive(t: EventTarget | null): boolean {
+    return (
+      t instanceof HTMLElement &&
+      !!t.closest("input, select, textarea, button, a, [contenteditable]")
+    );
+  }
+  function onDocKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && (ui.eqOpen || ui.queueOpen)) {
+      ui.eqOpen = false;
+      ui.queueOpen = false;
+      return;
+    }
+    if (e.repeat && e.key === " ") return;
+    if (isInteractive(e.target)) return;
+    if (e.key === " ") {
+      e.preventDefault();
+      void togglePlay();
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      if (!playback.current) return;
+      e.preventDefault();
+      seekTo(playback.positionSec + (e.key === "ArrowRight" ? 5 : -5));
+    }
+  }
 </script>
+
+<svelte:window onpointerdown={onDocPointerDown} onkeydown={onDocKeydown} />
 
 <footer class="playbar glass" style:background={backdrop ?? undefined}>
   <div class="now">
@@ -80,7 +140,7 @@
     {/if}
     <div class="text">
       <span class="t">{track?.title ?? "Nothing playing"}</span>
-      <span class="sub">{track ? `${artistName} — ${album?.title}` : "Pick an album"}</span>
+      <span class="sub">{track ? `${artistName} — ${album?.title}` : "Pick a track"}</span>
     </div>
   </div>
 
@@ -97,7 +157,12 @@
       <button aria-label="Previous track" disabled={!track} onclick={() => skip(-1)}>
         <svg viewBox="0 0 16 16"><path d="M4 3 v10 M12.5 3 L6.5 8 l6 5 Z" fill="currentColor" stroke="none" /></svg>
       </button>
-      <button class="playpause" aria-label={playback.isPlaying ? "Pause" : "Play"} onclick={togglePlay}>
+      <button
+        class="playpause"
+        aria-label={playback.isPlaying ? "Pause" : "Play"}
+        title={playback.isPlaying ? "Pause — Space" : "Play — Space"}
+        onclick={togglePlay}
+      >
         {#if playback.isPlaying}
           <svg viewBox="0 0 16 16"><rect x="4" y="3" width="2.8" height="10" rx="1" fill="currentColor"/><rect x="9.2" y="3" width="2.8" height="10" rx="1" fill="currentColor"/></svg>
         {:else}
@@ -127,6 +192,7 @@
         disabled={!track}
         oninput={(e) => seekTo(+e.currentTarget.value)}
         aria-label="Seek"
+        title="Seek — ←/→ = ±5s"
       />
       <span class="time">{fmt(playback.durationSec)}</span>
     </div>
@@ -137,9 +203,10 @@
       <button
         class="mode-btn"
         class:on={playback.eq.enabled}
+        bind:this={eqBtn}
         aria-label="Equalizer"
         title={`Equalizer: ${playback.eq.enabled ? "on" : "off"}${playback.eq.preset ? ` · ${playback.eq.preset}` : " · Custom"}`}
-        onclick={() => (ui.eqOpen = !ui.eqOpen)}
+        onclick={toggleEq}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <line x1="4" y1="21" x2="4" y2="14" />
@@ -172,7 +239,7 @@
         {:else if playback.shuffle === "artist"}
           <span class="badge">R</span>
         {:else if playback.shuffle === "all"}
-          <span class="badge">ALL</span>
+          <span class="badge">All</span>
         {/if}
       </button>
       <button
@@ -197,7 +264,8 @@
         class:on={playback.queue.length > 0}
         aria-label="Queue"
         title={`Queue: ${playback.queue.length} track${playback.queue.length === 1 ? "" : "s"} queued`}
-        onclick={() => (ui.queueOpen = !ui.queueOpen)}
+        bind:this={qBtn}
+        onclick={toggleQueue}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <line x1="4" y1="6" x2="14" y2="6" />
@@ -242,7 +310,7 @@
   </div>
 
   {#if ui.eqOpen}
-    <div class="eq-pop glass">
+    <div class="eq-pop glass" bind:this={eqEl} role="dialog" aria-label="Equalizer">
       <header>
         <label class="toggle">
           <input
@@ -308,11 +376,19 @@
     </div>
   {/if}
   {#if ui.queueOpen}
-    <div class="q-pop glass">
+    <div class="q-pop glass" bind:this={qEl} role="dialog" aria-label="Queue">
       <header>
         <span class="q-title">Queue</span>
         {#if playback.queue.length}
           <span class="q-count">{playback.queue.length}</span>
+          <button
+            class="q-clear"
+            aria-label="Clear queue"
+            title="Remove all queued tracks"
+            onclick={() => void queueClear()}
+          >
+            Clear
+          </button>
         {/if}
         <button class="close" aria-label="Close" onclick={() => (ui.queueOpen = false)}>×</button>
       </header>
@@ -569,9 +645,14 @@
   }
 
   .vol-btn {
+    /* Step 8c: 28px minimum hit target (was ~19px) — same bar as the
+     * sidebar back-chevron. The button is invisible at rest, so the
+     * larger box doesn't change the visual. */
     display: grid;
     place-items: center;
-    padding: 2px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     border: none;
     background: transparent;
     color: var(--text-dim);
@@ -594,6 +675,23 @@
   }
 
   /* --- Equalizer popover (Step 6) ------------------------------------------ */
+
+  /* Step 8c: materialize on entry — the popovers sit above their trigger
+   * buttons, so they grow from the bottom-right corner (transform-origin on
+   * the shared edge). Transform+opacity only = compositor-friendly; the
+   * global prefers-reduced-motion switch collapses the duration. */
+  .eq-pop,
+  .q-pop {
+    transform-origin: 100% 100%;
+    animation: pop-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+  }
 
   .eq-pop {
     position: absolute;
@@ -627,11 +725,13 @@
   }
 
   .eq-pop select {
+    /* Step 8c: 6px was the only off-ladder radius in the popovers — 8px is
+     * the control rung (DESIGN.md radii ladder). */
     font-size: 12px;
     color: var(--text);
     background: var(--hover);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 2px 4px;
   }
 
@@ -640,7 +740,9 @@
     border: none;
     background: transparent;
     color: var(--text-dim);
-    font-size: 16px;
+    /* On-ramp: body 14px was the closest step to the old off-ramp 16px
+     * glyph — and reads closer to the 12px preset select beside it. */
+    font-size: 14px;
     line-height: 1;
     cursor: pointer;
     padding: 0 2px;
@@ -744,12 +846,32 @@
     padding: 1px 7px;
   }
 
+  .q-clear {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 7px;
+  }
+
+  .q-clear:hover {
+    color: var(--text);
+    background: var(--hover);
+  }
+
+  .q-clear:active {
+    background: var(--active);
+  }
+
   .q-pop .close {
     margin-left: auto;
     border: none;
     background: transparent;
     color: var(--text-dim);
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1;
     cursor: pointer;
     padding: 0 2px;

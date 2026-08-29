@@ -1,5 +1,4 @@
 <script lang="ts">
-  import TitleBar from "./components/TitleBar.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import AlbumGrid from "./components/AlbumGrid.svelte";
   import PlayBar from "./components/PlayBar.svelte";
@@ -22,7 +21,7 @@
   void initMenu();
 
   // Keep the Rust-owned menu model's dynamic bits (playing/scanning/staged/
-  // theme) in sync so the titlebar menu bar and the Global Menu re-render.
+  // theme) in sync so the Global Menu re-render.
   $effect(() => {
     void playback.current;
     void playback.isPlaying;
@@ -92,8 +91,15 @@
 </script>
 
 <div class="app">
-  <TitleBar />
   <div class="stage">
+    <!-- No titlebar: the grid's top padding band is the window drag strip
+         (the sidebar header is the other drag region). It overlaps the
+         20px content padding, so nothing clickable hides under it at
+         scroll 0; scrolled content just can't be grabbed in its top 20px. -->
+    <div class="drag-strip" data-tauri-drag-region></div>
+    <!-- Soft cast shadows where content meets the window top and the
+         playbar shelf — rounds the hard scroll-clip (see .edge-shadows) -->
+    <div class="edge-shadows"></div>
     <AlbumGrid />
     <Sidebar />
     <PlayBar />
@@ -119,7 +125,37 @@
     min-height: 0;
   }
 
-  /* album-area backdrop at its own alpha; chrome layers sit at theirs */
+  .drag-strip {
+    position: absolute;
+    top: 0;
+    left: var(--sidebar-width);
+    right: 0;
+    height: var(--gap);
+    z-index: 5;
+  }
+
+  /* The grid scroller clips at the playbar's top line and at the window
+     top (Step 8): rows slide out under those edges. backdrop-filter can't
+     frost in-window content on this WebKitGTK (probe-verified), and a
+     per-row `filter: blur()` smears the whole row — so the cut is softened
+     with static cast shadows: chrome casts a soft shadow onto the grid.
+     pointer-events: none, so it never blocks tiles or the drag strip. */
+  .edge-shadows {
+    position: absolute;
+    top: 0;
+    left: var(--sidebar-width);
+    right: 0;
+    bottom: var(--playbar-h);
+    z-index: 5;
+    pointer-events: none;
+    background:
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.22), transparent 26px) top /
+        100% 26px no-repeat,
+      linear-gradient(to top, rgba(0, 0, 0, 0.3), transparent 34px) bottom /
+        100% 34px no-repeat;
+  }
+
+  /* album-area backdrop at its own alpha; chrome layers sit at theirs. */
   .stage::before {
     content: "";
     position: absolute;

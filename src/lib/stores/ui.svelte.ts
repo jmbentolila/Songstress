@@ -25,11 +25,16 @@ export const ui = $state({
   playbarGradient: load("songstress.playbarGradient", false),
   /** Accent color (Step 4) — ONE hex; null = stock purple from app.css. */
   accentColor: load<string | null>("songstress.accentColor", null),
+  /** In-sidebar menu (Step 8b, iOS Settings-style stack): gear swaps the
+   *  artist stack for the menu stack; menuDetail = pushed pane
+   *  ("appearance" or a Rust menu id). Session-only. */
+  menuOpen: false,
+  menuDetail: null as string | null,
   activeArtistId: "all" as string,
-  filter: "",
-  /** Titlebar search (albums/songs) — session-only, overrides artist filter. */
-  mediaFilter: "",
-  /** One expanded panel PER grid section: "songs" (titlebar search, shows
+  /** Single library search (session-only): filters the sidebar artist list
+   *  AND switches the grid to Songs/Albums match sections when non-empty. */
+  search: "",
+  /** One expanded panel PER grid section: "songs" (library search, shows
    *  matching tracks only) and "albums" (title/artist matches + the normal
    *  grid, full album). The same album can be open in both at once. */
   expandedAlbum: {

@@ -18,9 +18,9 @@ export type MenuItem = {
 export type Menu = { id: string; label: string; items: MenuItem[] };
 
 /** Mirrors the Rust-owned model (menu.rs) — refreshed via menu-changed.
- *  globalMenuActive: assume the Plasma Global Menu from the start (the
- *  in-titlebar menu bar stays hidden — no startup flash) and only show the
- *  bar if registration definitively fails. */
+ *  globalMenuActive: assume the Plasma Global Menu from the start and only
+ *  flag it inactive if registration definitively fails. The in-app menu
+ *  (sidebar stack, Step 8b) doesn't branch on this — it's always available. */
 export const menu = $state({
   menus: [] as Menu[],
   globalMenuActive: true,
@@ -72,7 +72,7 @@ export async function initMenu() {
   });
   // The registration races the webview load (retry loop takes seconds).
   // Poll until it resolves: 1 = keep assuming the Global Menu, 2 = failed →
-  // fall back to the in-titlebar menu bar.
+  // fall back: the sidebar gear menu is the in-app fallback from now on.
   const poll = setInterval(() => {
     void invoke<number>("appmenu_state")
       .then((state) => {

@@ -808,6 +808,22 @@ impl Mpv {
         Ok(())
     }
 
+    /// Clear the entire user queue (popover "Clear").
+    pub async fn queue_clear(&self) -> Result<(), String> {
+        let (index, playing, paths) = {
+            let mut st = self.state.lock().unwrap();
+            st.queue.clear();
+            let playing = st.current().is_some();
+            let paths = st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>();
+            (st.index, playing, paths)
+        };
+        if playing {
+            self.load_queue(index, &paths, false).await;
+        }
+        self.emit_queue_changed();
+        Ok(())
+    }
+
     /// Play the queued entry at `pos` NOW (popover click). Entries before it
     /// are discarded; the rest stay queued. A currently-playing queue entry
     /// is consumed first.
