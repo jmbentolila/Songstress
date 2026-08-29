@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { tick } from "svelte";
   import type { Album, Track } from "../lib/types";
   import { library } from "../lib/stores/library.svelte";
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
@@ -21,11 +20,25 @@
 
   let {
     album,
-    open,
+    targetId,
+    onSwitchCloseDone,
     /** When set, only these track ids render (library song search);
      *  playback indices stay anchored to the FULL album track list. */
     visibleTrackIds = null,
-  }: { album: Album; open: boolean; visibleTrackIds?: Set<string> | null } = $props();
+  }: {
+    album: Album;
+    /** What the section has expanded — the content this panel should
+     *  show; null = closed. May differ from album.id for one snappy
+     *  switch-close: album.id is where the panel row physically sits
+     *  (the grid relocates it when the close hands back). */
+    targetId: string | null;
+    /** Called when the snappy switch-close finishes: the grid moves the
+     *  (0px) panel row to the target album. */
+    onSwitchCloseDone: () => void;
+    /** When set, only these track ids render (library song search);
+     *  playback indices stay anchored to the FULL album track list. */
+    visibleTrackIds?: Set<string> | null;
+  } = $props();
 
   function editAlbumTags(e: MouseEvent, albumId: string) {
     e.preventDefault();
@@ -109,7 +122,7 @@
   // the body — no double-fire.
   function onKeydown(e: KeyboardEvent) {
     if (e.key !== "Delete" && e.key !== "Enter") return;
-    if (!open || ui.tagEditor.open || contextMenu.open) return;
+    if (targetId === null || ui.tagEditor.open || contextMenu.open) return;
     const id = selectedId;
     if (!id) return;
     const track = tracks.find((t) => t.id === id);
@@ -130,148 +143,160 @@
     else if (track.missing) void removeTrack(id);
   }
 
-  // Height is driven in px on .inner (never grid-template-rows: WebKitGTK
+    // --- panel expand / collapse / switch — one state machine ---------------
+  // Height is driven in px on .inner. Never grid-template-rows: WebKitGTK
   // animates the track and the content clip on different clocks, which read
-  // as a lagging shell/gap — and first-open snapped instead of animating).
-  // Rest states: closed = "0px", open settled = "auto". The markup starts at
-  // 0px so a fresh mount never flashes open before the effect runs.
+  // as a lagging shell/gap. Px height is the sanctioned accordion case where
+  // no transform equivalent exists — the grid rows really have to move.
+  //
+  // Rest states: closed = "0px", open settled = "auto" (tracks content
+  // changes: the two-column threshold, missing-track alerts, resizes). The
+  // markup starts at 0px so a fresh mount never flashes open first.
+  //
+  // The grid owns WHERE the panel row sits (the "host"): on a cross-row
+  // switch it keeps the row here for one snappy close, then relocates the
+  // (0px) row to the target — a move that occupies no space, so there is
+  // no visible cut. Every height move is a CSS transition with the
+  // duration set inline per phase, so a click mid-motion retargets the
+  // in-flight transition from its current value — nothing restarts.
+  //   open grow        0 -> H   360ms cubic-bezier(0.22,1,0.36,1)
+  //   plain collapse   H -> 0   280ms, content visible; displayId survives
+  //                      (per-section memory — the next open re-shows it)
+  //   switch-close     H -> 0   120ms (the travel version of a collapse;
+  //                      hands back to the grid at 0)
+  //   switch open      0 -> H   360ms + the ~160ms content fade — the
+  //                      fresh-open story at the destination
+  //   same-row switch  no height motion: the host flips in place, content
+  //                      swaps + fades; a size mismatch settles (or grows
+  //                      a short beat if the new album is much taller)
+
+  const CURVE = "cubic-bezier(0.22, 1, 0.36, 1)";
+  const GROW_MS = 360;
+  const CLOSE_MS = 280;
+  const SWITCH_CLOSE_MS = 120;
   let initInnerH = "0px";
-  let openRaf1 = 0;
-  let openRaf2 = 0;
-  let settleTimer: ReturnType<typeof setTimeout> | undefined;
-
-  $effect(() => {
-    if (open) {
-      openRaf1 = requestAnimationFrame(() => {
-        openRaf2 = requestAnimationFrame(() => {
-          if (!innerEl || !panelEl) return;
-          const from = innerEl.offsetHeight;
-          const to = Math.max(1, panelEl.offsetHeight);
-          if (Math.abs(from - to) < 2) {
-            innerEl.style.setProperty("height", "auto");
-            return;
-          }
-          clearTimeout(settleTimer);
-          innerEl.style.setProperty("transition", "none");
-          innerEl.style.setProperty("height", `${from}px`);
-          void innerEl.offsetHeight;
-          innerEl.style.removeProperty("transition");
-          innerEl.style.setProperty("height", `${to}px`);
-          reveal(to);
-          settleTimer = setTimeout(() => {
-            innerEl?.style.setProperty("height", "auto");
-            // Correct the view once the panel has its final height.
-            reveal(panelEl?.offsetHeight);
-          }, 400);
-        });
-      });
-    } else {
-      cancelAnimationFrame(openRaf1);
-      cancelAnimationFrame(openRaf2);
-      cancelAnimationFrame(scrollAnim);
-      clearTimeout(settleTimer);
-      entering = false;
-      if (innerEl) {
-        const from = Math.max(innerEl.offsetHeight, 0);
-        innerEl.style.setProperty("transition", "none");
-        innerEl.style.setProperty("height", `${from}px`);
-        void innerEl.offsetHeight;
-        innerEl.style.removeProperty("transition");
-        innerEl.style.setProperty("height", "0px");
-      }
-    }
-    return () => {
-      cancelAnimationFrame(openRaf1);
-      cancelAnimationFrame(openRaf2);
-    };
-  });
-
-  // --- album switch: swap instantly, fade the NEW content in ---------------
-  // The outgoing album is never rendered at the new row (that read as a flash
-  // of the wrong album), and height changes in a single step — no per-frame
-  // relayout, which was the switch lag.
-  let displayId = $state<string | null>(null);
+  // The content the box currently shows — deliberately NOT tracking
+  // album (the host): it lags by one switch-close and only the state
+  // machine below changes it. Captured at mount so $state sees a plain
+  // value, not a prop reference.
+  // svelte-ignore state_referenced_locally
+  const mountAlbumId = album.id;
+  let displayId = $state(mountAlbumId);
   let entering = $state(false);
   let innerEl = $state<HTMLElement>();
   let panelEl = $state<HTMLElement>();
-  let expanderEl = $state<HTMLElement>();
+  let raf1 = 0;
+  let raf2 = 0;
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let enterRaf1 = 0;
   let enterRaf2 = 0;
+  let generation = 0;
 
-  // Bring the (moving/growing) panel into view — one-shot nudges at expand
-  // start and settle; never any scroll locking afterwards. `finalHeight` is
-  // the panel's natural height: the expander box itself is still animating,
-  // and measuring the live box would see the near-zero animated size.
-  //
-  // We tween scrollTop ourselves instead of scrollBy({smooth}) because
-  // WebKitGTK silently drops stacked smooth-scroll requests (second expand
-  // wouldn't move until the scroll position was reset).
-  let scrollAnim = 0;
-  function reveal(finalHeight?: number) {
-    const el = expanderEl;
-    const scroller = el?.closest(".content");
-    if (!el || !(scroller instanceof HTMLElement)) return;
-    const er = el.getBoundingClientRect();
-    const sr = scroller.getBoundingClientRect();
-    // The scroller now clips at the playbar's top line (Step 8); its
-    // padding-bottom (--gap) is the small resting gap above that line.
-    const padBottom =
-      parseFloat(getComputedStyle(scroller).paddingBottom) || 0;
-    const usableBottom = sr.bottom - padBottom;
-    const h = finalHeight ?? er.height;
-    let delta = 0;
-    if (er.top + h > usableBottom) {
-      delta = er.top + h - usableBottom;
-    } else if (er.top < sr.top) {
-      delta = er.top - sr.top;
+  function move(px: number, dur: number) {
+    const el = innerEl;
+    if (!el) return;
+    // Pin `auto` (the settled rest state) to its current px first: a
+    // transition cannot interpolate from `auto`, so an unpinned shrink
+    // jumps to 0 instead of animating. Mid-motion, this pins the current
+    // animated value and retargets from it.
+    el.style.transition = "none";
+    el.style.height = `${el.offsetHeight}px`;
+    void el.offsetHeight;
+    el.style.transition = `height ${dur}ms ${CURVE}`;
+    el.style.height = `${px}px`;
+  }
+
+  // Settle an open panel to auto (a px->auto transition can't interpolate,
+  // so the transition is dropped in the same no-jank reframe as before).
+  function settleToAuto() {
+    if (!innerEl) return;
+    innerEl.style.transition = "none";
+    innerEl.style.height = "auto";
+    void innerEl.offsetHeight;
+    innerEl.style.removeProperty("transition");
+    innerEl.style.removeProperty("height");
+  }
+
+  function grow(gen: number) {
+    if (gen !== generation || !innerEl) return;
+    const to = Math.max(1, panelEl?.offsetHeight ?? 0);
+    if (innerEl.offsetHeight >= to - 2) {
+      settleToAuto();
+      return;
     }
-    if (Math.abs(delta) <= 1) return;
-
-    cancelAnimationFrame(scrollAnim);
-    // Cap at aligning the expander's TOP border with the scroller top: a
-    // panel taller than the viewport must never be scrolled past its start.
-    const startTop = scroller.scrollTop;
-    const maxTarget = startTop + (er.top - sr.top);
-    let targetTop = startTop + delta;
-    if (targetTop > maxTarget) targetTop = maxTarget;
-    const start = performance.now();
-    const DURATION = 280;
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / DURATION);
-      const eased = 1 - Math.pow(1 - t, 3);
-      scroller.scrollTop = startTop + (targetTop - startTop) * eased;
-      if (t < 1) scrollAnim = requestAnimationFrame(step);
-    };
-    scrollAnim = requestAnimationFrame(step);
+    move(to, GROW_MS);
+    settleTimer = setTimeout(() => {
+      if (gen !== generation) return;
+      settleToAuto();
+    }, GROW_MS + 20);
   }
 
   $effect(() => {
-    if (open && displayId === null) displayId = album.id;
-  });
+    const gen = ++generation;
+    cancelAnimationFrame(raf1);
+    cancelAnimationFrame(raf2);
+    cancelAnimationFrame(enterRaf1);
+    cancelAnimationFrame(enterRaf2);
+    clearTimeout(settleTimer);
+    clearTimeout(closeTimer);
 
-  $effect(() => {
-    if (!open || displayId === null || album.id === displayId) return;
+    if (displayId === targetId) {
+      // The content IS what the section has expanded: the box should be
+      // open. Covers fresh mounts, re-opens, the post-switch flip (grow
+      // from 0 + fade) and same-row flips (a settled box settles to the
+      // new size — or grows a short beat if the new album is much
+      // taller). A mid-close click on the host album retargets the close
+      // into this grow — the box simply turns back open.
+      if (targetId === null) return; // displayId is never null; TS guard
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => {
+          grow(gen);
+          if (entering) {
+            enterRaf1 = requestAnimationFrame(() => {
+              enterRaf2 = requestAnimationFrame(() => {
+                if (gen === generation) entering = false;
+              });
+            });
+          }
+        });
+      });
+      return;
+    }
+
+    if (targetId === null) {
+      // Plain collapse: close with the content visible; displayId stays
+      // (per-section memory — the next open re-shows this album).
+      entering = false;
+      if (innerEl && innerEl.offsetHeight > 2) move(0, CLOSE_MS);
+      return;
+    }
+
+    if (album.id === displayId) {
+      // A switch is pending but the host row hasn't moved yet (the grid
+      // keeps it here for one snappy close): close showing the OLD
+      // content, then hand back — the grid relocates the (0px) row, the
+      // album prop becomes the target, and the effect re-enters on the
+      // open branch, which grows the new album.
+      if ((innerEl?.offsetHeight ?? 0) < 2) {
+        // Defensive: already at 0 (the grid normally flips the host
+        // itself when the box is closed) — hand back at once.
+        onSwitchCloseDone();
+        return;
+      }
+      move(0, SWITCH_CLOSE_MS);
+      closeTimer = setTimeout(() => {
+        if (gen === generation) onSwitchCloseDone();
+      }, SWITCH_CLOSE_MS + 10);
+      return;
+    }
+
+    // album.id !== displayId: the grid has relocated the host (album.id
+    // === targetId) — swap the content while the box is at 0; the state
+    // change re-enters the effect on the open branch, which grows.
     displayId = album.id;
     selectedId = null;
     entering = true;
-    tick().then(() => {
-      if (!innerEl || !panelEl) return;
-      reveal(panelEl.offsetHeight);
-      innerEl.style.transition = "none";
-      innerEl.style.height = `${Math.max(1, panelEl.offsetHeight)}px`;
-      requestAnimationFrame(() => {
-        innerEl?.style.removeProperty("transition");
-        innerEl?.style.removeProperty("height");
-        // Let the opacity:0 frame paint before fading the new content in.
-        enterRaf1 = requestAnimationFrame(() => {
-          enterRaf2 = requestAnimationFrame(() => (entering = false));
-        });
-      });
-    });
-    return () => {
-      cancelAnimationFrame(enterRaf1);
-      cancelAnimationFrame(enterRaf2);
-    };
   });
 
   let displayAlbum = $derived(
@@ -294,7 +319,7 @@
     // Tracked so the gradient regenerates on theme flips too.
     const theme = resolvedTheme();
     const id = displayId;
-    if (id === null || !open) return;
+    if (targetId === null) return;
     const album = library.albums.find((a) => a.id === id);
     const alpha = PANEL_ALPHA[theme] ?? 0.5;
 
@@ -363,7 +388,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="expander" bind:this={expanderEl}>
+<div class="expander">
   <div class="inner" bind:this={innerEl} style:height={initInnerH}>
     <div class="fade" class:entering>
       <section class="panel" bind:this={panelEl} style:background={gradient ?? undefined}>
@@ -516,7 +541,9 @@
   .inner {
     overflow: hidden;
     min-height: 0;
-    transition: height 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+    /* No static transition: every move is set inline per phase (320/280/
+     * 140ms, cubic-bezier(0.22,1,0.36,1)) so a mid-motion click retargets
+     * the in-flight transition instead of restarting it. */
   }
 
   .fade {

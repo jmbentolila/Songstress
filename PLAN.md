@@ -35,6 +35,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Step 7b — packaging (RPM) | ✅ 2026-08-26 |
 | Step 8 — titlebar elimination (chrome into sidebar) | ✅ 2026-08-27 |
 | Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40; RPM rebuild pending) |
+| Expansion choreography + 20px-line reframe | ✅ 2026-08-29 (RPM rebuild pending) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -68,6 +69,15 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 - **UI revamp planned (2026-08-26)**: until the revamp, logic-first —
   build and fix features before the UI pass; don't churn cosmetics inside
   feature work.
+- **The 20px line (user-designed, 2026-08-29)**: every open/collapse/
+  switch ends with the focused album's row 20px (the scroller's top
+  padding) under the window top — or as low as the final layout's bottom
+  edge allows. Travel is an ANCHOR (live row position, eased glide +
+  hold), never a predicted tween (prediction produced a visible
+  stall→snap on cross-row switches). Cross-row order: travel → close →
+  expand (the close/relocation play under the pinned row). No
+  app-initiated auto-scroll on expand (reveal removed); wheel/keys/touch
+  cancel the glide; reduced motion disables the reframe entirely.
 
 ## Remaining work
 
@@ -1274,6 +1284,58 @@ Detector: the panel's `transition: height` is the documented WebKit
 dual-clock fix — registered as a file-scoped exception
 (layout-transition=* for ExpandedPanel.svelte); detector back to
 exit 0. Snapshot: .impeccable/critique/2026-08-29T19-41-14Z__src-components-albumgrid-svelte.md.
+Gates: check 0/0, vitest 53, build OK.
+
+**Expansion choreography + the 20px-line reframe (2026-08-29)**:
+the grid↔panel expansion surface, redesigned from user critique. Files:
+AlbumGrid.svelte, ExpandedPanel.svelte.
+- **Tile press ring** (user feedback "the wash should use the selected
+  border"): the `::after` overlay wash is gone; `:active` lights the
+  cover's EXISTING outline to the accent (`outline-color: var(--accent)`) —
+  the outline is the album's state language (dim = hover, accent =
+  playing / expanded / pressed). `.tile` gained 8px bottom padding
+  (caption breathing).
+- **Expansion state machine** (panel): the ad-hoc rAF chain became an
+  explicit machine — `displayId` (lagging content; deliberately NOT
+  tracking the `album` prop), `generation` counter for interruption,
+  `move()` pins `auto`→px before every transition (a transition cannot
+  interpolate from `auto` — an unpinned shrink jumps to 0 instead of
+  animating), `settleToAuto()` drops the inline height in one no-jank
+  reflow, `grow()` measures the natural height. Constants: grow 360 / 
+  collapse 280 / switch-close 120ms, `cubic-bezier(0.22,1,0.36,1)`.
+- **Host-relocation architecture** (grid): the grid owns WHERE the panel
+  row lives (`songHostId` / `albumHostId`), the panel owns what it shows
+  (`album` prop = host row, `targetId` prop = the store). Same-row
+  switch = host flips now, in-place content swap + fade. Cross-row =
+  host lags for one 120ms close at the old row, `onSwitchCloseDone()`
+  moves the 0px row (invisible), new album grows at the destination.
+  A safety effect re-anchors a stale host (its row vanished from a
+  search/artist change mid-close) to the pending target — without it
+  every later switch deadlocks.
+- **reveal() auto-scroll: removed** — no app-initiated viewport movement
+  in the expansion machinery; replaced by the reframe below.
+- **The 20px-line reframe** (user-designed invariant — see decisions
+  log): every open / collapse / switch ends with the focused row at the
+  20px line, or the final layout's bottom edge (the browser's scrollTop
+  clamp does the bottom limit for free — e.g. the last row of a
+  200-track album). The travel is an ANCHOR, not a predicted tween: each
+  frame it nudges scrollTop by however far the row's LIVE viewport
+  position is from the desired one (ease-out cubic glide to the line,
+  240–380ms — viewport-bounded, since only on-screen rows are clickable —
+  then a hold). The live read makes it immune to mid-flight layout
+  change: on a cross-row switch the held close (released when the glide
+  lands) and the invisible relocation play under the PINNED row, so the
+  row's motion is one continuous glide, then still. The first iteration
+  aimed a predicted tween at the final layout and produced a visible
+  stall→snap (the row physically can't reach the final position while
+  the old slot is still open) — that's why the anchor exists. Cancellation:
+  wheel / touch / keys take the view over (height animations finish on
+  their own); reduced motion disables the reframe entirely (zero viewport
+  movement — the stricter a11y reading); ≤4px deltas don't travel.
+  Verified via instrumented traces (Vite middleware sink →
+  /tmp/songstress-diag.log, auto-click driver, all stripped): glide
+  frames 405→21, close phase pinned at 20 before every paint, relocation
+  compensated in one frame, collapse at delta 0 = no travel.
 Gates: check 0/0, vitest 53, build OK.
 
 **Remaining: RPM rebuild (user installs) — deliberate pause 2026-08-29,
