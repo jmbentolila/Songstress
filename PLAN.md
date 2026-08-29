@@ -1225,6 +1225,24 @@ as the sidebar colorMeta exceptions); the two 16px close glyphs were fixed
 for real (→ 14px body, on-ramp) rather than ignored. Gates: check 0/0,
 vitest 53, cargo 65, build OK, detector exit 0, screenshot clean.
 
+**Icon consistency pass (impeccable polish, 2026-08-29)**: audited the
+playbar's three glyph sources (pixel-cropped evidence) and landed:
+- P1 track-skip icons carried a DEAD bar subpath (fill-only path, zero
+  area — the bar never rendered; the triangle-only look was accidental).
+  Now intentional: bare triangle = track step, bar+triangle = album jump
+  (weight encodes jump size, doesn't rely on tooltips); code + comment
+  match the pixels.
+- P2 popover close × and queue-row × were FONT glyphs (a third family
+  beside the SVGs) → utility-family stroked X (24-box, stroke 2, 14px).
+- P2 volume waves 1.2 / mute cross 1.3 → 1.6 (the media-family stroke
+  weight; 1.6 at 15px render = the Lucide-equivalent optical weight).
+- P3 transport SVGs gained aria-hidden (a11y parity with mode/volume).
+- DESIGN.md gained an **Iconography** subsection: the two-family system
+  (media = 16-box fills + 1.6 strokes; utility = Lucide 24-box stroke 2)
+  and the no-typographic-glyph rule.
+Gates: check 0/0, vitest 53, build OK, detector exit 0, cropped screenshot
+verified (incl. a live red-gradient-album playbar state).
+
 **Remaining: RPM rebuild (user installs) — deliberate pause 2026-08-29,
 other work takes the queue.**
 
@@ -1232,6 +1250,44 @@ other work takes the queue.**
 
 ## Open threads / known issues
 
+- **WebKitGTK viewport glitch, VARIANT 2 (2026-08-29)**: webview surface
+  clipped to the top ~40px band, rest of the window black; layout was FULL
+  size (frontend viewport matched the window — the 60s guard correctly saw
+  no mismatch and could never fire). Triggered after the user dragged the
+  window into a side-by-side split (journal: size churn 2740×1780 →
+  2560×1600 → 2400×2132 right after launch). EXHAUSTED without effect:
+  KWin reconfigure, minimize/restore, maximize/unmaximize, FOUR real 1px
+  resize nudges (incl. during the churn), blur-effect unload/reload,
+  full page reload (Vite entry touch). KWin scripting is dead on 6.7
+  (loadScript/loadDeclarativeScript return -1 for any path or name —
+  installed-script dir too; the /WindowsRunner Match/Run interface is
+  `org.kde.krunner1`, NOT `org.kde.KWin.WindowsRunner`).
+
+  Environment experiments (all via a songstress-dev.service.d drop-in,
+  since 2026-08-29; drop-in REMOVED same evening — dev unit runs stock
+  env):
+  - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: clip gone, UI perfect — but the
+    user confirmed the glass layers break (search bar / mode buttons /
+    panels read as inconsistent backgrounds; the wallpaper frost is
+    gone). Rejected for daily use.
+  - `WEBKIT_DISABLE_COMPOSITING_MODE=1`: transparency also degraded
+    (same family of "sections with different backgrounds"). Rejected.
+  - KILLING `WebKitWebProcess` as a runtime recovery: FATAL —
+    WebKitGTK 2.52 does not respawn it in the Tauri setup; the window
+    goes solid black and only a unit restart recovers. NEVER do this.
+  - No upstream fix available: already on webkit2gtk4.1 2.52.5-1.fc44
+    (latest Fedora build).
+
+  Intermittency (stock env): launches at 15:17 and 15:28 were
+  band-clipped (persisted 8+ min, unresponsive to everything above);
+  15:33 launched clean; a follow-up restart showed a TRANSIENT
+  "blurred wallpaper only" state (no content yet) that self-recovered
+  within seconds — pre-first-paint, not the clip. Practical recovery:
+  give a fresh launch ~10s; if the band persists, `systemctl --user
+  restart songstress-dev` and retry — the race does not always hit.
+  Trigger correlation: the window had just been dragged into a
+  side-by-side split (size churn in journal). Open: a durable fix
+  needs the WebKitGTK/Fedora side (DMABUF buffer pin on resize).
 - **WebKitGTK viewport glitch** (FIXED 2026-08-22, kept for reference):
   on some launches the webview rendered at a stale smaller size inside the
   correctly-sized GTK window. `WEBKIT_DISABLE_DMABUF_RENDERER=1` fixed the
