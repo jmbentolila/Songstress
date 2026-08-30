@@ -143,3 +143,24 @@ public/covers/            album art for the fake library (real folder.jpg files)
 4. `npm run build` → succeeds
 5. Visual pass if UI touched (raise window, screenshot, actually look)
 6. Update PLAN.md (status table + implementation log)
+
+## Versioning at commit time
+
+Every time a commit gets the green light: quantify the change since the last
+bump (what shipped — fixes/polish vs. features vs. breaking; dev-only vs.
+user-visible) and bump the version accordingly in ALL THREE places, together
+(`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` — they
+drift if bumped independently):
+
+- **patch** (0.x.y → 0.x.y+1): bug fixes, motion/polish, copy changes
+- **minor** (0.x.y → 0.(x+1).0): a meaningful user-visible feature or a
+  PLAN.md step that ships new capability
+- **major**: breaking change (DB schema, config format, command interface)
+
+Include the bump in the same commit as the work. If a batch of commits
+already shipped, make a follow-up "Version 0.x.y" commit whose message
+quantifies what the version contains. A commit batch that is dev-only
+(absent from the prod build) does not need a bump — say so in the commit
+message. Never leave the version files disagreeing with each other, and
+never leave a bump uncommitted across work commits: the version must always
+describe what HEAD contains.
