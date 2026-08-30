@@ -27,7 +27,40 @@
   let detailMenu = $derived(
     atDetail ? menu.menus.find((m) => m.id === ui.menuDetail) ?? null : null,
   );
-  let detailItems = $derived(detailMenu?.items ?? []);
+
+  // --- Sidebar-specific tree (impeccable critique 2026-08-30, option C) --
+  // The Rust model (menu.rs) feeds the Plasma Global Menu — a menu-BAR
+  // shape. The sidebar does not mirror it:
+  //   • View's one item (theme) already lives in Appearance → pane dropped
+  //   • Help's one item (About) was a no-op; it is now the root's footer
+  //     row opening a real in-glass dialog
+  //   • Playback loses its 6 transport rows — the PlayBar owns those
+  const PLAYBACK_TRANSPORT = new Set([
+    "playback.play-pause",
+    "playback.stop",
+    "playback.previous",
+    "playback.next",
+    "playback.album-prev",
+    "playback.album-next",
+  ]);
+
+  let rootPanes = $derived([
+    { id: APPEARANCE, label: "Appearance" },
+    ...menu.menus
+      .filter((m) => m.id !== "view" && m.id !== "help")
+      .map((m) => ({ id: m.id, label: m.label })),
+  ]);
+
+  let detailItems = $derived.by(() => {
+    if (!atDetail || ui.menuDetail === APPEARANCE) return [];
+    return (detailMenu?.items ?? []).filter(
+      (i) =>
+        !PLAYBACK_TRANSPORT.has(i.id) &&
+        // "Save imported music" exists only to act on staged imports —
+        // in the sidebar it hides instead of standing as a dead row.
+        !(i.id === "library.save-imports" && !i.enabled),
+    );
+  });
   let detailTitle = $derived(
     ui.menuDetail === APPEARANCE ? "Appearance" : (detailMenu?.label ?? "Settings"),
   );
@@ -71,6 +104,31 @@
 
   // The native color input needs a concrete value; presets leave it alone.
   let customHex = $state(ui.accentColor ?? "#ff6ec7");
+
+  // Slider filled track: the native range paints one uniform track, so the
+  // accent fill is a background gradient sized to the current value.
+  function fill(v: number, min: number, max: number) {
+    const pct = ((v - min) / (max - min)) * 100;
+    return `linear-gradient(to right, var(--accent) ${pct}%, var(--hover) ${pct}%)`;
+  }
+
+  // Arrow keys walk the focused layer's rows (menu convention). Tab still
+  // works; ranges keep their native arrow behavior (this only fires when a
+  // BUTTON in a layer is focused). Home layer included: arrow-walk artists.
+  function stackKeydown(e: KeyboardEvent) {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const layer = (document.activeElement as HTMLElement | null)?.closest(".layer");
+    if (!layer) return;
+    const btns = [...layer.querySelectorAll("button")].filter(
+      (b) => !(b as HTMLButtonElement).disabled,
+    ) as HTMLButtonElement[];
+    const i = btns.indexOf(document.activeElement as HTMLButtonElement);
+    if (i === -1) return;
+    e.preventDefault();
+    const next =
+      e.key === "ArrowDown" ? Math.min(i + 1, btns.length - 1) : Math.max(i - 1, 0);
+    btns[next].focus();
+  }
 
   const albumCounts = $derived.by(() => {
     const m = new Map<string, number>();
@@ -137,6 +195,13 @@
   let searchInput = $state<HTMLInputElement | null>(null);
 
   function onGlobalKey(e: KeyboardEvent) {
+    // ONE Escape owner (this router): the About dialog closes first — two
+    // window listeners raced here (Svelte re-attaches them on update, so
+    // order is not guaranteed) and the dialog + the stack popped together.
+    if (e.key === "Escape" && ui.aboutOpen) {
+      ui.aboutOpen = false;
+      return;
+    }
     // Escape pops one menu level: detail → root → home.
     if (e.key === "Escape" && ui.menuOpen) {
       if (ui.menuDetail) ui.menuDetail = null;
@@ -190,12 +255,21 @@
       aria-expanded={ui.menuOpen}
       onclick={toggleSettings}
     >
-      <svg class="icon icon-gear" class:show={!ui.menuOpen} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3">
-        <circle cx="8" cy="8" r="2.2" />
-        <path
-          d="M8 1.8 v1.9 M8 12.3 v1.9 M14.2 8 h-1.9 M3.7 8 H1.8 M12.5 3.5 l-1.35 1.35 M4.85 11.15 L3.5 12.5 M12.5 12.5 l-1.35 -1.35 M4.85 4.85 L3.5 3.5"
-          stroke-linecap="round"
-        />
+      <!-- Feather settings cog: the old circle+8-short-rays read as a
+           lightbulb/sun at 16px (user-reported). Feather keeps it in
+           the app's icon family; the morph is shape-agnostic. -->
+      <svg
+        class="icon icon-gear"
+        class:show={!ui.menuOpen}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
       </svg>
       <svg class="icon icon-x" class:show={ui.menuOpen} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
         <path d="M4 4 L12 12 M12 4 L4 12" />
@@ -203,7 +277,10 @@
     </button>
   </header>
 
-  <div class="stack">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- Key router only: arrow keys move focus among the focused layer's
+       buttons; the layers themselves are the semantic containers. -->
+  <div class="stack" onkeydown={stackKeydown}>
     <!-- home: search + artists (the sidebar's normal job) -->
     <div class="layer" class:off={inMenu}>
       <div class="search">
@@ -289,15 +366,22 @@
         <span class="navtitle">Settings</span>
       </div>
       <nav class="scroll">
-        <button class="mrow" onclick={() => openDetail(APPEARANCE)}>
-          <span class="name">Appearance</span>
-        </button>
-        {#each menu.menus as top (top.id)}
-          <button class="mrow" onclick={() => openDetail(top.id)}>
-            <span class="name">{top.label}</span>
+        {#each rootPanes as pane (pane.id)}
+          <button class="mrow" onclick={() => openDetail(pane.id)}>
+            <span class="name">{pane.label}</span>
+            <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
+              <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           </button>
         {/each}
       </nav>
+      <!-- About: a footer row, not a nav pane. Help held exactly one item
+           and it did nothing — now it opens the real dialog. -->
+      <div class="rootfoot">
+        <button class="mrow" onclick={() => (ui.aboutOpen = true)}>
+          <span class="name">About Songstress</span>
+        </button>
+      </div>
     </div>
 
     <!-- detail: one pane at a time -->
@@ -315,6 +399,7 @@
             <input
               type="range" min="120" max="320" step="4"
               value={ui.tileSize}
+              style:background={fill(ui.tileSize, 120, 320)}
               oninput={(e) => (ui.tileSize = +e.currentTarget.value)}
             />
           </label>
@@ -323,6 +408,7 @@
             <input
               type="range" min="28" max="52" step="2"
               value={ui.sidebarRowSize}
+              style:background={fill(ui.sidebarRowSize, 28, 52)}
               oninput={(e) => (ui.sidebarRowSize = +e.currentTarget.value)}
             />
           </label>
@@ -331,6 +417,9 @@
           </button>
           <label class="toggle">
             <input type="checkbox" bind:checked={ui.playbarGradient} />
+            <span class="box" aria-hidden="true">
+              <svg viewBox="0 0 10 10"><path d="M1.5 5.5 L4 8 L8.5 2.5" /></svg>
+            </span>
             <span>Playbar artwork gradient</span>
           </label>
           <div class="accent">
@@ -368,8 +457,12 @@
               disabled={!item.enabled}
               onclick={() => activateMenuItem(item.id)}
             >
-              <span class="check">{item.checked === true ? "✓" : ""}</span>
               <span class="name">{item.label}</span>
+              {#if item.checked === true}
+                <svg class="ok" viewBox="0 0 14 14" aria-hidden="true">
+                  <path d="M2 7.5 L5.5 11 L12 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              {/if}
             </button>
           {/each}
         </div>
@@ -720,23 +813,14 @@
     text-align: left;
   }
 
-  /* .row height comes from --sidebar-row-size (user-tunable, min 28px),
-     so no min-height here. Menu rows are deliberately 40px (≈iOS 44pt at
-     our base size) — their own roomier cadence, not the list's. */
+  /* ONE row language (impeccable critique 2026-08-30, option A): menu
+     rows share the artist-row rhythm — same height token (user-tunable),
+     same 13px type, same label column. The old fixed 40px/13.5px cadence
+     made the same container speak three row dialects. */
   .mrow,
   .irow {
-    height: 40px;
-    font-size: 13.5px;
-  }
-
-  /* menu items: check column left, label fills — not the name/trailing
-     split of the other rows */
-  .irow {
-    justify-content: flex-start;
-  }
-
-  .irow .name {
-    flex: 1;
+    height: var(--sidebar-row-size);
+    font-size: 13px;
   }
 
   .row:hover,
@@ -786,11 +870,47 @@
     flex: none;
   }
 
-  /* menu item check column (matches the old in-titlebar menu bar's ✓) */
-  .check {
+  /* Trailing glyphs sit in the count column: ✓ state (checked items) and
+     › drill (root rows). No left check column — labels align with the
+     pane title and the artist names. */
+  .ok {
     width: 14px;
+    height: 14px;
     flex: none;
     color: var(--accent);
+  }
+
+  .irow:disabled .ok {
+    color: var(--text-dim);
+  }
+
+  .drill {
+    width: 10px;
+    height: 14px;
+    flex: none;
+    color: var(--text-dim);
+    opacity: 0.6;
+  }
+
+  .mrow:hover .drill {
+    color: var(--text);
+    opacity: 1;
+  }
+
+  /* About footer: anchored to the root's bottom (the layer is a flex
+     column; .scroll's flex:1 pushes it down). Dimmed — it's a quiet exit,
+     not a pane. */
+  .rootfoot {
+    flex: none;
+    padding: 4px 8px 10px;
+  }
+
+  .rootfoot .mrow {
+    color: var(--text-dim);
+  }
+
+  .rootfoot .mrow:hover {
+    color: var(--text);
   }
 
   .empty {
@@ -843,8 +963,29 @@
     color: var(--text-dim);
   }
 
+  /* Glass sliders: the native uniform track is replaced by the inline
+     fill gradient (accent → hover wash); the thumb is an accent dot. */
   .appearance input[type="range"] {
-    accent-color: var(--accent);
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--hover);
+    cursor: pointer;
+  }
+
+  .appearance input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .appearance input[type="range"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
   }
 
   .theme {
@@ -861,15 +1002,65 @@
     background: var(--active);
   }
 
+  /* Glass checkbox (impeccable critique 2026-08-30): the OS-default square
+     was the only non-glass control in the app. The native input stays
+     focusable and drives everything; .box is its visual. */
   .toggle {
     flex-direction: row !important;
     align-items: center;
     gap: 8px;
+    cursor: pointer;
   }
 
   .toggle input {
-    accent-color: var(--accent);
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
     margin: 0;
+  }
+
+  .toggle .box {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--hover);
+    transition: background 160ms ease-out, border-color 160ms ease-out;
+  }
+
+  .toggle .box svg {
+    width: 10px;
+    height: 10px;
+    fill: none;
+    /* accent-text: the App's luminance-aware variable (white on dark
+       accents, dark on light ones) — a white check on a white accent
+       would vanish. */
+    stroke: var(--accent-text, #fff);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0;
+    transform: scale(0.7);
+    transition: opacity 160ms ease-out, transform 160ms ease-out;
+  }
+
+  .toggle input:checked + .box {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .toggle input:checked + .box svg {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .toggle input:focus-visible + .box {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .accent {

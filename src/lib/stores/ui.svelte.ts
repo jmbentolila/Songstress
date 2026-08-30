@@ -56,6 +56,8 @@ export const ui = $state({
   eqOpen: false,
   /** Playbar queue popover (session-only, Step 7a). */
   queueOpen: false,
+  /** "About Songstress" dialog — settings root footer row; session-only. */
+  aboutOpen: false,
 });
 
 export function resolvedTheme(): Theme {

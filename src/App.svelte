@@ -3,6 +3,7 @@
   import AlbumGrid from "./components/AlbumGrid.svelte";
   import PlayBar from "./components/PlayBar.svelte";
   import TagEditor from "./components/TagEditor.svelte";
+  import About from "./components/About.svelte";
   import MusicFolders from "./components/MusicFolders.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import { ui, resolvedTheme, initSettings, pushSetting } from "./lib/stores/ui.svelte";
@@ -105,6 +106,7 @@
     <PlayBar />
   </div>
   <TagEditor />
+  <About />
   <MusicFolders />
   <ContextMenu />
 </div>

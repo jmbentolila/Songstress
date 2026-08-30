@@ -333,9 +333,12 @@ Two families, split by role — every glyph in the chrome belongs to one:
   read as a third family beside the SVGs.
 
 ### Rows & Navigation
-- **Menu row (40px):** full-width, 8px radius, Glass hover wash, accent
-  wash on press; check column (14px, accent ✓) for state items; disabled
-  = dim, no wash.
+- **Menu row (one row language, 2026-08-30):** the sidebar has ONE row
+  language — artist rows AND menu rows share `--sidebar-row-size` height,
+  13px type, and the same label column. Trailing glyphs sit in the count
+  column: a 14px accent ✓ for checked items, a dim › chevron on root rows
+  that open a pane (full on hover). No left check column. Full-width, 8px
+  radius, Glass hover wash, accent wash on press; disabled = dim, no wash.
 - **Artist row (user height, default 36px):** name left (13px), count
   right (11px dim, tabular); active = `--active` wash + 600 weight.
 - **Track row (expanded panel):** number (tabular, 12px dim) · title
@@ -347,6 +350,13 @@ Two families, split by role — every glyph in the chrome belongs to one:
   root recedes -100% while a pane enters from the right; ✕ pops all
   levels as one conveyor (home in from left, root out left in parallel,
   pane out right) and teleports the root back to its entry side off-screen.
+  Arrow keys walk the focused layer's buttons (Tab still works). The
+  sidebar's tree is SIDEBAR-shaped, not a mirror of the Global Menu
+  (menu-bar shape): Appearance / Playback / Library + a dim "About
+  Songstress" footer row. View's theme item lives in Appearance; Playback
+  drops its transport rows (the PlayBar owns them); "Save imported music"
+  hides when nothing is staged. The About footer opens an in-glass dialog
+  (name, Tauri version, one-line description — no native dialogs).
 
 ### Cards / Containers
 - **Album tile:** square cover (10px radius, cover-mass shadow) + caption
@@ -364,9 +374,16 @@ Two families, split by role — every glyph in the chrome belongs to one:
 - **Search fields (sidebar 30px, titlebar-less era):** 8px radius, 1px
   Glass Line stroke, hover-wash fill, 14px leading icon, placeholder in
   dim; focus = accent stroke only.
-- **Sliders:** native range inputs, `accent-color: var(--accent)`; the
-  equalizer's vertical sliders are horizontal inputs rotated -90° in fixed
-  slots (WebKitGTK ignores `writing-mode` on ranges).
+- **Sliders:** native range inputs, appearance-none: 4px track (hover-wash
+  base with an inline accent fill gradient sized to the value) + 14px
+  accent-dot thumb; focus = accent ring. The equalizer's vertical sliders
+  are horizontal inputs rotated -90° in fixed slots (WebKitGTK ignores
+  `writing-mode` on ranges).
+- **Checkbox:** hidden native input (stays focusable) + 16px rounded-square
+  box (5px radius — deliberate, below the control tier for a 16px object):
+  hover-wash fill + Glass Line at rest, accent fill + check in
+  `--accent-text` (luminance-aware: white on dark accents, dark on light
+  ones) when checked; 160ms fill/check-in; focus = inset accent ring.
 - **Color picker:** hidden native input inside a conic-gradient swatch;
   preset swatches are 20px circles, selected = 2px Chalk outline.
 

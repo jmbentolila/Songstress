@@ -34,11 +34,12 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Step 7c — multi-library roots | ✅ 2026-08-26 |
 | Step 7b — packaging (RPM) | ✅ 2026-08-26 |
 | Step 8 — titlebar elimination (chrome into sidebar) | ✅ 2026-08-27 |
-| Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40; RPM rebuild pending) |
-| Expansion choreography + 20px-line reframe | ✅ 2026-08-29 (RPM rebuild pending) |
+| Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40) |
+| Expansion choreography + 20px-line reframe | ✅ 2026-08-29 |
 | Cross-row choreography REMOVED (collapse-then-expand) | ✅ 2026-08-30 |
 | Cross-row: parallel collapse + expand (travel drains) | ✅ 2026-08-30 (reimplemented + trace-verified) |
-| Motion audit: tokens + polish (improve-animations) | ✅ 2026-08-30 |
+| Motion audit: tokens + polish (impeccable) | ✅ 2026-08-30 |
+| Settings menu tree: sidebar-shaped + glass controls | ✅ 2026-08-30 (RPM 0.2.0-1 built 2026-08-30) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -1508,6 +1509,41 @@ are all correct (and user-verified — untouched). What landed:
   them once more.
 - **KWin DX multi-line WindowClasses** silently fails to match — keep one
   entry (see README/AGENTS).
+
+## Settings menu tree — sidebar-shaped redesign ✅ (2026-08-30, impeccable critique, user options C/A/A)
+
+Critique of the settings menu tree scored 25/40 (snapshot
+`.impeccable/critique/2026-08-30T21-44-56Z__src-components-sidebar-svelte.md`;
+degraded single-context run — no sub-agent tool in this harness). Core
+finding: the tree was the Rust global menu bar rendered verbatim
+(Playback/Library/View/Help + grafted Appearance) — View was a one-item
+pane duplicating Appearance's theme button, Help was a one-item pane of a
+NO-OP ("About Songstress" did nothing on either surface), and the root
+rows had no drill-down affordance. The sidebar now has its own tree
+(Global Menu / menu.rs untouched — it stays a menu bar):
+- **Root:** Appearance / Playback / Library with trailing › chevrons + a
+  dim **About Songstress footer row** at the bottom (a footer, not a nav
+  pane) opening the new in-glass **About dialog** (About.svelte, App-level
+  like TagEditor: name, version via `getVersion()` so it can't drift from
+  the RPM, one-line description; Esc/backdrop/✕ close; focus lands inside
+  on open; the sidebar's Escape handler yields to it via `ui.aboutOpen`).
+- **Playback pane:** drops its 6 transport rows (the PlayBar owns them) —
+  modes + EQ only. **Library pane:** "Save imported music" hides when
+  nothing is staged instead of standing as a dead row.
+- **ONE row language** (option A): menu rows join the artist-row rhythm
+  (`--sidebar-row-size` height, 13px, same label column); the left check
+  column is gone — ✓ and › are trailing glyphs in the count column, labels
+  align with the pane title. Arrow keys walk the focused layer's buttons
+  (menu convention; Tab unchanged; ranges keep native arrow behavior).
+- **Glass controls** (option A): the OS-default checkbox (the only
+  non-glass control in the app) is a hidden native input driving a 16px
+  rounded box — accent fill + check in luminance-aware `--accent-text`
+  (a white check on the user's white accent would vanish), 160ms;
+  sliders are appearance-none with an inline accent fill gradient sized
+  to the value + accent-dot thumb.
+- DESIGN.md updated (row language, tree shape, slider/checkbox
+  components); the detector's one advisory (checkbox 5px radius off the
+  rounded scale) is documented as deliberate there.
 
 ## Environment quick facts (for fresh sessions)
 
