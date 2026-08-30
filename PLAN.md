@@ -37,6 +37,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40; RPM rebuild pending) |
 | Expansion choreography + 20px-line reframe | ✅ 2026-08-29 (RPM rebuild pending) |
 | Cross-row choreography REMOVED (collapse-then-expand) | ✅ 2026-08-30 |
+| Cross-row: parallel collapse + expand (travel drains) | ✅ 2026-08-30 (reimplemented + trace-verified) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -104,6 +105,22 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
   The host token SURVIVES as a mount-identity mechanism: a cross-row
   flip re-keys the destination row so it mounts fresh instead of
   re-keying the outgoing instance there (teleport).)
+  FOLLOW-UP (same day, user requested): the two ALBUM animations run
+  IN PARALLEL — the outgoing panel becomes a ghost row at its own row
+  (fresh mount at the measured height — the seamless hand-off trick —
+  plain 280ms CSS close, no pin/prediction of any kind) while the host
+  flips to the destination at t=0 (token flip → fresh mount → grow).
+  Only the VIEW'S TRAVEL waits: a per-section glide queue drains when
+  the ghost list is empty (drainGlide), because the travel is the one
+  thing that conflicts with a close above the line — and a close above
+  the row never moves the row ON the line (its close plays BELOW that
+  row, the row's own panel slot), so the window is pin-free and
+  bob-free in both directions. Upward switches read as natural
+  accordion reflow (the new panel growing above pushes the old row down
+  while it closes); the glide then lands on an already-grown panel —
+  the smoothest glide of all the variants. The heavy pin/predict
+  machinery stayed removed: what came back is only measured spawn +
+  plain CSS close + a queue.
 
 ## Remaining work
 

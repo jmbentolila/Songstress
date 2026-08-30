@@ -25,6 +25,20 @@
     /** When set, only these track ids render (library song search);
      *  playback indices stay anchored to the FULL album track list. */
     visibleTrackIds = null,
+    /** Mount height in px. Hosts mount at 0 (grow in). A GHOST — the
+     *  outgoing panel of a cross-row switch — mounts at the measured
+     *  height of the instance it replaces, so its first paint is
+     *  identical (the seamless hand-off) and it then plays the plain
+     *  close. */
+    initialPx = 0,
+    /** Two-way: the panel drives it, the grid mirrors it onto the slot
+     *  element so the slot's spacing can sync with the height animation
+     *  (a fixed grid gap around a closed 0px panel would leave ~2× the
+     *  standard row gap below the row — the slot's margin cancels the
+     *  gap while closed and transitions with the SAME duration/curve as
+     *  the height, so the row below settles at the standard gap without
+     *  a jump at either end):  */
+    phase = $bindable("closed"),
   }: {
     album: Album;
     /** What this row should show — the section's expanded album when it
@@ -33,12 +47,17 @@
      *  of a cross-row switch and plays the plain collapse). */
     targetId: string | null;
     /** Called when a close finishes (or on a mount that is already
-     *  closed). The grid uses it to consume a pending cross-row open:
-     *  the collapse is done, so the destination can take over. */
+     *  closed). For ghosts the grid removes the ghost row and drains the
+     *  queued view travel; for hosts it's a safety drain. */
     onClosed?: () => void;
     /** When set, only these track ids render (library song search);
      *  playback indices stay anchored to the FULL album track list. */
     visibleTrackIds?: Set<string> | null;
+    /** Mount height in px (see above). Defaults to 0. */
+    initialPx?: number;
+    /** Spacing phase, see the prop docs above. Bind with
+     *  `bind:phase={...}` in the grid. */
+    phase?: "closed" | "open" | "closing";
   } = $props();
 
   function editAlbumTags(e: MouseEvent, albumId: string) {
@@ -152,18 +171,23 @@
   //
   // Rest states: closed = "0px", open settled = "auto" (tracks content
   // changes: the two-column threshold, missing-track alerts, resizes). The
-  // markup starts at 0px so a fresh mount never flashes open first.
+  // markup starts at initialPx (0 for hosts — a fresh mount never flashes
+  // open; the measured spawn height for ghosts — see below).
   //
   // The grid owns WHERE the panel row sits (the "host"). Cross-row
-  // switches are collapse-then-expand: the host stays at the outgoing
-  // album while it plays the plain collapse (its targetId turns null —
-  // the section is expanded elsewhere), and when the close finishes the
-  // grid flips the host to the destination (fresh mount, grow) and
-  // glides it to the 20px line. Every height move is a CSS transition
-  // with the duration set inline per phase, so a click mid-motion
-  // retargets the in-flight transition from its current value — nothing
-  // restarts (a mid-collapse click on the host album turns the close
-  // straight back into a grow).
+  // switches run the two ALBUM animations in parallel: at t=0 the host
+  // flips to the destination (token flip → fresh mount → grow) while the
+  // outgoing panel is re-mounted as a GHOST row at its own row — a fresh
+  // instance at the measured height (initialPx) that plays the plain
+  // 280ms CSS close. No pin, no prediction, no frame counting: a close
+  // never moves the row ON the line (it plays below that row, in the
+  // row's own panel slot), so the one thing that conflicts with a close
+  // above the line is the VIEW'S TRAVEL — and the grid defers it behind
+  // a per-section queue that drains when the ghost list is empty. Every
+  // height move is a CSS transition with the duration set inline per
+  // phase, so a click mid-motion retargets the in-flight transition from
+  // its current value — nothing restarts (a mid-collapse click on the
+  // host album turns the close straight back into a grow).
   //   open grow        0 -> H   360ms cubic-bezier(0.22,1,0.36,1)
   //   plain collapse   H -> 0   280ms, content visible; displayId survives
   //                      (per-section memory — the next open re-shows it);
@@ -182,7 +206,12 @@
   // at mount so $state sees a plain value, not a prop reference.
   // svelte-ignore state_referenced_locally
   const mountAlbumId = album.id;
+  // Captured at mount (a prop value, not a reactive binding): the spawn
+  // height is a birth-time fact — hosts 0, ghosts the measured px.
+  // svelte-ignore state_referenced_locally
+  const initInnerH = initialPx > 1 ? `${initialPx}px` : "0px";
   let displayId = $state(mountAlbumId);
+
   // Same-row switches fade the swapped-in content.
   let entering = $state(false);
   let innerEl = $state<HTMLElement>();
@@ -254,6 +283,9 @@
       if (targetId === null) return; // displayId is never null; TS guard
       raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => {
+          // Flip with the grow, not before: the slot's margin transition
+          // must start the same frame the height transition does.
+          phase = "open";
           grow(gen);
           if (entering) {
             enterRaf1 = requestAnimationFrame(() => {
@@ -277,11 +309,15 @@
       // onClosed can never fire after a retarget.
       entering = false;
       if (innerEl && innerEl.offsetHeight > 2) {
+        phase = "closing"; // the slot's margin collapse starts now too
         move(0, CLOSE_MS);
         closeTimer = setTimeout(() => {
-          if (gen === generation) onClosed?.();
+          if (gen !== generation) return;
+          phase = "closed";
+          onClosed?.();
         }, CLOSE_MS + 10);
       } else {
+        phase = "closed";
         onClosed?.();
       }
       return;
@@ -387,8 +423,8 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="expander">
-  <div class="inner" bind:this={innerEl} style:height="0px">
+<div class="expander" class:closed={phase === "closed"} class:closing={phase === "closing"}>
+  <div class="inner" bind:this={innerEl} style:height={initInnerH}>
     <div class="fade" class:entering>
       <section class="panel" bind:this={panelEl} style:background={gradient ?? undefined}>
         {#if displayAlbum.cover}
@@ -535,6 +571,18 @@
     margin-bottom: 4px;
     border-radius: var(--radius-panel);
     box-shadow: var(--shadow);
+    /* The 4px shadow room joins the animation (same clock as the height)
+     * so the row below the panel never jumps when the state settles. */
+    transition: margin-bottom 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .expander.closing {
+    margin-bottom: 0;
+    transition: margin-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .expander.closed {
+    margin-bottom: 0;
   }
 
   .inner {

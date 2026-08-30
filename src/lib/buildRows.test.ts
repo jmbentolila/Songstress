@@ -57,4 +57,36 @@ describe("buildRows", () => {
     expect(buildRows(albums, 0, null)).toHaveLength(5);
   });
 
+  describe("ghost rows (in-flight cross-row switch closes)", () => {
+    it("inserts a ghost row directly after the ghost album's row", () => {
+      const rows = buildRows(albums, 2, "e", ["a"]);
+      expect(rows.map((r) => r.kind)).toEqual(["albums", "ghost", "albums", "albums", "expanded"]);
+      expect(rows[1]).toEqual({ kind: "ghost", id: "a" });
+      expect(rows[4]).toEqual({ kind: "expanded", album: albums[4] });
+    });
+
+    it("keeps multiple ghosts, each after its own row", () => {
+      const rows = buildRows(albums, 2, "e", ["a", "c"]);
+      expect(rows.map((r) => r.kind)).toEqual([
+        "albums",
+        "ghost",
+        "albums",
+        "ghost",
+        "albums",
+        "expanded",
+      ]);
+      expect(rows[1]).toEqual({ kind: "ghost", id: "a" });
+      expect(rows[3]).toEqual({ kind: "ghost", id: "c" });
+    });
+
+    it("skips a ghost id not present in the filtered set", () => {
+      const rows = buildRows(albums, 2, "a", ["missing"]);
+      expect(rows.map((r) => r.kind)).toEqual(["albums", "expanded", "albums", "albums"]);
+    });
+
+    it("never double-inserts an album that is both host and ghost", () => {
+      const rows = buildRows(albums, 2, "a", ["a"]);
+      expect(rows.filter((r) => r.kind !== "albums").map((r) => r.kind)).toEqual(["expanded"]);
+    });
+  });
 });

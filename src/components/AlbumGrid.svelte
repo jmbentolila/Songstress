@@ -56,73 +56,185 @@
 
   // Per-section panel HOST: where the panel row physically sits (also the
   // collapse memory — the row persists at 0px so re-opens are instant).
-  // host === the store's expanded album, EXCEPT during a cross-row
-  // switch's collapse phase: the host stays at the outgoing album while
-  // it plays the plain collapse, and flips to the target when the close
-  // finishes (see pending below). Same-row switches flip the host in
-  // place (the instance persists, content swaps + fades).
+  // host === the store's expanded album at all times: a cross-row switch
+  // flips it at t=0 (the destination mounts fresh and grows) while the
+  // outgoing panel plays its close as a GHOST row at its own row. Same-
+  // row switches flip the host in place (the instance persists, content
+  // swaps + fades).
   let songHostId = $state<string | null>(null);
   let albumHostId = $state<string | null>(null);
 
-  // Cross-row switches are COLLAPSE-THEN-EXPAND, composed from the two
-  // plain animations — no bespoke choreography (the old parallel design
-  // ghosted the outgoing panel and pinned it closed under the glide; on
-  // downward switches that fight showed as motion in the 20px strip and
-  // was never fully tamed on this WebKitGTK — the strip above the row
-  // only ever moves when layout ABOVE the row animates while a
-  // one-paint-late scrollTop chases it, so any close-above-the-row
-  // design inherits the risk).
-  // The pending open survives the collapse: the host panel's onClosed
-  // consumes it (flip host + glide + grow). Any other intent replaces or
-  // clears it (each branch of toggleExpand sets it explicitly). Plain
-  // (non-reactive): written from event handlers and effects only.
-  let songPending: string | null = null;
-  let albumPending: string | null = null;
+  // Cross-row switches run the two ALBUM animations IN PARALLEL — no
+  // bespoke choreography, no pin, no prediction (the old parallel design
+  // pinned the outgoing ghost closed under the glide; on downward
+  // switches that fight showed as motion in the 20px strip and was never
+  // tamed — the strip above the row only ever moves when layout ABOVE
+  // the row animates while a one-paint-late scrollTop chases it). What
+  // came back is the minimal version:
+  //   * the outgoing panel becomes a GHOST row at its own row — a fresh
+  //     ExpandedPanel mount at the measured height (seamless hand-off)
+  //     playing the plain 280ms CSS close, nothing else;
+  //   * the host flips to the destination at t=0 (fresh mount + grow);
+  //   * only the VIEW'S TRAVEL waits: a per-section glide queue drains
+  //     when the ghost list is empty (drainGlide) — the travel is the one
+  //     thing that conflicts with a close above the line, and a close
+  //     above the row never moves the row ON the line (its close plays
+  //     BELOW that row), so once the ghosts are gone the window is
+  //     pin-free and bob-free in both directions.
+  // ghosts: album id → measured spawn height, per section. $state: the
+  // row model (buildRows) renders one ghost row per entry.
+  let songGhosts = $state<Record<string, number>>({});
+  let albumGhosts = $state<Record<string, number>>({});
+  // Spacing phase per panel instance, keyed by album id (see
+  // ExpandedPanel's `phase` prop). Host and ghost ids are always distinct
+  // within a section, so one map serves both. The grid mirrors the panel
+  // (which drives it via bind:phase) onto the slot element so the slot's
+  // margin can sync with the panel's height animation. Ghosts spawn
+  // "open" (they look exactly like the panel they replaced) and the
+  // panel flips them through closing → closed itself.
+  type PanelPhase = "closed" | "open" | "closing";
+  let songPanelPhase = $state<Record<string, PanelPhase>>({});
+  let albumPanelPhase = $state<Record<string, PanelPhase>>({});
+  // Queued view travel per section (target album id). Plain, non-
+  // reactive: written from event handlers/effects, consumed by drainGlide.
+  let songGlide: string | null = null;
+  let albumGlide: string | null = null;
 
   // The host row's component identity is a two-value token. A cross-row
-  // switch flips it when the host moves to the destination (phase 2),
-  // which makes the destination row a FRESH mount (with the old key, the
+  // switch flips it at t=0 when the host moves to the destination, which
+  // makes the destination row a FRESH mount (with the old key, the
   // outgoing instance would be re-keyed at the destination and teleport
   // there with the old content at the old height). Same-row switches
   // keep the token: the instance persists and swaps content in place —
-  // no remount, no height motion.
+  // no remount, no height motion. Ghost rows carry their own key
+  // (x-ghost-<id>), independent of the token.
   let songTok = $state<"a" | "b">("a");
   let albumTok = $state<"a" | "b">("a");
 
   // The list the albums-section panel currently renders in.
   let albumList = $derived(searchActive ? titleAlbums : visibleAlbums);
 
-  // If the host's row disappears from its section (search/artist change
-  // mid-collapse), the panel is unmounted and every later switch could
-  // deadlock — the host must follow the target itself (the box can't be
-  // open: its row is gone, so the move is invisible). The unmount can't
-  // fire onClosed, so a pending open is cleared with it (the target's row
-  // mounts open on its own when it (re)appears).
+  // A ghost whose row vanishes (search/artist change mid-close) unmounts
+  // WITHOUT firing onClosed — it must be removed from the ghost list or
+  // the queued view travel would never drain. (A vanished HOST row needs
+  // no handling: the host === the store, so the next switch measures
+  // nothing, spawns a zero-height ghost that drains immediately, and
+  // flips.)
   $effect(() => {
-    const host = albumHostId;
-    const target = ui.expandedAlbum.albums;
-    if (host && target && host !== target && !albumList.some((a) => a.id === host)) {
-      albumHostId = target;
-      albumPending = null;
+    const list = albumList;
+    for (const id of Object.keys(albumGhosts)) {
+      if (!list.some((a) => a.id === id)) {
+        delete albumGhosts[id];
+        delete albumPanelPhase[id];
+        void drainGlide("albums");
+      }
     }
   });
   $effect(() => {
-    const host = songHostId;
-    const target = ui.expandedAlbum.songs;
-    if (host && target && host !== target && !songAlbums.some((a) => a.id === host)) {
-      songHostId = target;
-      songPending = null;
+    const list = songAlbums;
+    for (const id of Object.keys(songGhosts)) {
+      if (!list.some((a) => a.id === id)) {
+        delete songGhosts[id];
+        delete songPanelPhase[id];
+        void drainGlide("songs");
+      }
     }
   });
 
   function setHost(section: "songs" | "albums", id: string | null) {
     if (section === "songs") songHostId = id;
     else albumHostId = id;
+    // Pre-seed the new host's spacing phase so its slot is styled from
+    // the first frame (it opens: the panel's effect confirms "open" when
+    // the grow starts).
+    if (id) {
+      if (section === "songs") songPanelPhase[id] = "open";
+      else albumPanelPhase[id] = "open";
+    }
   }
 
   function flipToken(section: "songs" | "albums") {
     if (section === "songs") songTok = songTok === "a" ? "b" : "a";
     else albumTok = albumTok === "a" ? "b" : "a";
+  }
+
+  function sectionKeyOf(section: "songs" | "albums"): string {
+    return section === "songs" ? "songs" : searchActive ? "albums" : "all";
+  }
+
+  // ── Ghosts + queued travel (the parallel cross-row switch) ──────────
+  // The live host panel's current height — read BEFORE the flip, while
+  // the outgoing row is still in the DOM. The ghost mounts at exactly
+  // this height, so the swap is invisible (seamless hand-off).
+  function measureHost(section: "songs" | "albums"): number {
+    const id = section === "songs" ? songHostId : albumHostId;
+    if (!id) return 0;
+    const slot = document.querySelector<HTMLElement>(
+      `.panel-slot[data-section="${sectionKeyOf(section)}"][data-album-id="${CSS.escape(id)}"]`,
+    );
+    return slot?.querySelector<HTMLElement>(".inner")?.offsetHeight ?? 0;
+  }
+
+  function spawnGhost(section: "songs" | "albums", id: string, h: number) {
+    if (section === "songs") {
+      songGhosts[id] = h;
+      songPanelPhase[id] = "open";
+    } else {
+      albumGhosts[id] = h;
+      albumPanelPhase[id] = "open";
+    }
+  }
+
+  function removeGhost(section: "songs" | "albums", id: string) {
+    if (section === "songs") {
+      delete songGhosts[id];
+      delete songPanelPhase[id];
+    } else {
+      delete albumGhosts[id];
+      delete albumPanelPhase[id];
+    }
+  }
+
+  const hasGhosts = (section: "songs" | "albums") =>
+    Object.keys(section === "songs" ? songGhosts : albumGhosts).length > 0;
+
+  const getGlide = (section: "songs" | "albums") =>
+    section === "songs" ? songGlide : albumGlide;
+  const setGlide = (section: "songs" | "albums", id: string | null) => {
+    if (section === "songs") songGlide = id;
+    else albumGlide = id;
+  };
+
+  /**
+   * Queue the view travel to an album's row. Fires immediately when no
+   * ghost is still closing in this section — otherwise it waits for
+   * drainGlide to be re-triggered (ghost onClosed / vanished-ghost
+   * effect). The travel is deliberately the ONLY deferred piece: it is
+   * the one thing that conflicts with a close above the line (writing
+   * scrollTop while layout above the row animates — one-paint-late on
+   * this WebKitGTK). Panels may grow and close freely; the glide just
+   * lands after the dust settles, on an already-grown panel.
+   */
+  function queueGlide(section: "songs" | "albums", id: string) {
+    setGlide(section, id);
+    void drainGlide(section);
+  }
+
+  async function drainGlide(section: "songs" | "albums") {
+    const target = getGlide(section);
+    if (!target) return;
+    if (hasGhosts(section)) return; // retried when the last ghost closes
+    await tick(); // the row list must have flushed before the tile is measured
+    // A newer intent may have replaced (or cleared) the target in the
+    // window — it always re-decides the queue, so a stale drain no-ops.
+    if (getGlide(section) !== target) return;
+    setGlide(section, null);
+    reframeTo(sectionKeyOf(section), target);
+  }
+
+  function onGhostClosed(section: "songs" | "albums", id: string) {
+    removeGhost(section, id);
+    void drainGlide(section);
   }
 
   // Row-model same-row check (no DOM measurement): buildRows slices the
@@ -151,16 +263,25 @@
   // height is established while the view is still moving, so there is
   // nothing left to re-target. The anchor only ever tracks rows whose
   // layout ABOVE them is stable: panels grow and close BELOW their row,
-  // so nothing animated moves the pinned row (any design that animates
-  // layout above the row fights this anchor's one-paint-late scrollTop on
-  // this WebKitGTK — that's why cross-row switches collapse-then-expand
-  // instead of closing the outgoing panel under the glide).
+  // so nothing animated moves the tracked row — and a cross-row switch's
+  // ghost close (which CAN sit above the destination) is finished before
+  // the anchor starts (the travel drains after the ghost list empties),
+  // so the anchor never shares a frame with a close above the row (that
+  // is the one-paint-late fight that killed the pinned-ghost design).
   //
   // Glides are click-triggered, so their distance is bounded by the
   // viewport (the clicked row is on screen): ease-out cubic, 240–380ms.
   // Wheel / keys / touch cancel (the user takes over; the height
   // animations finish on their own). Reduced motion disables the reframe
   // entirely — no viewport movement at all.
+  //
+  // Cross-row switches queue the travel (queueGlide) instead of starting
+  // it: the outgoing panel's ghost may still be closing ABOVE the
+  // destination, and a close above the row + a live anchor writing
+  // scrollTop is exactly the one-paint-late fight this anchor must never
+  // be in. drainGlide starts the glide once the ghost list is empty —
+  // layout above the target is settled, the distance is exact, and the
+  // glide lands on an already-grown panel.
   const LINE = 20; // .content padding-top (var(--gap))
   // Glide duration for a given distance — click-triggered, so bounded by
   // the viewport: ease-out cubic, 240–380ms.
@@ -174,29 +295,10 @@
     reframeCleanup = null;
   }
 
-  /**
-   * Consume a pending cross-row open: the outgoing panel just finished
-   * its collapse, so the destination can take over — flip the host (the
-   * token flip makes the destination a fresh mount), wait for the row
-   * list to flush, then glide the destination row to the line while the
-   * panel grows below it.
-   */
-  async function consumePending(section: "songs" | "albums") {
-    const p = section === "songs" ? songPending : albumPending;
-    if (!p) return;
-    if (section === "songs") songPending = null;
-    else albumPending = null;
-    flipToken(section);
-    setHost(section, p);
-    await tick(); // the row list must have flushed before the glide measures
-    // A newer intent may have taken over in the window (it always re-decides
-    // host + pending) — don't glide to a stale target.
-    if ((section === "songs" ? songHostId : albumHostId) !== p) return;
-    const sectionKey = section === "songs" ? "songs" : searchActive ? "albums" : "all";
-    reframeTo(sectionKey, p);
-  }
-
   function reframeTo(sectionKey: string, albumId: string): number {
+    // A fresh intent supersedes any in-flight glide (one scroller serves
+    // all sections — a double rAF loop would fight over scrollTop).
+    stopReframe();
     const scroller = document.querySelector<HTMLElement>(".content");
     const tile = document.querySelector<HTMLElement>(
       `button.tile[data-section="${sectionKey}"][data-album-id="${CSS.escape(albumId)}"]`,
@@ -242,9 +344,9 @@
 
   // Each section expands INDEPENDENTLY: the Songs section shows only the
   // matching tracks, the Albums section always the full album.
-  let rows = $derived(buildRows(visibleAlbums, cols, albumHostId));
-  let songRows = $derived(buildRows(songAlbums, cols, songHostId));
-  let titleRows = $derived(buildRows(titleAlbums, cols, albumHostId));
+  let rows = $derived(buildRows(visibleAlbums, cols, albumHostId, Object.keys(albumGhosts)));
+  let songRows = $derived(buildRows(songAlbums, cols, songHostId, Object.keys(songGhosts)));
+  let titleRows = $derived(buildRows(titleAlbums, cols, albumHostId, Object.keys(albumGhosts)));
 
   let sections = $derived(
     searchActive
@@ -269,10 +371,11 @@
     return (section === "songs" ? ui.expandedAlbum.songs : ui.expandedAlbum.albums) === id;
   }
 
-  // The host row's target: the section's expanded album — UNLESS the
-  // section is expanded elsewhere (a cross-row switch's collapse phase:
-  // the host still shows the outgoing album, so this instance's target is
-  // null = closed, and the panel plays the plain collapse).
+  // The host row's target: the section's expanded album when it is THIS
+  // album, else null (closed). With the parallel cross-row design the
+  // host always equals the store (the flip happens at t=0), so this is
+  // simply "am I the expanded one?" — the outgoing panel's close lives in
+  // the ghost row, never in a lagging host.
   function hostTarget(sectionKey: string, albumId: string): string | null {
     const t = sectionKey === "songs" ? ui.expandedAlbum.songs : ui.expandedAlbum.albums;
     return t === albumId ? t : null;
@@ -301,45 +404,45 @@
         extractArtColors(cover);
       }
     }
-    // Indices come from the row model; the host is where the box
-    // physically is (=== cur, except during a cross-row collapse phase —
-    // the host lags the store until the collapse finishes).
+    // The host is where the box physically is (=== cur: the host flips
+    // with the store in every branch below, in the same tick).
     const host = section === "songs" ? songHostId : albumHostId;
     const list = section === "songs" ? songAlbums : albumList;
-    const sectionKey = section === "songs" ? "songs" : searchActive ? "albums" : "all";
 
     // A fresh intent takes over first: any in-flight reframe stops.
     stopReframe();
 
     if (next !== null && cur !== null && cur !== id) {
       // Switch. Same row → the row doesn't move → flip now (in-place
-      // swap + fade), no reframe.
-      // Cross-row → COLLAPSE, THEN EXPAND: the host stays put while the
-      // outgoing panel plays the plain collapse; its onClosed consumes
-      // the pending open (flip host + glide + fresh grow). Every branch
-      // sets pending explicitly — a fresh intent always decides what the
-      // next open will be.
+      // swap + fade), no travel (any queued travel is superseded).
+      // Cross-row → the two album animations run IN PARALLEL: the
+      // outgoing panel becomes a ghost at its own row (measured height,
+      // plain close) while the host flips to the destination at t=0
+      // (fresh mount + grow). Only the travel is queued — it drains when
+      // the ghost list empties, so it never writes scrollTop while a
+      // close above the row is still animating.
       if (sameRowIn(list, host ?? "", id)) {
-        if (section === "songs") songPending = null;
-        else albumPending = null;
         setHost(section, id);
+        setGlide(section, null);
       } else {
-        if (section === "songs") songPending = id;
-        else albumPending = id;
+        const h = measureHost(section);
+        spawnGhost(section, cur, h);
+        flipToken(section);
+        setHost(section, id);
+        queueGlide(section, id);
       }
     } else if (next !== null) {
-      // Fresh open / open from closed: flip the host now (the slot move
-      // is absorbed by the live anchor); glide and grow run in parallel.
-      if (section === "songs") songPending = null;
-      else albumPending = null;
+      // Fresh open / open from closed: flip the host now; the glide is
+      // queued (drains immediately when no ghost is still closing, so in
+      // the common case glide and grow run in parallel — and if a
+      // previous close is still draining, the travel waits for it).
       setHost(section, id);
-      reframeTo(sectionKey, id);
+      queueGlide(section, id);
     } else {
-      // Collapse (or a mid-switch cancel): the host stays (per-section
-      // memory).
-      if (section === "songs") songPending = null;
-      else albumPending = null;
-      reframeTo(sectionKey, host ?? id);
+      // Collapse (or a mid-switch cancel): the host STAYS (per-section
+      // memory) and plays the plain close in place; the travel to it is
+      // queued the same way.
+      queueGlide(section, host ?? id);
     }
     ui.expandedAlbum[section] = next;
   }
@@ -361,7 +464,9 @@
         {#each section.rows as row (
           row.kind === "albums"
             ? `r-${row.items[0].id}`
-            : `x-${section.key}-${section.key === "songs" ? songTok : albumTok}`
+            : row.kind === "ghost"
+              ? `x-ghost-${row.id}`
+              : `x-${section.key}-${section.key === "songs" ? songTok : albumTok}`
         )}
           {#if row.kind === "albums"}
             <div class="grid-row" style:--cols={cols}>
@@ -394,14 +499,45 @@
                 </button>
               {/each}
             </div>
+          {:else if row.kind === "ghost"}
+            {@const ghostAlbum = library.albums.find((a) => a.id === row.id)}
+            {@const phaseMap = section.key === "songs" ? songPanelPhase : albumPanelPhase}
+            {#if ghostAlbum}
+              <!-- Ghost: the outgoing panel of an in-flight cross-row
+                   switch. Fresh mount at the measured height (seamless
+                   hand-off), plain close, nothing else. -->
+              <div
+                class="panel-slot"
+                class:closed={phaseMap[row.id] === "closed"}
+                class:closing={phaseMap[row.id] === "closing"}
+                data-section={section.key}
+                data-album-id={row.id}
+              >
+                <ExpandedPanel
+                  album={ghostAlbum}
+                  targetId={null}
+                  initialPx={section.key === "songs" ? songGhosts[row.id] ?? 0 : albumGhosts[row.id] ?? 0}
+                  bind:phase={phaseMap[row.id]}
+                  visibleTrackIds={section.key === "songs" ? matchingTrackIds(row.id) : null}
+                  onClosed={() => onGhostClosed(section.key === "songs" ? "songs" : "albums", row.id)}
+                />
+              </div>
+            {/if}
           {:else}
-            <div class="panel-slot" data-section={section.key} data-album-id={row.album.id}>
+            {@const phaseMap = section.key === "songs" ? songPanelPhase : albumPanelPhase}
+            <div
+              class="panel-slot"
+              class:closed={phaseMap[row.album.id] === "closed"}
+              class:closing={phaseMap[row.album.id] === "closing"}
+              data-section={section.key}
+              data-album-id={row.album.id}
+            >
               <ExpandedPanel
                 album={row.album}
                 targetId={hostTarget(section.key, row.album.id)}
+                bind:phase={phaseMap[row.album.id]}
                 visibleTrackIds={section.key === "songs" ? matchingTrackIds(row.album.id) : null}
-                onClosed={() =>
-                  consumePending(section.key === "songs" ? "songs" : "albums")}
+                onClosed={() => void drainGlide(section.key === "songs" ? "songs" : "albums")}
               />
             </div>
           {/if}
@@ -477,6 +613,29 @@
     display: grid;
     grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
     gap: 12px var(--gap);
+  }
+
+  /* The panel slot's top spacing is part of the panel's animation. The
+   * grid gap is fixed (it can't be opted out per item), so while the
+   * panel is closed the slot's margin cancels the gap above it and the
+   * rows on either side sit at the STANDARD 20px gap instead of 20 + 0 +
+   * 20. The transition runs the SAME duration/curve as the height move
+   * (360 open / 280 close — the panel flips the slot's class in the same
+   * frame the height transition starts), so the panel's top edge glides
+   * with the shrinking/growing box and the row below settles into the
+   * standard gap without a jump at either end. */
+  .panel-slot {
+    margin-top: 0;
+    transition: margin-top 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .panel-slot.closing {
+    margin-top: calc(-1 * var(--gap));
+    transition: margin-top 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .panel-slot.closed {
+    margin-top: calc(-1 * var(--gap));
   }
 
   .tile {
