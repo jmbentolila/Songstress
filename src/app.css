@@ -6,6 +6,11 @@
   --gap: 20px;
   --radius-panel: 12px;
   --radius-cover: 10px;
+  /* Motion tokens — extend these, don't hand-type curves per component.
+     --ease-out is the user-verified panel-choreography curve (frame
+     traces + the 20px-line decision in PLAN.md): do not "improve" it. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* Apple drawer (sidebar menu stack) */
 }
 
 html[data-theme="dark"] {

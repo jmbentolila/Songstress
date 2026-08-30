@@ -270,11 +270,13 @@
         onclick={toggleQueue}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <line x1="4" y1="6" x2="14" y2="6" />
-          <line x1="4" y1="12" x2="14" y2="12" />
-          <line x1="4" y1="18" x2="10" y2="18" />
-          <circle cx="16.5" cy="16.5" r="3" />
-          <line x1="19.5" y1="16.5" x2="19.5" y2="5" />
+          <!-- Sized to the same content span as the other mode glyphs
+               (was 15.5x14.5 in the 24 box vs 17-22x18-22 — read small). -->
+          <line x1="4" y1="4" x2="14" y2="4" />
+          <line x1="4" y1="11.5" x2="14" y2="11.5" />
+          <line x1="4" y1="19" x2="10" y2="19" />
+          <circle cx="16.5" cy="18" r="3.5" />
+          <line x1="20" y1="3.5" x2="20" y2="18" />
         </svg>
         {#if playback.queue.length > 0}
           <span class="badge count">{playback.queue.length}</span>
@@ -454,7 +456,9 @@
     padding: 0 18px;
     border-top: 1px solid var(--border);
     user-select: none;
-    transition: background 400ms ease;
+    /* The artwork-gradient swap is a state response, not a scene change:
+       inside the 300ms UI budget, strong ease-out. */
+    transition: background 280ms var(--ease-out);
   }
 
   .now {
@@ -693,7 +697,7 @@
   .eq-pop,
   .q-pop {
     transform-origin: 100% 100%;
-    animation: pop-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: pop-in 140ms var(--ease-out);
   }
 
   @keyframes pop-in {

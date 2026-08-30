@@ -198,7 +198,9 @@
   //                      (or grows a short beat if the new album is much
   //                      taller)
 
-  const CURVE = "cubic-bezier(0.22, 1, 0.36, 1)";
+  // Token (app.css): the user-verified panel-choreography curve. var()
+  // resolves fine in inline styles — .inner lives in the document.
+  const CURVE = "var(--ease-out)";
   const GROW_MS = 360;
   const CLOSE_MS = 280;
   // The content the box currently shows — deliberately NOT tracking
@@ -573,12 +575,12 @@
     box-shadow: var(--shadow);
     /* The 4px shadow room joins the animation (same clock as the height)
      * so the row below the panel never jumps when the state settles. */
-    transition: margin-bottom 360ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: margin-bottom 360ms var(--ease-out);
   }
 
   .expander.closing {
     margin-bottom: 0;
-    transition: margin-bottom 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: margin-bottom 280ms var(--ease-out);
   }
 
   .expander.closed {
@@ -594,7 +596,7 @@
   }
 
   .fade {
-    transition: opacity 0.16s ease-out;
+    transition: opacity 160ms ease-out;
   }
 
   .fade.entering {

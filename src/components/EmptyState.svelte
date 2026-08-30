@@ -24,7 +24,7 @@
     <h2>Building your library…</h2>
     {#if scanner.total > 0}
       <div class="bar">
-        <div class="fill" style:width={`${pct}%`}></div>
+        <div class="fill" style:transform="scaleX(${pct / 100})"></div>
       </div>
       <p class="dim">
         {scanner.phase === "artwork" ? "Extracting artwork" : "Scanning"} —
@@ -121,7 +121,12 @@
 
   .fill {
     height: 100%;
+    width: 100%;
     background: var(--accent);
-    transition: width 0.25s ease-out;
+    /* scaleX instead of width: compositor-only — progress ticks are
+       frequent and the bar shouldn't layout on every one. */
+    transform-origin: 0 50%;
+    transform: scaleX(0);
+    transition: transform 250ms var(--ease-out);
   }
 </style>

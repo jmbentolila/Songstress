@@ -38,6 +38,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Expansion choreography + 20px-line reframe | ✅ 2026-08-29 (RPM rebuild pending) |
 | Cross-row choreography REMOVED (collapse-then-expand) | ✅ 2026-08-30 |
 | Cross-row: parallel collapse + expand (travel drains) | ✅ 2026-08-30 (reimplemented + trace-verified) |
+| Motion audit: tokens + polish (improve-animations) | ✅ 2026-08-30 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -225,6 +226,19 @@ the upstream report.
 - Cosmetic meanwhile: artifact clears on any redraw over that area.
 - App-side fix impossible: the stale pixel is outside the moved window —
   only the compositor/effect can repaint it.
+
+### Up next (user-confirmed 2026-08-30, after the motion-audit fixes)
+
+- **Skeleton loaders for the grid + artist list during the first scan** —
+  the first-scan state is being reworked; the EmptyState progress bar
+  (now scaleX-driven) stays. Nothing in the motion-audit changes should
+  conflict (the audit's one additive suggestion — TagEditor modal
+  entrance — is parked with the modal work below on purpose).
+- **Modal work (later, user-owned)**: TagEditor + any future modals. The
+  audit noted the TagEditor mounts with zero entrance motion
+  (TagEditor.svelte:251 `{#if open}`) — a ~180ms scale(0.97)+fade from
+  center is the planned direction (transform+opacity only; center origin
+  is correct for a centered modal).
 
 ### Explicitly deferred
 
@@ -1394,6 +1408,34 @@ other work takes the queue.**
 
 ---
 
+## Motion audit — token consolidation + polish ✅ (2026-08-30, improve-animations skill)
+
+Full audit of the motion surface (8 categories). Verdict: **the core
+choreography is right** — no HIGH/MEDIUM feel-breaking findings; the
+360/280ms panel moves, the 240–380ms anchor glide, the gap-synced slot
+margins, the 320ms drawer stack and the instant high-frequency hovers
+are all correct (and user-verified — untouched). What landed:
+- **Motion tokens** (app.css `:root`): `--ease-out:
+  cubic-bezier(0.22, 1, 0.36, 1)` (the user-verified panel curve — now
+  referenced, not re-typed) and `--ease-drawer: cubic-bezier(0.32, 0.72,
+  0, 1)`. All 7 hand-typed curve sites replaced, incl. ExpandedPanel's
+  JS `CURVE` const (var() resolves fine in inline styles — verified by
+  frame trace). Duration spellings normalized to ms.
+- **PlayBar gradient fade** 400ms `ease` → 280ms var(--ease-out) (UI
+  budget is <300ms).
+- **EmptyState progress fill** animates `width` (layout) → full-width
+  element + `transform: scaleX(pct/100)` from the left edge, 250ms
+  var(--ease-out) — compositor-only per progress tick.
+- **Dead `translate` transition on .tile .cover** removed (the hover lift
+  it served went away in Step 0c).
+- **Finding #4 (pop-in keyframes on the EQ/queue popovers) is VOID —
+  not implemented**: both popovers `{#if}`-unmount on close, so a
+  re-open is a fresh element for keyframes AND transitions alike; the
+  keyframes-restart concern only applies to re-triggered mounted
+  elements. The 140ms pop-in (scale 0.98 from the shared edge with the
+  trigger) is correct as-is.
+- Parked with the modal work: TagEditor entrance (see *Up next*).
+
 ## Open threads / known issues
 
 - **WebKitGTK viewport glitch, VARIANT 2 (2026-08-29)**: webview surface
@@ -1480,5 +1522,11 @@ other work takes the queue.**
 - playerctl NOT installed — verify MPRIS via busctl/gdbus/qdbus-qt6.
 - grim NOT installed; screenshots via `spectacle -b -n -a -o <file>`
   (active window) / `-f` fullscreen; background captures for artifacts.
-- No click-injection tooling (no ydotool/wtype) — UI verification is
-  menu-driven over DBus + screenshots + unit tests.
+- UI verification loop: the DEV-ONLY devtools bridge (commit e3f127b) —
+  `node tools/devctl.mjs click|eval|sample|tail` drives the running webview
+  (tile clicks, page-scope eval, rAF frame traces) and reads its
+  console/errors via logs/devtools.log. No desktop input needed.
+  (The WebKit remote-inspector drop-in opens a port but the handshake
+  protocol was never identified — tools/inspect.mjs kept for the record.
+  Svelte scoped CSS silently drops cross-component :has() — use explicit
+  state for cross-component CSS hooks.)

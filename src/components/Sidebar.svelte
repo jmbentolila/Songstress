@@ -519,7 +519,7 @@
     display: flex;
     flex-direction: column;
     pointer-events: none;
-    transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 320ms var(--ease-drawer);
   }
 
   /* On-screen layers are interactive; off-screen ones aren't. (The home
@@ -899,7 +899,7 @@
     cursor: pointer;
     outline: 2px solid transparent;
     outline-offset: 2px;
-    transition: outline-color 0.12s ease;
+    transition: outline-color 120ms ease;
   }
 
   .swatch:hover {

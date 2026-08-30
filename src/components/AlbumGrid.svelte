@@ -626,12 +626,12 @@
    * standard gap without a jump at either end. */
   .panel-slot {
     margin-top: 0;
-    transition: margin-top 360ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: margin-top 360ms var(--ease-out);
   }
 
   .panel-slot.closing {
     margin-top: calc(-1 * var(--gap));
-    transition: margin-top 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: margin-top 280ms var(--ease-out);
   }
 
   .panel-slot.closed {
@@ -661,9 +661,9 @@
     outline: 2px solid transparent;
     outline-offset: 1px;
     position: relative;
-    transition:
-      outline-color 0.15s ease,
-      translate 0.15s ease;
+    /* outline-color only: the hover-lift (translate) was removed in
+       Step 0c — the transition property went with it. */
+    transition: outline-color 150ms ease;
   }
 
   .cover img {
