@@ -1,8 +1,12 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { songstressDevTools } from "./vite.songstress.devtools.js";
 
 export default defineConfig({
-  plugins: [svelte()],
+  // songstressDevTools: DEV-ONLY bridge for the agent visual loop
+  // (sink at POST /__songstress, commands at /__songstress_cmd, log at
+  // logs/devtools.log). No-op outside dev. See tools/devctl.mjs.
+  plugins: [svelte(), songstressDevTools()],
   clearScreen: false,
   server: {
     port: 1420,
