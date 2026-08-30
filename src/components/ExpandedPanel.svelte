@@ -21,20 +21,21 @@
   let {
     album,
     targetId,
-    onSwitchCloseDone,
+    onClosed,
     /** When set, only these track ids render (library song search);
      *  playback indices stay anchored to the FULL album track list. */
     visibleTrackIds = null,
   }: {
     album: Album;
-    /** What the section has expanded — the content this panel should
-     *  show; null = closed. May differ from album.id for one snappy
-     *  switch-close: album.id is where the panel row physically sits
-     *  (the grid relocates it when the close hands back). */
+    /** What this row should show — the section's expanded album when it
+     *  is THIS album; null = closed (nothing is expanded, or the section
+     *  is expanded on another row: this instance is the outgoing panel
+     *  of a cross-row switch and plays the plain collapse). */
     targetId: string | null;
-    /** Called when the snappy switch-close finishes: the grid moves the
-     *  (0px) panel row to the target album. */
-    onSwitchCloseDone: () => void;
+    /** Called when a close finishes (or on a mount that is already
+     *  closed). The grid uses it to consume a pending cross-row open:
+     *  the collapse is done, so the destination can take over. */
+    onClosed?: () => void;
     /** When set, only these track ids render (library song search);
      *  playback indices stay anchored to the FULL album track list. */
     visibleTrackIds?: Set<string> | null;
@@ -143,7 +144,7 @@
     else if (track.missing) void removeTrack(id);
   }
 
-    // --- panel expand / collapse / switch — one state machine ---------------
+  // --- panel expand / collapse / switch — one state machine ---------------
   // Height is driven in px on .inner. Never grid-template-rows: WebKitGTK
   // animates the track and the content clip on different clocks, which read
   // as a lagging shell/gap. Px height is the sanctioned accordion case where
@@ -153,35 +154,36 @@
   // changes: the two-column threshold, missing-track alerts, resizes). The
   // markup starts at 0px so a fresh mount never flashes open first.
   //
-  // The grid owns WHERE the panel row sits (the "host"): on a cross-row
-  // switch it keeps the row here for one snappy close, then relocates the
-  // (0px) row to the target — a move that occupies no space, so there is
-  // no visible cut. Every height move is a CSS transition with the
-  // duration set inline per phase, so a click mid-motion retargets the
-  // in-flight transition from its current value — nothing restarts.
+  // The grid owns WHERE the panel row sits (the "host"). Cross-row
+  // switches are collapse-then-expand: the host stays at the outgoing
+  // album while it plays the plain collapse (its targetId turns null —
+  // the section is expanded elsewhere), and when the close finishes the
+  // grid flips the host to the destination (fresh mount, grow) and
+  // glides it to the 20px line. Every height move is a CSS transition
+  // with the duration set inline per phase, so a click mid-motion
+  // retargets the in-flight transition from its current value — nothing
+  // restarts (a mid-collapse click on the host album turns the close
+  // straight back into a grow).
   //   open grow        0 -> H   360ms cubic-bezier(0.22,1,0.36,1)
   //   plain collapse   H -> 0   280ms, content visible; displayId survives
-  //                      (per-section memory — the next open re-shows it)
-  //   switch-close     H -> 0   120ms (the travel version of a collapse;
-  //                      hands back to the grid at 0)
-  //   switch open      0 -> H   360ms + the ~160ms content fade — the
-  //                      fresh-open story at the destination
-  //   same-row switch  no height motion: the host flips in place, content
-  //                      swaps + fades; a size mismatch settles (or grows
-  //                      a short beat if the new album is much taller)
+  //                      (per-section memory — the next open re-shows it);
+  //                      onClosed fires at 0 (the grid consumes a
+  //                      pending cross-row open, if any)
+  //   same-row switch  no height motion: the instance persists in place,
+  //                      content swaps + fades; a size mismatch settles
+  //                      (or grows a short beat if the new album is much
+  //                      taller)
 
   const CURVE = "cubic-bezier(0.22, 1, 0.36, 1)";
   const GROW_MS = 360;
   const CLOSE_MS = 280;
-  const SWITCH_CLOSE_MS = 120;
-  let initInnerH = "0px";
   // The content the box currently shows — deliberately NOT tracking
-  // album (the host): it lags by one switch-close and only the state
-  // machine below changes it. Captured at mount so $state sees a plain
-  // value, not a prop reference.
+  // album (the host): only the state machine below changes it. Captured
+  // at mount so $state sees a plain value, not a prop reference.
   // svelte-ignore state_referenced_locally
   const mountAlbumId = album.id;
   let displayId = $state(mountAlbumId);
+  // Same-row switches fade the swapped-in content.
   let entering = $state(false);
   let innerEl = $state<HTMLElement>();
   let panelEl = $state<HTMLElement>();
@@ -243,11 +245,12 @@
 
     if (displayId === targetId) {
       // The content IS what the section has expanded: the box should be
-      // open. Covers fresh mounts, re-opens, the post-switch flip (grow
-      // from 0 + fade) and same-row flips (a settled box settles to the
-      // new size — or grows a short beat if the new album is much
-      // taller). A mid-close click on the host album retargets the close
-      // into this grow — the box simply turns back open.
+      // open. Covers fresh mounts, re-opens, cross-row switch
+      // destinations (grow from 0 + fade, in parallel with the glide) and
+      // same-row flips (a settled box settles to the new size — or grows
+      // a short beat if the new album is much taller). A mid-close click
+      // on the host album retargets the close into this grow — the box
+      // simply turns back open.
       if (targetId === null) return; // displayId is never null; TS guard
       raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => {
@@ -265,35 +268,30 @@
     }
 
     if (targetId === null) {
-      // Plain collapse: close with the content visible; displayId stays
-      // (per-section memory — the next open re-shows this album).
+      // Plain collapse — including the outgoing panel of a cross-row
+      // switch (targetId is null while the section is expanded
+      // elsewhere): close with the content visible; displayId stays
+      // (per-section memory). onClosed fires at 0 — the grid consumes a
+      // pending cross-row open, if any. A generation bump (a mid-close
+      // click retargeting the close into a grow) cancels both timers, so
+      // onClosed can never fire after a retarget.
       entering = false;
-      if (innerEl && innerEl.offsetHeight > 2) move(0, CLOSE_MS);
-      return;
-    }
-
-    if (album.id === displayId) {
-      // A switch is pending but the host row hasn't moved yet (the grid
-      // keeps it here for one snappy close): close showing the OLD
-      // content, then hand back — the grid relocates the (0px) row, the
-      // album prop becomes the target, and the effect re-enters on the
-      // open branch, which grows the new album.
-      if ((innerEl?.offsetHeight ?? 0) < 2) {
-        // Defensive: already at 0 (the grid normally flips the host
-        // itself when the box is closed) — hand back at once.
-        onSwitchCloseDone();
-        return;
+      if (innerEl && innerEl.offsetHeight > 2) {
+        move(0, CLOSE_MS);
+        closeTimer = setTimeout(() => {
+          if (gen === generation) onClosed?.();
+        }, CLOSE_MS + 10);
+      } else {
+        onClosed?.();
       }
-      move(0, SWITCH_CLOSE_MS);
-      closeTimer = setTimeout(() => {
-        if (gen === generation) onSwitchCloseDone();
-      }, SWITCH_CLOSE_MS + 10);
       return;
     }
 
-    // album.id !== displayId: the grid has relocated the host (album.id
-    // === targetId) — swap the content while the box is at 0; the state
-    // change re-enters the effect on the open branch, which grows.
+    // album.id !== displayId: a persistent instance whose host row was
+    // re-pointed (same-row switch: the shared row now hosts the new
+    // album; or defensive relocation when the section's list changed):
+    // swap the content; the state change re-enters the effect on the
+    // open branch, which grows.
     displayId = album.id;
     selectedId = null;
     entering = true;
@@ -316,10 +314,11 @@
   const PANEL_ALPHA: Record<string, number> = { dark: 0.36, light: 0.3 };
 
   $effect(() => {
-    // Tracked so the gradient regenerates on theme flips too.
+    // Tracked so the gradient regenerates on theme flips too. Runs for
+    // ghosts too (targetId null): the ghost must show the outgoing
+    // panel's art-derived background while it closes.
     const theme = resolvedTheme();
     const id = displayId;
-    if (targetId === null) return;
     const album = library.albums.find((a) => a.id === id);
     const alpha = PANEL_ALPHA[theme] ?? 0.5;
 
@@ -389,7 +388,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="expander">
-  <div class="inner" bind:this={innerEl} style:height={initInnerH}>
+  <div class="inner" bind:this={innerEl} style:height="0px">
     <div class="fade" class:entering>
       <section class="panel" bind:this={panelEl} style:background={gradient ?? undefined}>
         {#if displayAlbum.cover}

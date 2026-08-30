@@ -36,6 +36,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Step 8 — titlebar elimination (chrome into sidebar) | ✅ 2026-08-27 |
 | Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40; RPM rebuild pending) |
 | Expansion choreography + 20px-line reframe | ✅ 2026-08-29 (RPM rebuild pending) |
+| Cross-row choreography REMOVED (collapse-then-expand) | ✅ 2026-08-30 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -74,10 +75,35 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
   padding) under the window top — or as low as the final layout's bottom
   edge allows. Travel is an ANCHOR (live row position, eased glide +
   hold), never a predicted tween (prediction produced a visible
-  stall→snap on cross-row switches). Cross-row order: travel → close →
-  expand (the close/relocation play under the pinned row). No
-  app-initiated auto-scroll on expand (reveal removed); wheel/keys/touch
-  cancel the glide; reduced motion disables the reframe entirely.
+  stall→snap on cross-row switches). No app-initiated auto-scroll on
+  expand (reveal removed); wheel/keys/touch cancel the glide; reduced
+  motion disables the reframe entirely.
+- **Cross-row switches are COLLAPSE-THEN-EXPAND (user decision,
+  2026-08-30 — choreography removed)**: the host stays at the outgoing
+  album while it plays the plain 280ms collapse; `onClosed` consumes the
+  pending open (token flip → fresh mount at the destination, glide,
+  360ms grow). Only the plain animations exist now: fresh expand,
+  collapse, same-row in-place swap + 160ms fade. WHY the bespoke
+  cross-row design went away: the parallel version (outgoing panel
+  ghosted at its row, closed under the 20px-line pin while the
+  destination grew) is only clean when the close plays BELOW the pinned
+  row — scrollTop only tracks layout ABOVE the row, so an upward
+  switch's close costs the pin nothing, but a downward switch's close
+  moves layout above the row while the anchor writes a scrollTop that
+  this WebKitGTK applies one PAINT late. That combination was never
+  fully tameable: instrumented traces (per-frame row position, ghost
+  height, scrollTop before/after) showed the pin holding the row at
+  20±1px while the user still reported motion in the 20px strip and a
+  final rest above the line — a measurement/observation gap no amount
+  of prediction closed (tried: catch-up anchor, next-paint prediction,
+  frame-count-domain close with exact per-paint shrink, predicted
+  drop-off, composite-position probe). Lesson: never animate layout
+  ABOVE the pinned row on this target; sequence instead.
+  (Removed machinery: ghost rows, two-value tokens for close hand-off,
+  grid-driven/frame-count close, predictive pin, `lib/ease.ts`.
+  The host token SURVIVES as a mount-identity mechanism: a cross-row
+  flip re-keys the destination row so it mounts fresh instead of
+  re-keying the outgoing instance there (teleport).)
 
 ## Remaining work
 
@@ -1301,17 +1327,23 @@ AlbumGrid.svelte, ExpandedPanel.svelte.
   `move()` pins `auto`→px before every transition (a transition cannot
   interpolate from `auto` — an unpinned shrink jumps to 0 instead of
   animating), `settleToAuto()` drops the inline height in one no-jank
-  reflow, `grow()` measures the natural height. Constants: grow 360 / 
-  collapse 280 / switch-close 120ms, `cubic-bezier(0.22,1,0.36,1)`.
+  reflow, `grow()` measures the natural height. Constants: grow 360 /
+  collapse 280ms, same-row swap = 160ms content fade, no height
+  motion. `cubic-bezier(0.22,1,0.36,1)` throughout.
 - **Host-relocation architecture** (grid): the grid owns WHERE the panel
   row lives (`songHostId` / `albumHostId`), the panel owns what it shows
-  (`album` prop = host row, `targetId` prop = the store). Same-row
-  switch = host flips now, in-place content swap + fade. Cross-row =
-  host lags for one 120ms close at the old row, `onSwitchCloseDone()`
-  moves the 0px row (invisible), new album grows at the destination.
-  A safety effect re-anchors a stale host (its row vanished from a
-  search/artist change mid-close) to the pending target — without it
-  every later switch deadlocks.
+  (`album` prop = host row, `targetId` prop = the store's expanded album
+  WHEN IT IS THIS ALBUM, else null = this instance closes). Same-row
+  switch = host flips now, in-place content swap + fade (instance
+  persists — the row key's two-value token does NOT flip). Cross-row
+  switch = collapse-then-expand (see decisions log 2026-08-30): host
+  lags the store through the outgoing panel's plain collapse, and its
+  `onClosed` consumes the pending open — token flip (fresh mount at the
+  destination), host flip, `await tick()` (row list flushed before the
+  glide measures), glide + grow. A safety effect re-anchors a stale host
+  (its row vanished from a search/artist change mid-collapse) to the
+  store's target and clears the pending open (the unmount can't fire
+  onClosed) — without it every later switch deadlocks.
 - **reveal() auto-scroll: removed** — no app-initiated viewport movement
   in the expansion machinery; replaced by the reframe below.
 - **The 20px-line reframe** (user-designed invariant — see decisions
@@ -1323,19 +1355,21 @@ AlbumGrid.svelte, ExpandedPanel.svelte.
   position is from the desired one (ease-out cubic glide to the line,
   240–380ms — viewport-bounded, since only on-screen rows are clickable —
   then a hold). The live read makes it immune to mid-flight layout
-  change: on a cross-row switch the held close (released when the glide
-  lands) and the invisible relocation play under the PINNED row, so the
-  row's motion is one continuous glide, then still. The first iteration
-  aimed a predicted tween at the final layout and produced a visible
-  stall→snap (the row physically can't reach the final position while
-  the old slot is still open) — that's why the anchor exists. Cancellation:
-  wheel / touch / keys take the view over (height animations finish on
-  their own); reduced motion disables the reframe entirely (zero viewport
-  movement — the stricter a11y reading); ≤4px deltas don't travel.
+  change: the panel grows BELOW the pinned row while the glide runs, so
+  the row's motion is one continuous glide, then still. The first
+  iteration aimed a predicted tween at the final layout and produced a
+  visible stall→snap (the row physically can't reach the final position
+  while the old slot is still open) — that's why the anchor exists. The
+  anchor contract: it only ever tracks rows whose layout ABOVE them is
+  stable (panels grow and close below their row); anything that animates
+  layout above the row fights its one-paint-late scrollTop on this
+  WebKitGTK (the reason cross-row switches collapse-then-expand — see
+  decisions log 2026-08-30). Cancellation: wheel / touch / keys take the
+  view over (height animations finish on their own); reduced motion
+  disables the reframe entirely (zero viewport movement — the stricter
+  a11y reading); ≤4px deltas don't travel.
   Verified via instrumented traces (Vite middleware sink →
-  /tmp/songstress-diag.log, auto-click driver, all stripped): glide
-  frames 405→21, close phase pinned at 20 before every paint, relocation
-  compensated in one frame, collapse at delta 0 = no travel.
+  /tmp/songstress-diag.log, all instrumentation stripped after use).
 Gates: check 0/0, vitest 53, build OK.
 
 **Remaining: RPM rebuild (user installs) — deliberate pause 2026-08-29,

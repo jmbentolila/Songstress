@@ -56,4 +56,5 @@ describe("buildRows", () => {
     expect(buildRows([], 3, null)).toEqual([]);
     expect(buildRows(albums, 0, null)).toHaveLength(5);
   });
+
 });
