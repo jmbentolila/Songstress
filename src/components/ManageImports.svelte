@@ -17,6 +17,7 @@
     imports,
     markAllImports,
     markImport,
+    refreshImportPlan,
     toggleImportTracks,
   } from "../lib/stores/imports.svelte";
   import {
@@ -46,13 +47,26 @@
   const progress = $derived(
     imports.total > 0 ? Math.min(1, (imports.done + inner) / imports.total) : inner,
   );
+  // A file imported while this window is open — from the pane behind it, the
+  // Global Menu, anywhere — has no reason to be invisible here, and a mark made
+  // before it landed would otherwise apply to an album nobody has seen. So the
+  // plan is re-read whenever a scan finishes with this window up.
+  let wasScanning = false;
+  $effect(() => {
+    const running = scanner.running;
+    if (wasScanning && !running && imports.open) void refreshImportPlan();
+    wasScanning = running;
+  });
+
   // What Apply is about to do, said in the order the buttons above it are
   // marked in. "2 decisions marked" would describe the UI; this describes the
   // files.
   const footLine = $derived(
-    imports.applying
+    imports.waiting
+      ? "Waiting for the scan to finish…"
+      : imports.applying
       ? `${imports.active}…`
-      : sum.decided === 0
+        : sum.decided === 0
         ? "Mark an album to apply"
         : sum.save === 0
           ? `${plural(sum.discard, "album")} to discard`
@@ -90,6 +104,17 @@
       document.querySelector<HTMLElement>("[data-imports-door]")?.focus({ preventScroll: true });
     }
     wasOpen = open;
+  });
+
+  // The window fetches for itself when it is up with nothing in hand: the store
+  // fills the plan on open, and a module reload that cleared the plan without
+  // closing the window would otherwise leave it claiming nothing is waiting.
+  let fetched = false;
+  $effect(() => {
+    if (imports.open && !fetched) {
+      fetched = true;
+      void refreshImportPlan();
+    }
   });
 
   // Focus the first decision when the window opens, so the keyboard does not
@@ -163,6 +188,13 @@
 
                     <div class="mi-dest" title={a.destination.folder}>
                       <span class="mi-rule">{dest.lead}</span>
+                      <!-- The two claims are different kinds of statement (what will
+                           happen / where), and 6px of gap did not say that. A middle
+                           dot, the same separator the meta line and the footer
+                           summary already use. Hidden from assistive tech: it is
+                           punctuation for the eye, and a screen reader has the two
+                           spans in their own order. -->
+                      <span class="mi-sep" aria-hidden="true">·</span>
                       <span class="mi-path">{dest.path}</span>
                     </div>
 
@@ -409,6 +441,12 @@
   .mi-rule {
     flex: none;
     font-style: italic;
+  }
+
+  /* Quieter than both sides: a joint, not a third statement. */
+  .mi-sep {
+    flex: none;
+    opacity: 0.5;
   }
 
   .mi-path {

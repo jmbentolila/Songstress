@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { applyOrder, type Decision, type StagedAlbum } from "../importPlan";
-import { discardImports, saveImports } from "./scanner.svelte";
+import { discardImports, saveImports, scanner } from "./scanner.svelte";
 
 /**
  * State behind the "Manage imported music" modal.
@@ -26,6 +26,8 @@ export const imports = $state({
   /** Set from the state after each op, not from a thrown error: the truth about
    *  a save is whether the album is still staged, not whether the command threw. */
   failed: [] as string[],
+  /** Apply is pausing for a scan it did not start (see `waitForIdle`). */
+  waiting: false,
 });
 
 export async function refreshImportPlan(): Promise<void> {
@@ -83,6 +85,22 @@ export function toggleImportTracks(albumId: string): void {
 }
 
 /**
+ * The verbs this loop calls refuse to run while a scan is in flight — so a save
+ * issued during the scan that follows the import that made this pile would be
+ * dropped without a word. Wait for it, and say so; give up rather than hang.
+ */
+async function waitForIdle(): Promise<boolean> {
+  if (!scanner.running) return true;
+  imports.waiting = true;
+  const deadline = Date.now() + 60_000;
+  while (scanner.running && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  imports.waiting = false;
+  return !scanner.running;
+}
+
+/**
  * Perform the marked decisions, one album at a time, in the order the modal
  * shows them. Sequential on purpose: each verb ends with a library scan, and
  * running them concurrently would have two scans rewriting the same dump. After
@@ -99,6 +117,12 @@ export async function applyImportDecisions(): Promise<void> {
   imports.done = 0;
   for (const op of ops) {
     imports.active = op.label;
+    if (!(await waitForIdle())) {
+      // The shared verbs refuse to run during a scan, and a refusal that is
+      // invisible is worse than a delay that is said out loud.
+      imports.failed.push(op.label);
+      continue;
+    }
     // The shared verbs own the scan state and the progress events; they report
     // failure by leaving the album staged, which is what the check below reads.
     if (op.decision === "save") await saveImports(op.albumId);
@@ -108,6 +132,7 @@ export async function applyImportDecisions(): Promise<void> {
     imports.done++;
   }
   imports.active = "";
+  imports.waiting = false;
   imports.applying = false;
   // Everything staged is decided and gone: the door it was opened from is about
   // to disappear from the pane, so the window goes with it.
