@@ -160,9 +160,9 @@ pub fn build() -> Vec<Menu> {
                     !s.scanning,
                     None,
                 ),
-                item("library.rescan-full", "Full Rescan (rebuild)", !s.scanning, None),
-                item("library.add-files", "Add music files…", !s.scanning, None),
-                item("library.add-folder", "Add music folder…", !s.scanning, None),
+                item("library.rescan-full", "Full rescan (all files)", !s.scanning, None),
+                item("library.add-files", "Import music files…", !s.scanning, None),
+                item("library.add-folder", "Import music folder…", !s.scanning, None),
                 item(
                     "library.save-imports",
                     "Save imported music",

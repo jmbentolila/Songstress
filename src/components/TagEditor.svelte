@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { library } from "../lib/stores/library.svelte";
   import { ui } from "../lib/stores/ui.svelte";
+  import SurfaceClose from "./SurfaceClose.svelte";
   import { rescan } from "../lib/stores/scanner.svelte";
 
   /** File-level tag surface mirrored from the Rust TrackTags (serde names). */
@@ -250,12 +251,12 @@
 
 {#if ui.tagEditor.open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="te-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && cancel()}>
+  <div class="te-backdrop scrim" role="presentation" onclick={(e) => e.target === e.currentTarget && cancel()}>
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="te glass" bind:this={panelEl} role="dialog" aria-modal="true" aria-label={heading}>
       <header class="te-head">
+        <SurfaceClose label="Close" onclick={cancel} />
         <h2>{heading}</h2>
-        <button class="te-close" aria-label="Close" onclick={cancel}>✕</button>
       </header>
 
       {#if loading}
@@ -306,15 +307,6 @@
 {/if}
 
 <style>
-  .te-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 150;
-    display: grid;
-    place-items: center;
-    background: rgba(0, 0, 0, 0.35);
-  }
-
   .te {
     width: min(620px, calc(100vw - 80px));
     max-height: calc(100vh - 120px);
@@ -346,22 +338,7 @@
     text-overflow: ellipsis;
   }
 
-  .te-close {
-    width: 24px;
-    height: 24px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-
-  .te-close:hover {
-    background: var(--hover);
-    color: var(--text);
-  }
-
-  .te-body {
+      .te-body {
     overflow-y: auto;
     padding: 12px 2px;
   }

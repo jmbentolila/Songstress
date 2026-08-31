@@ -4,6 +4,7 @@ import type { Album, Artist, Track } from "../types";
 import { albums as fakeAlbums, artistOf as fakeArtistOf, artists as fakeArtists, tracksOf as fakeTracksOf } from "../fakeLibrary";
 import { sortKey } from "../sort";
 import { isTauri } from "../window";
+import { pushSetting, ui } from "./ui.svelte";
 
 /**
  * Live mode is the default inside Tauri; `VITE_LIB=fake` opts out (and the
@@ -35,6 +36,8 @@ class LibraryStore {
   scanning = $state(false);
   artists = $state<Artist[]>(LIVE_LIBRARY ? [] : fakeArtists);
   albums = $state<Album[]>(LIVE_LIBRARY ? [] : byYear(fakeAlbums));
+  /** Denominator for the Library pane's status footer. */
+  trackCount = $state(0);
   #byAlbum = new Map<string, Track[]>();
 
   constructor() {
@@ -42,6 +45,10 @@ class LibraryStore {
       void this.load();
       void listen("scan-finished", () => {
         this.scanning = false;
+        // "scanned 14:02" in the Library footer — persisted, so the answer
+        // survives a restart instead of being session-fresh every launch.
+        ui.lastScan = Date.now();
+        pushSetting("lastScan", ui.lastScan);
         void this.load();
       });
       void listen("scan-progress", (e) => {
@@ -61,6 +68,7 @@ class LibraryStore {
       const dump = await invoke<LibraryDump>("get_library");
       this.artists = dump.artists;
       this.albums = byYear(dump.albums);
+      this.trackCount = dump.tracks.length;
       this.#byAlbum = new Map<string, Track[]>();
       for (const t of dump.tracks) {
         const list = this.#byAlbum.get(t.albumId);

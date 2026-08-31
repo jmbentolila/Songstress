@@ -31,6 +31,9 @@ export const ui = $state({
   menuOpen: false,
   menuDetail: null as string | null,
   activeArtistId: "all" as string,
+  /** 4th stack layer (the accent picker), pushed from a pane. Session-only,
+   *  like menuDetail; null = no sub layer open. */
+  menuSub: null as string | null,
   /** Single library search (session-only): filters the sidebar artist list
    *  AND switches the grid to Songs/Albums match sections when non-empty. */
   search: "",
@@ -43,6 +46,9 @@ export const ui = $state({
   },
   /** Library roots (Step 7c) — musicDirs, hydrated from the DB settings. */
   musicFolders: [] as string[],
+  /** Epoch ms of the last completed scan (DB-backed settings) — the Library
+   *  pane footer answers "when was this built?" instead of staying silent. */
+  lastScan: null as number | null,
   /** "Music folders…" modal (Step 7c); session-only. */
   musicFoldersOpen: false,
   /** Tag editor modal (Step 1): exactly one of albumId/trackId is set. */
@@ -58,7 +64,17 @@ export const ui = $state({
   queueOpen: false,
   /** "About Songstress" dialog — settings root footer row; session-only. */
   aboutOpen: false,
+  /** Return address for the modal: whoever opened it, captured at open time. */
+  aboutOpener: null as HTMLElement | null,
 });
+
+// Opening a modal records where focus came from, so dismissal can put it back.
+// Recorded here rather than read on unmount: by then the dialog's own focus trap
+// has already moved activeElement inside, so the trigger is no longer findable.
+export function openAbout(from: HTMLElement | null = null) {
+  ui.aboutOpener = from ?? (document.activeElement as HTMLElement | null);
+  ui.aboutOpen = true;
+}
 
 export function resolvedTheme(): Theme {
   return ui.theme === "system" ? prefersDark() : ui.theme;
@@ -120,6 +136,7 @@ export async function initSettings() {
     // musicDirs is the migrated multi-root list (setup writes it from the
     // legacy musicDir on first launch); parse falls back to [] when absent.
     ui.musicFolders = parse<string[]>("musicDirs", ui.musicFolders);
+    ui.lastScan = parse<number | null>("lastScan", ui.lastScan);
   } catch {
     // No backend (browser dev) — localStorage keeps working.
   }

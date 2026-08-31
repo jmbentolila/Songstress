@@ -8,6 +8,7 @@
   import ContextMenu from "./components/ContextMenu.svelte";
   import { ui, resolvedTheme, initSettings, pushSetting } from "./lib/stores/ui.svelte";
   import { accentVariants } from "./lib/accent";
+  import { decoVars } from "./lib/stores/decoration.svelte";
   import { initMenu, pushMenuState } from "./lib/stores/menu.svelte";
   import { startViewportGuard } from "./lib/viewportGuard";
   import { initScanner, importMusic, scanner } from "./lib/stores/scanner.svelte";
@@ -43,6 +44,13 @@
         void importMusic(event.payload.paths);
       }
     });
+  });
+
+  // The KWin button palette on <html>: the titlebar dots and every surface's
+  // close dot read --tb-* from here, so one source (the user's decoration) drives
+  // the whole family.
+  $effect(() => {
+    for (const [k, v] of decoVars()) document.documentElement.style.setProperty(k, v);
   });
 
   $effect(() => {
@@ -117,8 +125,15 @@
     inset: 0;
     display: flex;
     flex-direction: column;
-    border-radius: 14px;
+    border-radius: var(--radius-window);
     overflow: hidden;
+    /* Structural guarantee for every overlay: paint containment makes .app the
+       containing block for position:fixed descendants, so they are clipped to
+       the window's rounded shape instead of escaping it (a bare overflow:hidden
+       does NOT clip fixed descendants — their containing block is the viewport).
+       Without this, any future full-window overlay can paint square corners over
+       the transparent ones again. */
+    contain: paint;
   }
 
   .stage {

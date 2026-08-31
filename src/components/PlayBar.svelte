@@ -12,12 +12,13 @@
     albumSkip,
   } from "../lib/stores/playback.svelte";
   import { library } from "../lib/stores/library.svelte";
+  import Toggle from "./Toggle.svelte";
+  import SurfaceClose from "./SurfaceClose.svelte";
   import { ui, resolvedTheme } from "../lib/stores/ui.svelte";
   import {
     setEqEnabled,
     setEqPreamp,
     setEqBand,
-    applyEqPreset,
     queueRemove,
     queueJump,
     queueClear,
@@ -25,7 +26,6 @@
   import { artGradientContrast } from "../lib/gradient";
   import {
     EQ_BANDS,
-    EQ_PRESETS,
     EQ_MAX_DB,
     fmtDb,
     fmtHz,
@@ -77,9 +77,38 @@
     ui.eqOpen = !ui.eqOpen;
     if (ui.eqOpen) ui.queueOpen = false;
   }
+
+  // The popover's escape hatch: everything the equalizer owns that is NOT the
+  // curve lives in the sidebar's Playback pane, and the EQ button is where the
+  // user already was — so the popover offers the way there instead of
+  // duplicating the controls poorly. Focus handoff matches the stack's own
+  // (preventScroll: `.stack` is a scroll port and the layer is still sliding).
+  function openPlaybackSettings() {
+    ui.eqOpen = false;
+    ui.menuSub = null;
+    ui.menuOpen = true;
+    ui.menuDetail = "playback";
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(".layer.detail .backchev")
+        ?.focus({ preventScroll: true }),
+    );
+  }
   function toggleQueue() {
     ui.queueOpen = !ui.queueOpen;
     if (ui.queueOpen) ui.eqOpen = false;
+  }
+
+  // Dismissal returns focus to the button that opened the surface, so Tab
+  // continues from where the user was instead of restarting at <body>. No
+  // preventScroll needed (the playbar is never scrolled) but it costs nothing.
+  function closeEqPop() {
+    ui.eqOpen = false;
+    eqBtn?.focus({ preventScroll: true });
+  }
+  function closeQueuePop() {
+    ui.queueOpen = false;
+    qBtn?.focus({ preventScroll: true });
   }
 
   // Step 8c: standard popover dismissal — outside click + Escape, the same
@@ -317,32 +346,30 @@
 
   {#if ui.eqOpen}
     <div class="eq-pop glass" bind:this={eqEl} role="dialog" aria-label="Equalizer">
+      <!-- Trimmed (2026-08-31): the Playback pane owns enable + preset, so the
+           popover shows the preset NAME read-only and hands the rest over. Its
+           native checkbox and <select> were the last two widgets outside the
+           design system — the select's open menu is the toolkit's own chrome,
+           the same objection AGENTS.md records for GTK file choosers. What stays
+           is the popover's unique value: shaping the curve while something
+           plays, from the button that is already under the cursor. -->
       <header>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            checked={playback.eq.enabled}
-            onchange={(e) => setEqEnabled(e.currentTarget.checked)}
-          />
-          <span>Equalizer</span>
-        </label>
-        <select
-          value={playback.eq.preset ?? ""}
-          onchange={(e) => applyEqPreset(e.currentTarget.value || null)}
-          aria-label="Preset"
-        >
-          {#if !playback.eq.preset}
-            <option value="">Custom</option>
-          {/if}
-          {#each EQ_PRESETS as p (p.name)}
-            <option value={p.name}>{p.name}</option>
-          {/each}
-        </select>
-        <button class="close" aria-label="Close" onclick={() => (ui.eqOpen = false)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18 M6 6 l12 12"/></svg>
+        <SurfaceClose label="Close equalizer" onclick={closeEqPop} />
+        <button class="route" onclick={openPlaybackSettings}>
+          <span>Playback settings</span>
+          <svg viewBox="0 0 10 14" aria-hidden="true">
+            <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
       </header>
-      <div class="bands">
+      <!-- Three bands, top to bottom: chrome (dot + route), the curve — the one
+           thing this surface does that the pane doesn't — and ownership (is it
+           on, which preset). The row sits at the BASE, inverting the Playback
+           pane's gate-above ordering: a form is read top-down, an instrument
+           surface keeps its master at the base. Deliberate, see DESIGN.md.
+           When off, the curve sleeps and the checkbox row stays full contrast —
+           dimming the gate would hide the only way out. -->
+      <div class="bands" class:asleep={!playback.eq.enabled}>
         <label class="band preamp">
           <span class="db">{fmtDb(playback.eq.preampDb)}</span>
           <span class="slot">
@@ -381,11 +408,21 @@
           </label>
         {/each}
       </div>
+      <footer class="own">
+        <Toggle
+          small
+          checked={playback.eq.enabled}
+          label="Equalizer"
+          onchange={setEqEnabled}
+        />
+        <span class="preset">{playback.eq.preset ?? "Custom"}</span>
+      </footer>
     </div>
   {/if}
   {#if ui.queueOpen}
     <div class="q-pop glass" bind:this={qEl} role="dialog" aria-label="Queue">
       <header>
+        <SurfaceClose label="Close queue" onclick={closeQueuePop} />
         <span class="q-title">Queue</span>
         {#if playback.queue.length}
           <span class="q-count">{playback.queue.length}</span>
@@ -398,9 +435,6 @@
             Clear
           </button>
         {/if}
-        <button class="close" aria-label="Close" onclick={() => (ui.queueOpen = false)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18 M6 6 l12 12"/></svg>
-        </button>
       </header>
       {#if queueRows.length === 0 && upNextRows.length === 0}
         <p class="q-empty">Nothing queued. Right-click a track → “Play next” or “Add to queue”.</p>
@@ -728,51 +762,81 @@
     gap: 12px;
   }
 
-  .eq-pop .toggle {
+  .eq-pop header {
+    justify-content: space-between;
+  }
+
+  /* Route out of the popover: same action tier as the panes' footer rows (0.82
+     of --text, neutral hover wash, accent ring), because leaving a surface is a
+     real action, not decoration. */
+  .eq-pop .route {
     display: flex;
     align-items: center;
-    gap: 7px;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--text);
-    cursor: pointer;
-  }
-
-  .eq-pop select {
-    /* Step 8c: 6px was the only off-ladder radius in the popovers — 8px is
-     * the control rung (DESIGN.md radii ladder). */
-    font-size: 12px;
-    color: var(--text);
-    background: var(--hover);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 2px 4px;
-  }
-
-  .eq-pop .close {
-    margin-left: auto;
+    gap: 6px;
     border: none;
+    border-radius: 8px;
     background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0 2px;
-  }
-
-  /* Utility-family stroked X replaces the old font × (a third family in
-   * an SVG bar). 14px keeps the old footprint. */
-  .eq-pop .close svg,
-  .q-pop .close svg,
-  .q-x svg {
-    width: 14px;
-    height: 14px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-  }
-
-  .eq-pop .close:hover {
     color: var(--text);
+    opacity: 0.82;
+    font-size: 12.5px;
+    cursor: pointer;
+    padding: 4px 6px;
+    margin: -4px -6px -4px 0;
+  }
+
+  .eq-pop .route svg {
+    width: 10px;
+    height: 14px;
+    color: var(--text-dim);
+  }
+
+  .eq-pop .route:hover {
+    background: var(--hover);
+    opacity: 1;
+  }
+
+  .eq-pop .route:active {
+    background: var(--active);
+  }
+
+  .eq-pop .route:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    opacity: 1;
+  }
+
+  /* Asleep, not disabled: the curve stays editable while the equalizer is off
+     (shape it first, then switch it on), so only the readouts and the tracks
+     dim — the band labels and the ownership row keep their contrast. */
+  .bands.asleep .db,
+  .bands.asleep .slot {
+    opacity: 0.45;
+  }
+
+  .bands .db,
+  .bands .slot {
+    transition: opacity 200ms ease-out;
+  }
+
+  /* Ownership, at the base: what is on, and which curve you are editing.
+     Inert by design — the route lives in the header now, so this row must not
+     look clickable. */
+  .eq-pop .own {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: -2px -2px -4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    cursor: default;
+  }
+
+  /* Read-only, Micro tier: it names what you are editing (and says "Custom"
+     when the curve diverged) without pretending to be a picker. */
+  .eq-pop .preset {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
   }
 
   .bands {
@@ -870,6 +934,9 @@
   }
 
   .q-clear {
+    /* Far edge, opposite the close dot: destructive action as far from
+      * dismissal as this header gets. */
+    margin-left: auto;
     border: none;
     background: transparent;
     color: var(--text-dim);
@@ -889,20 +956,7 @@
     background: var(--active);
   }
 
-  .q-pop .close {
-    margin-left: auto;
-    border: none;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0 2px;
-  }
-
-  .q-pop .close:hover {
-    color: var(--text);
-  }
-
-  .q-empty {
+    .q-empty {
     font-size: 11.5px;
     color: var(--text-dim);
     margin: 2px 0 4px;

@@ -60,6 +60,25 @@ public/covers/            album art for the fake library (real folder.jpg files)
   `bind:clientWidth`, dropped component CSS, phantom layouts. Non-atomic writes to
   watched files (sed/python rewrite of app.css) make it worse. Fix = cold restart:
   `systemctl --user restart songstress-dev`. Don't debug phantoms before restarting.
+- **A COLD start can also drop component CSS — and a reload will not fix it.**
+  The webview can request `X.svelte?svelte&type=style&lang.css` before the plugin
+  has compiled its parent; the plugin has no metadata for that id, Vite falls
+  through to the static-file handler (which ignores the query) and the "CSS" is
+  served as the component's RAW SOURCE, so the style tag never injects. Result:
+  the shell renders layout-less (full-width grid, playbar stacked vertically)
+  while components requested a moment later are fine — it reads as "only one
+  pane broke". Diagnose: `curl -s 'localhost:1420/src/App.svelte?svelte&type=style&lang.css' | head -c 200`
+  — raw `<script>` means uncached. Fix: `server.warmup.clientFiles` (added to
+  vite.config.js); `touch`ing the file is the manual version. `location.reload()`
+  does NOTHING here — the id stays uncached, so don't waste a restart cycle on it.
+- **`overflow: hidden` is still a scroll port.** Programmatic `.focus()` on an
+  element inside a layer that is `translateX(100%)` SCROLLS the clipper
+  (`.stack.scrollLeft` → ~202) and nothing ever scrolls it back: every layer
+  shifts sideways at once, so pane titles print over each other and the deeper
+  layer's controls leak into view. The 4-layer stack therefore uses
+  `overflow: clip` AND `focus({ preventScroll: true })` (`focusFirst`) — the
+  layer is animating into place anyway, so it never needs the scroll. If the
+  settings panes ever look "printed twice", read `.stack.scrollLeft` first.
 - **Component CSS can be emitted unscoped.** TitleBar once emitted a global sheet,
   leaking `.title { text-align: center }` into every component. (TitleBar was
   deleted in Step 8 — its `tb-*` traffic lights now live in Sidebar; the
@@ -135,13 +154,52 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **Cover decode is expensive** (some art is 3000px). Panel art uses
   `decoding="async"`; `AlbumGrid.toggleExpand` pre-decodes via `img.decode()`.
 
+## Svelte 5 gotchas learned the hard way
+
+- **A class forwarded into a child component is unscoped.** `<SurfaceClose
+  class="ab-close" />` puts the class on an element compiled in another file, so
+  the parent's scoped rule `.ab-close { … }` is reported as *unused* and does
+  nothing. Use `:global(.ab-close)` — and give it one more class of specificity
+  (`:global(.ab .ab-close)`) when the child sets the same property, because the
+  child's stylesheet loads later and an equal-specificity tie goes to it.
+- **Child effects run before parent effects.** Never capture `document.activeElement`
+  in a parent `$effect` to remember "who opened this" — by then the child's
+  autofocus has already moved focus inside. Record the trigger at open time
+  (`openAbout(e.currentTarget)`), and read it back on unmount.
+
+## UI work: impeccable + apple-design are the default tools
+
+Any UI tweak goes through the **impeccable** skill (run its `context.mjs`
+setup once per session — it loads PRODUCT.md + DESIGN.md as the brief; then
+the one playbook for the command at hand: critique / polish / animate /
+harden / new-work…) and **apple-design** for the motion + material rules
+( respond on pointer-down; animate from the presentation value; enter and
+exit along the same path; springs over fixed-duration tweens where a gesture
+can interrupt; size-specific tracking; translucency conveys hierarchy).
+
+Two overrides, because this repo is older and more constrained than the
+skills' defaults:
+- **DESIGN.md's tuned values win** (two-tier glass 0.8/0.7, panel gradient
+  0.36/0.30, one accent, the motion tokens `--ease-out` / `--ease-drawer`,
+  the No-Lift Rule). Where apple-design says `backdrop-filter` for in-window
+  frost, we clip + cast light instead — see the WebKitGTK gotcha above.
+- The immersive verification loop is the devtools bridge (`tools/devctl.mjs`)
+  + spectacle, not a headless browser; prefer critique/audit snapshots under
+  `.impeccable/critique/` over open-ended screenshot loops.
+
 ## Verification before saying done
 
 1. `npm run check` → 0 errors
 2. `npm test` → all green
 3. `cargo test --lib` (in src-tauri) → all green
 4. `npm run build` → succeeds
-5. Visual pass if UI touched (raise window, screenshot, actually look)
+5. Visual pass if UI touched (raise window, screenshot, actually look).
+   RAISE IT FOR REAL: WebKit stops repainting the Songstress window while it is
+   unfocused, so `spectacle` hands back a frame from BEFORE your last action and
+   you will debug a UI bug that does not exist. Activate first
+   (`qdbus-qt6 org.kde.KWin /WindowsRunner org.kde.krunner1.Run "$ID" activate`),
+   then screenshot — and when a screenshot contradicts a DOM probe, trust the
+   probe and re-shoot.
 6. Update PLAN.md (status table + implementation log)
 
 ## Versioning at commit time

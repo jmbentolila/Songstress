@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { ui, cycleTheme, resolvedTheme } from "../lib/stores/ui.svelte";
+  import { ui, resolvedTheme, openAbout } from "../lib/stores/ui.svelte";
   import { library } from "../lib/stores/library.svelte";
-  import { ACCENT_PRESETS } from "../lib/accent";
+  import { ACCENT_PRESETS, accentVariants, hexToHsl } from "../lib/accent";
   import { menu, activateMenuItem } from "../lib/stores/menu.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
   import { fold } from "../lib/search";
@@ -10,7 +10,26 @@
     windowMinimize,
     windowToggleMaximize,
   } from "../lib/window";
-  import { decoState, loadDecoration } from "../lib/stores/decoration.svelte";
+  import { decoState, decoVars, loadDecoration } from "../lib/stores/decoration.svelte";
+  import Toggle from "./Toggle.svelte";
+  import {
+    playback,
+    applyEqPreset,
+    setEqPreamp,
+    setEqBand,
+    setEqEnabled,
+    setShuffleStage,
+    setShuffleOn,
+    setRepeatStage,
+    setRepeatOn,
+  } from "../lib/stores/playback.svelte";
+  import {
+    EQ_BANDS,
+    EQ_PRESETS,
+    EQ_MAX_DB,
+    fmtDb,
+    fmtHz,
+  } from "../lib/eq";
 
   loadDecoration();
 
@@ -21,9 +40,31 @@
   // Real panes are the Rust-owned model (menu.svelte); "appearance" is
   // frontend-only (the old gear-popover settings).
   const APPEARANCE = "appearance";
+  const PLAYBACK = "playback";
+
+  // Stage labels for the Playback pane's reveals. "off" is deliberately NOT a
+  // segment: the group's checkbox owns Off, so the segmented control only ever
+  // shows the modes you can actually be in (2-up repeat, 3-up shuffle) and the
+  // two controls can never disagree about the state.
+  const REPEAT_MODES: { id: "album" | "track"; label: string }[] = [
+    { id: "album", label: "Album" },
+    { id: "track", label: "Track" },
+  ];
+  const SHUFFLE_MODES: { id: "album" | "artist" | "all"; label: string }[] = [
+    { id: "album", label: "Album" },
+    { id: "artist", label: "Artist" },
+    { id: "all", label: "All" },
+  ];
+  const THEME_IDS = ["system", "light", "dark"];
+  const REPEAT_IDS = REPEAT_MODES.map((m) => m.id);
+  const SHUFFLE_IDS = SHUFFLE_MODES.map((m) => m.id);
 
   let inMenu = $derived(ui.menuOpen);
   let atDetail = $derived(ui.menuDetail !== null);
+  // 4th layer (quieter pass): the accent picker is a once-a-year decision,
+  // so it no longer shares the Appearance pane's first screen — this row
+  // pushes it one level deeper, same drawer language.
+  let atSub = $derived(ui.menuSub !== null);
   let detailMenu = $derived(
     atDetail ? menu.menus.find((m) => m.id === ui.menuDetail) ?? null : null,
   );
@@ -52,7 +93,7 @@
   ]);
 
   let detailItems = $derived.by(() => {
-    if (!atDetail || ui.menuDetail === APPEARANCE) return [];
+    if (!atDetail || ui.menuDetail === APPEARANCE || ui.menuDetail === PLAYBACK) return [];
     return (detailMenu?.items ?? []).filter(
       (i) =>
         !PLAYBACK_TRANSPORT.has(i.id) &&
@@ -65,15 +106,60 @@
     ui.menuDetail === APPEARANCE ? "Appearance" : (detailMenu?.label ?? "Settings"),
   );
 
+  // Focus handoff (audit pass B): pushing a layer used to leave focus on the
+  // row that triggered it — inside a layer that is now aria-hidden/inert, so
+  // the ring vanished and Tab walked the covered rows before reaching one
+  // visible control. Every layer change moves focus to the incoming layer's
+  // back affordance (or its first row), which is where the a11y tree now starts.
+  function focusFirst(sel: string) {
+    // preventScroll is load-bearing, not politeness: `.stack` is a scroll
+    // port (overflow hidden still scrolls programmatically), and the incoming
+    // layer sits at translateX(+100%) when we focus into it — its back button
+    // is therefore OFF to the right, and focusing it SCROLLED the stack to
+    // scrollLeft ~202. That scroll is permanent (nothing scrolls it back) and
+    // shifts every layer left at once: titles printed over each other,
+    // chevrons clipped, the sub layer's swatches showing through the root
+    // pane. The layer is animating into place anyway, so it needs no scroll.
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>(sel)?.focus({ preventScroll: true }),
+    );
+  }
   function openDetail(id: string) {
+    ui.menuSub = null;
     ui.menuDetail = id;
+    focusFirst(".layer.detail .backchev");
+  }
+  function openSub(id: string) {
+    ui.menuSub = id;
+    focusFirst(".layer.sub .backchev");
   }
   function back() {
-    ui.menuDetail = null;
+    if (ui.menuSub) {
+      ui.menuSub = null;
+      focusFirst(".layer.detail .backchev");
+    } else {
+      ui.menuDetail = null;
+      focusFirst(".layer.root .scroll .mrow");
+    }
   }
   function closeSettings() {
+    if (ui.menuSub) teleportDetail();
+    ui.menuSub = null;
     ui.menuDetail = null;
     ui.menuOpen = false;
+    focusFirst(".gear");
+  }
+  // A receded detail layer sits fully off-screen LEFT; on a full pop it would
+  // otherwise sweep the whole sidebar width on its way back to its +100%
+  // entry slot (it paints over the root layer). Same one-frame transition
+  // suppression the root layer uses — both ends are off-screen, so the
+  // teleport is invisible.
+  let detailNoAnim = $state(false);
+  function teleportDetail() {
+    detailNoAnim = true;
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => (detailNoAnim = false)),
+    );
   }
   // Full-pop close choreography: root exits LEFT, parallel to home
   // arriving at the same speed (no crossing, no 2× sweep, no centered
@@ -86,7 +172,11 @@
     if (!ui.menuOpen) {
       ui.menuOpen = true;
       ui.menuDetail = null;
+      ui.menuSub = null;
+      focusFirst(".layer.root .scroll .mrow");
     } else {
+      if (ui.menuSub) teleportDetail();
+      ui.menuSub = null;
       ui.menuOpen = false;
       if (ui.menuDetail) {
         clearTimeout(closeTimer);
@@ -105,11 +195,138 @@
   // The native color input needs a concrete value; presets leave it alone.
   let customHex = $state(ui.accentColor ?? "#ff6ec7");
 
+  // --- pane footers + the Appearance reset -------------------------------
+  // Each detail layer gets one dim footer row: an action where a real reset
+  // exists, a status line where it doesn't. The Appearance pane is where you
+  // can get stuck (theme/accent are one-way picks), so it gets the undo.
+  function resetAppearance() {
+    ui.tileSize = 180;
+    ui.sidebarRowSize = 36;
+    ui.theme = "system";
+    ui.accentColor = null;
+    ui.playbarGradient = false; // the pane's other visible control; reset means reset
+  }
+  // Footer resets the pane's THREE subjects, not just the equalizer — a button
+  // under Repeat/Shuffle/Equalizer that only touched the third one lied about
+  // its scope (user decision, 2026-08-31).
+  function resetPlayback() {
+    setRepeatOn(false);
+    setShuffleOn(false);
+    setEqEnabled(false);
+    applyEqPreset("Flat");
+    setEqPreamp(0);
+  }
+  let libStats = $derived(
+    `${library.albums.length} albums · ${library.trackCount} tracks`,
+  );
+  // "never scanned" would be a lie on a library built before this readout
+  // existed — the time clause only appears once a scan happened in anger.
+  let libLine = $derived(
+    scanner.running
+      ? `${libStats} · scanning…`
+      : ui.lastScan === null
+        ? libStats
+        : `${libStats} · scanned ${new Date(ui.lastScan).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}`,
+  );
+  // Theme modes, in the order the segmented control shows them. "system" is
+  // the shipped default and was unreachable once touched: the old button
+  // cycled dark|light, which resolves system to a fixed value.
+  // System first: reading left to right, the leftmost segment reads as the
+  // default/entry option, and following the OS is exactly the default for a
+  // music app on a desktop with a day/night schedule. Light | Dark then run in
+  // the same order the `theme` setting has always been listed in (user choice,
+  // 2026-08-31). Index order is also the radiogroup's arrow/Home/End order.
+  const THEMES: { id: "light" | "dark" | "system"; label: string }[] = [
+    { id: "system", label: "System" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark" },
+  ];
+
+  // Summary chip on the Accent row: the picker itself lives one level deeper.
+  let accentName = $derived(
+    ui.accentColor === null
+      ? "Stock purple"
+      : (ACCENT_PRESETS.find((p) => p.hex === ui.accentColor)?.name ??
+        ui.accentColor),
+  );
+
+  // --- polish: say what you actually get ----------------------------------
+  // accentVariants() clamps accent lightness per theme (accent.ts CLAMP), so
+  // the Black preset renders LIGHT GREY in the dark theme — a black dot that
+  // lies about its result. Swatches keep the raw color (Black and White must
+  // stay tellable apart) and gain a ring in the color they actually produce,
+  // but only where the two differ enough to matter.
+  let themeNow = $derived(resolvedTheme());
+  function clampColor(hex: string | null): string | undefined {
+    if (!hex) return undefined;
+    const derived = accentVariants(hex, themeNow).accent;
+    const l0 = hexToHsl(hex)[2];
+    const l1 = hexToHsl(derived)[2];
+    return Math.abs(l1 - l0) > 0.12 ? derived : undefined;
+  }
+  function swatchRing(hex: string | null, selected: boolean): string | undefined {
+    const c = clampColor(hex);
+    // A selected dot already wears a 2px ring (its outline). Adding the clamp
+    // ring outside it drew two near-identical concentric rings — read as a
+    // rendering glitch, and it made the SELECTED dot look disabled. The
+    // tooltip carries the promise while a clamped preset is selected.
+    if (!c || selected) return undefined;
+    return `0 0 0 2px ${c}`;
+  }
+  function clampHint(hex: string | null, name: string): string {
+    const ring = clampColor(hex);
+    if (!ring) return name;
+    return `${name} — renders ${ring} in ${themeNow} theme`;
+  }
+  // The custom swatch shows the picked color (the rainbow is a permanent
+  // placeholder for a choice already made); a conic corner keeps it readable
+  // as the picker rather than as a twelfth preset.
+  let hasCustom = $derived(
+    ui.accentColor !== null && !ACCENT_PRESETS.some((p) => p.hex === ui.accentColor),
+  );
+  let chipColor = $derived(
+    ui.accentColor === null
+      ? undefined
+      : accentVariants(ui.accentColor, themeNow).accent,
+  );
+
   // Slider filled track: the native range paints one uniform track, so the
   // accent fill is a background gradient sized to the current value.
   function fill(v: number, min: number, max: number) {
     const pct = ((v - min) / (max - min)) * 100;
     return `linear-gradient(to right, var(--accent) ${pct}%, var(--hover) ${pct}%)`;
+  }
+
+  // Radiogroup keys: Left/Right (and Home/End) move within the group — the
+  // ARIA contract for role="radio", which stackKeydown's Up/Down walk does
+  // not cover. Selection follows focus (radios select on focus). Shared by
+  // every segmented control in the stack (Theme, Repeat, Shuffle).
+  function segKeys(
+    ids: readonly string[],
+    current: () => string,
+    apply: (id: string) => void,
+  ) {
+    return (e: KeyboardEvent) => {
+      const n = ids.length;
+      const cur = ids.indexOf(current());
+      let next: number | null = null;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (cur + 1) % n;
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (cur + n - 1) % n;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = n - 1;
+      if (next === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Grab the buttons NOW: `currentTarget` is null once the dispatch is over,
+      // and a deferred lookup silently leaves focus on the old segment (ring on
+      // System, aria-checked on Light).
+      const btns = (e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>(".segbtn");
+      apply(ids[next]);
+      btns[next]?.focus({ preventScroll: true });
+    };
   }
 
   // Arrow keys walk the focused layer's rows (menu convention). Tab still
@@ -173,23 +390,11 @@
       .filter((c): c is Kind => c === "X" || c === "I" || c === "A"),
   );
 
-  const chromeVars = $derived.by(() => {
-    const d = decoState.value;
-    const op = (d?.bgOpacityActive ?? 100) / 100;
-    const rgba = (c: [number, number, number]) =>
-      `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${op})`;
-    const close = d?.close ?? { normal: [255, 95, 87], hover: [195, 63, 69] };
-    const min = d?.minimize ?? { normal: [254, 188, 46], hover: [218, 165, 5] };
-    const max = d?.maximize ?? { normal: [88, 251, 63], hover: [38, 148, 62] };
-    return [
-      `--tb-x: ${rgba(close.normal)}`,
-      `--tb-x-hover: ${rgba(close.hover)}`,
-      `--tb-i: ${rgba(min.normal)}`,
-      `--tb-i-hover: ${rgba(min.hover)}`,
-      `--tb-a: ${rgba(max.normal)}`,
-      `--tb-a-hover: ${rgba(max.hover)}`,
-    ].join("; ");
-  });
+  const chromeVars = $derived(
+    decoVars()
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("; "),
+  );
   // Keyboard accelerators (critique P3): `/` focuses the library search,
   // `s` toggles the Settings stack — both inert while typing in any field.
   let searchInput = $state<HTMLInputElement | null>(null);
@@ -202,9 +407,10 @@
       ui.aboutOpen = false;
       return;
     }
-    // Escape pops one menu level: detail → root → home.
+    // Escape pops one menu level: sub → detail → root → home.
     if (e.key === "Escape" && ui.menuOpen) {
-      if (ui.menuDetail) ui.menuDetail = null;
+      if (ui.menuSub) ui.menuSub = null;
+      else if (ui.menuDetail) ui.menuDetail = null;
       else ui.menuOpen = false;
       return;
     }
@@ -282,7 +488,7 @@
        buttons; the layers themselves are the semantic containers. -->
   <div class="stack" onkeydown={stackKeydown}>
     <!-- home: search + artists (the sidebar's normal job) -->
-    <div class="layer" class:off={inMenu}>
+    <div class="layer" class:off={inMenu} inert={inMenu}>
       <div class="search">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" stroke-width="1.4" />
@@ -353,6 +559,7 @@
     <!-- menu root: top-level panes -->
     <div
       class="layer root"
+      inert={!(inMenu && !atDetail)}
       class:active={inMenu && !atDetail}
       class:receded={inMenu && atDetail}
       class:exiting={!inMenu && atDetail}
@@ -378,14 +585,23 @@
       <!-- About: a footer row, not a nav pane. Help held exactly one item
            and it did nothing — now it opens the real dialog. -->
       <div class="rootfoot">
-        <button class="mrow" onclick={() => (ui.aboutOpen = true)}>
+        <button class="mrow" onclick={(e) => openAbout(e.currentTarget)}>
           <span class="name">About Songstress</span>
         </button>
       </div>
     </div>
 
-    <!-- detail: one pane at a time -->
-    <div class="layer detail" class:active={inMenu && atDetail} aria-hidden={!(inMenu && atDetail)}>
+    <!-- detail: one pane at a time (a pushed sub-layer recedes it fully — the
+         same full push the root layer uses, no parallax peek in a flat glass
+         column) -->
+    <div
+      class="layer detail"
+      inert={!(inMenu && atDetail && !atSub)}
+      class:active={inMenu && atDetail && !atSub}
+      class:receded={inMenu && atDetail && atSub}
+      class:no-anim={detailNoAnim}
+      aria-hidden={!(inMenu && atDetail && !atSub)}
+    >
       <div class="navrow">
         <button class="backchev" aria-label="Back to settings" onclick={back}>
           <svg viewBox="0 0 10 14" aria-hidden="true"><path d="M7 2 L3 7 L7 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -393,61 +609,211 @@
         <span class="navtitle">{detailTitle}</span>
       </div>
       {#if ui.menuDetail === APPEARANCE}
-        <div class="appearance">
-          <label>
-            <span>Tile size</span>
-            <input
-              type="range" min="120" max="320" step="4"
-              value={ui.tileSize}
-              style:background={fill(ui.tileSize, 120, 320)}
-              oninput={(e) => (ui.tileSize = +e.currentTarget.value)}
-            />
-          </label>
-          <label>
-            <span>Sidebar rows</span>
-            <input
-              type="range" min="28" max="52" step="2"
-              value={ui.sidebarRowSize}
-              style:background={fill(ui.sidebarRowSize, 28, 52)}
-              oninput={(e) => (ui.sidebarRowSize = +e.currentTarget.value)}
-            />
-          </label>
-          <button class="theme" onclick={cycleTheme}>
-            Theme: {resolvedTheme() === "dark" ? "Dark" : "Light"}
-          </button>
-          <label class="toggle">
-            <input type="checkbox" bind:checked={ui.playbarGradient} />
-            <span class="box" aria-hidden="true">
-              <svg viewBox="0 0 10 10"><path d="M1.5 5.5 L4 8 L8.5 2.5" /></svg>
-            </span>
-            <span>Playbar artwork gradient</span>
-          </label>
-          <div class="accent">
-            <span>Accent</span>
-            <div class="swatches">
-              {#each ACCENT_PRESETS as p (p.name)}
-                <button
-                  class="swatch"
-                  class:selected={ui.accentColor === p.hex}
-                  style:background={p.hex ?? "linear-gradient(135deg, #a78bfa 50%, #7c58f0 50%)"}
-                  title={p.name}
-                  aria-label={p.name}
-                  onclick={() => (ui.accentColor = p.hex)}
-                ></button>
-              {/each}
-              <label
-                class="swatch custom"
-                class:selected={ui.accentColor !== null && !ACCENT_PRESETS.some((p) => p.hex === ui.accentColor)}
-                title="Custom color"
+        <div class="panebody">
+          <section class="group">
+            <div class="glabel">Sizes</div>
+            <label class="ctl">
+              <span class="ctlhead"
+                ><span>Tile size</span><span class="val">{ui.tileSize}px</span></span
               >
-                <input
-                  type="color"
-                  bind:value={customHex}
-                  oninput={(e) => (ui.accentColor = e.currentTarget.value)}
-                />
-              </label>
+              <input
+                type="range" min="120" max="320" step="4"
+                value={ui.tileSize}
+                aria-valuetext={`${ui.tileSize} pixels`}
+                style:background={fill(ui.tileSize, 120, 320)}
+                oninput={(e) => (ui.tileSize = +e.currentTarget.value)}
+              />
+            </label>
+            <label class="ctl">
+              <span class="ctlhead"
+                ><span>Sidebar rows</span><span class="val">{ui.sidebarRowSize}px</span></span
+              >
+              <input
+                type="range" min="28" max="52" step="2"
+                value={ui.sidebarRowSize}
+                aria-valuetext={`${ui.sidebarRowSize} pixels`}
+                style:background={fill(ui.sidebarRowSize, 28, 52)}
+                oninput={(e) => (ui.sidebarRowSize = +e.currentTarget.value)}
+              />
+            </label>
+          </section>
+          <section class="group">
+            <div class="glabel">Theme</div>
+            <!-- the group is not a tab stop (tabindex -1); the checked radio
+                 inside carries tabindex=0, arrows move within it -->
+            <div
+              class="seg"
+              role="radiogroup"
+              aria-label="Theme"
+              tabindex="-1"
+              onkeydown={segKeys(THEME_IDS, () => ui.theme, (id) => (ui.theme = id as typeof ui.theme))}
+            >
+              <!-- roving tabindex: the group is one Tab stop, arrows move inside it -->
+              {#each THEMES as t, i (t.id)}
+                <button
+                  class="segbtn"
+                  class:on={ui.theme === t.id}
+                  role="radio"
+                  aria-checked={ui.theme === t.id}
+                  tabindex={ui.theme === t.id ? 0 : -1}
+                  data-i={i}
+                  onclick={() => (ui.theme = t.id)}
+                >{t.label}</button>
+              {/each}
             </div>
-          </div>
+            <Toggle
+              checked={ui.playbarGradient}
+              label="Playbar artwork gradient"
+              onchange={(on) => (ui.playbarGradient = on)}
+            />
+            <!-- Accent folded one level deep: the 12-dot grid was the highest
+                 element count in the sidebar for the lowest-frequency
+                 decision. Summary row here, grid in the sub layer. -->
+            <button class="mrow subrow" onclick={() => openSub("accent")}>
+              <span class="name">Accent</span>
+              <span class="tail">
+                <span
+                  class="cur"
+                  class:stock={ui.accentColor === null}
+                  style:background={ui.accentColor ?? undefined}
+                  aria-hidden="true"
+                ></span>
+                <span class="curname">{accentName}</span>
+                <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
+                  <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
+            </button>
+          </section>
+        </div>
+        <div class="panefoot">
+          <button class="frow" onclick={resetAppearance}>Reset appearance</button>
+        </div>
+      {:else if ui.menuDetail === PLAYBACK}
+        <!-- Bespoke pane, driven by the stores rather than the flattened menu
+             model (Appearance does the same). Three subjects, each with an
+             enable checkbox; the fields it owns appear underneath it, indented,
+             and disappear when it is off — which is also what killed the dead
+             `EQ Preset: …` row (it could not be reachable and meaningful while
+             the equalizer was off, and now it simply isn't rendered).
+             The Global Menu keeps its flat cycling rows and writes the same
+             state through the same setters, so the two surfaces cannot drift. -->
+        <div class="panebody">
+          <section class="group">
+            <Toggle
+              checked={playback.repeat !== "off"}
+              label="Repeat"
+              onchange={setRepeatOn}
+            />
+            {#if playback.repeat !== "off"}
+              <div class="reveal" style="--seg-n: {REPEAT_MODES.length}">
+                <div
+                  class="seg"
+                  role="radiogroup"
+                  aria-label="Repeat mode"
+                  tabindex="-1"
+                  onkeydown={segKeys(REPEAT_IDS, () => playback.repeat, (id) => setRepeatStage(id as "album" | "track"))}
+                >
+                  {#each REPEAT_MODES as m (m.id)}
+                    <button
+                      class="segbtn"
+                      class:on={playback.repeat === m.id}
+                      role="radio"
+                      aria-checked={playback.repeat === m.id}
+                      tabindex={playback.repeat === m.id ? 0 : -1}
+                      onclick={() => setRepeatStage(m.id)}
+                    >{m.label}</button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </section>
+
+          <section class="group">
+            <Toggle
+              checked={playback.shuffle !== "off"}
+              label="Shuffle"
+              onchange={setShuffleOn}
+            />
+            {#if playback.shuffle !== "off"}
+              <div class="reveal" style="--seg-n: {SHUFFLE_MODES.length}">
+                <div
+                  class="seg"
+                  role="radiogroup"
+                  aria-label="Shuffle scope"
+                  tabindex="-1"
+                  onkeydown={segKeys(SHUFFLE_IDS, () => playback.shuffle, (id) => setShuffleStage(id as "album" | "artist" | "all"))}
+                >
+                  {#each SHUFFLE_MODES as m (m.id)}
+                    <button
+                      class="segbtn"
+                      class:on={playback.shuffle === m.id}
+                      role="radio"
+                      aria-checked={playback.shuffle === m.id}
+                      tabindex={playback.shuffle === m.id ? 0 : -1}
+                      onclick={() => setShuffleStage(m.id)}
+                    >{m.label}</button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+          </section>
+
+          <section class="group">
+            <Toggle
+              checked={playback.eq.enabled}
+              label="Equalizer"
+              onchange={setEqEnabled}
+            />
+            {#if playback.eq.enabled}
+              <div class="reveal">
+                <!-- 10 named presets is too many for a segment: same drill
+                     language as Accent, value shown in the count column. -->
+                <button class="mrow subrow" onclick={() => openSub("eq-preset")}>
+                  <span class="name">Preset</span>
+                  <span class="tail">
+                    <span class="curname">{playback.eq.preset ?? "Custom"}</span>
+                    <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
+                      <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </span>
+                </button>
+                <div class="glabel">Custom</div>
+                <label class="ctl">
+                  <span class="ctlhead"
+                    ><span>Preamp</span><span class="val">{fmtDb(playback.eq.preampDb)} dB</span></span
+                  >
+                  <input
+                    type="range" min={-EQ_MAX_DB} max={EQ_MAX_DB} step="0.5"
+                    value={playback.eq.preampDb}
+                    aria-valuetext={`${fmtDb(playback.eq.preampDb)} decibels`}
+                    style:background={fill(playback.eq.preampDb, -EQ_MAX_DB, EQ_MAX_DB)}
+                    oninput={(e) => setEqPreamp(+e.currentTarget.value)}
+                  />
+                </label>
+                {#each EQ_BANDS as hz, i (hz)}
+                  <label class="ctl">
+                    <span class="ctlhead"
+                      ><span>{fmtHz(hz)}</span><span class="val">{fmtDb(playback.eq.gains[i])}</span></span
+                    >
+                    <input
+                      type="range" min={-EQ_MAX_DB} max={EQ_MAX_DB} step="0.5"
+                      value={playback.eq.gains[i]}
+                      aria-label={`${fmtHz(hz)} hertz`}
+                      aria-valuetext={`${fmtDb(playback.eq.gains[i])} decibels`}
+                      title="Double-click to zero"
+                      style:background={fill(playback.eq.gains[i], -EQ_MAX_DB, EQ_MAX_DB)}
+                      ondblclick={() => setEqBand(i, 0)}
+                      oninput={(e) => setEqBand(i, +e.currentTarget.value)}
+                    />
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        </div>
+        <div class="panefoot">
+          <button class="frow" onclick={resetPlayback}>Reset playback</button>
         </div>
       {:else}
         <div class="scroll items">
@@ -466,6 +832,106 @@
             </button>
           {/each}
         </div>
+        {#if ui.menuDetail === "library"}
+          <!-- status, not padding: this pane had no idea when the library was
+               last built (heuristic 1 gap) -->
+          <div class="panefoot">
+            <div class="fstat">{libLine}</div>
+          </div>
+        {/if}
+      {/if}
+    </div>
+
+    <!-- sub layer: one level deeper than a pane (currently the accent
+         picker). Same drawer language: enters from the right, pushes the
+         detail layer fully left, `‹` returns the way it came. -->
+    <div
+      class="layer sub"
+      inert={!(inMenu && atDetail && atSub)}
+      class:active={inMenu && atDetail && atSub}
+      aria-hidden={!(inMenu && atDetail && atSub)}
+    >
+      <div class="navrow">
+        <button class="backchev" aria-label={`Back to ${detailTitle}`} onclick={back}>
+          <svg viewBox="0 0 10 14" aria-hidden="true"><path d="M7 2 L3 7 L7 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+        <span class="navtitle">{ui.menuSub === "eq-preset" ? "EQ Preset" : "Accent"}</span>
+      </div>
+      {#if ui.menuSub === "eq-preset"}
+        <!-- 10 named presets: a list, not a segment. Same row language as the
+             generic panes' checked items, so "this is the one that is on" is
+             one grammar across the stack. -->
+        <div class="scroll items">
+          {#each EQ_PRESETS as p (p.name)}
+            <button
+              class="irow"
+              aria-current={playback.eq.preset === p.name || undefined}
+              onclick={() => applyEqPreset(p.name)}
+            >
+              <span class="name">{p.name}</span>
+              {#if playback.eq.preset === p.name}
+                <svg class="ok" viewBox="0 0 14 14" aria-hidden="true">
+                  <path d="M2 7.5 L5.5 11 L12 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              {/if}
+            </button>
+          {/each}
+        </div>
+        {#if playback.eq.preset === null}
+          <!-- a hand-edited curve is a real state; saying so beats showing
+             nothing (setEqBand clears the preset name) -->
+          <div class="panefoot">
+            <div class="fstat">Custom curve — adjust the sliders in Playback</div>
+          </div>
+        {/if}
+      {:else}
+      <div class="panebody">
+        <section class="group">
+          <div class="glabel">Presets</div>
+          <div class="swatches">
+            {#each ACCENT_PRESETS as p (p.name)}
+              <button
+                class="swatch"
+                class:selected={ui.accentColor === p.hex}
+                style:background={p.hex ?? "linear-gradient(135deg, #a78bfa 50%, #7c58f0 50%)"}
+                style:box-shadow={swatchRing(p.hex, ui.accentColor === p.hex)}
+                title={clampHint(p.hex, p.name)}
+                aria-label={clampHint(p.hex, p.name)}
+                onclick={() => (ui.accentColor = p.hex)}
+              ></button>
+            {/each}
+          </div>
+        </section>
+
+        <!-- Its own group: the picker is an EDITOR, not a twelfth choice in a
+             list of named ones, and a rainbow dot among named colors promised
+             something the presets beside it didn't need — plus it inherited a
+             preset's color the moment one was picked. Readout row language
+             (label left, Micro value right, control at the end of the line),
+             so it says the same thing as the slider rows above it. -->
+        <section class="group">
+          <div class="glabel">Custom</div>
+          <label class="colorrow">
+            <span class="ctlhead">
+              <span>Pick any color</span>
+              <span class="val">{hasCustom ? ui.accentColor : "not set"}</span>
+            </span>
+            <span
+              class="swatch custom"
+              class:picked={hasCustom}
+              style:background={hasCustom ? chipColor : undefined}
+              aria-hidden="true"
+            >
+              <input
+                type="color"
+                bind:value={customHex}
+                aria-label="Custom accent color"
+                oninput={(e) => (ui.accentColor = e.currentTarget.value)}
+              />
+            </span>
+          </label>
+        </section>
+      </div>
       {/if}
     </div>
   </div>
@@ -511,6 +977,16 @@
     border: 1px solid rgba(0, 0, 0, 0.18);
     padding: 0;
     cursor: pointer;
+  }
+
+  /* Hit area: a 13px target is under this app's own ~28px minimum. The dots sit
+     in the drag region, which forgives a little, but the invisible box is grown
+     to 21px anyway — capped by the 8px gap between dots. Same trick the surface
+     dots don't need (their button is 26px around the same dot). */
+  .tb-light::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
   }
 
   /* Absolute centering — place-items:center on a native <button> drifts
@@ -603,7 +1079,13 @@
     position: relative;
     flex: 1;
     min-height: 0;
+    /* `clip`, not `hidden`: hidden still creates a scroll port that a
+       programmatic focus() inside a translated layer can scroll (see
+       focusFirst). clip cannot be scrolled at all, so a mis-timed focus can
+       never shift the layer stack sideways. hidden stays first as the
+       fallback for engines without `overflow: clip`. */
     overflow: hidden;
+    overflow: clip;
   }
 
   .layer {
@@ -650,9 +1132,10 @@
     transform: translateX(-200%);
   }
 
-  /* one-frame transition suppression while the off-screen root teleports
-     from -200% back to its +100% entry slot */
-  .layer.root.no-anim {
+  /* one-frame transition suppression while an off-screen layer teleports
+     back to its +100% entry slot (root from -200%, detail from -100%) */
+  .layer.root.no-anim,
+  .layer.detail.no-anim {
     transition: none;
   }
 
@@ -663,6 +1146,24 @@
   }
 
   .layer.detail.active {
+    transform: translateX(0);
+  }
+
+  /* A pushed sub layer takes the detail pane fully off-screen LEFT (same
+     full push as root — a flat glass column has no room for a parallax peek,
+     and the sub layer covers the column edge to edge anyway). */
+  .layer.detail.receded {
+    transform: translateX(-100%);
+  }
+
+  /* sub: one level deeper than a pane (the accent picker). Same drawer
+     language, one z-step up. */
+  .layer.sub {
+    transform: translateX(100%);
+    z-index: 3;
+  }
+
+  .layer.sub.active {
     transform: translateX(0);
   }
 
@@ -884,27 +1385,28 @@
     color: var(--text-dim);
   }
 
+  /* The drill is a meaningful graphic (it says "this row navigates"), so it
+     needs 3:1 — the old extra opacity: .6 on top of --text-dim measured
+     ≈2.3:1 over a bright wallpaper under the 0.7 chrome tier. At --text-dim
+     alone it is ≈3.5:1: still quiet, but it survives the wallpaper. */
   .drill {
     width: 10px;
     height: 14px;
     flex: none;
     color: var(--text-dim);
-    opacity: 0.6;
+    transition: color 120ms var(--ease-out);
   }
 
-  .mrow:hover .drill {
+  /* Hover AND keyboard focus both resolve it — the ring alone left keyboard
+     users with the weakest version of the one glyph that explains the drawer. */
+  .mrow:hover .drill,
+  .mrow:focus-visible .drill {
     color: var(--text);
-    opacity: 1;
   }
 
   /* About footer: anchored to the root's bottom (the layer is a flex
      column; .scroll's flex:1 pushes it down). Dimmed — it's a quiet exit,
-     not a pane. */
-  .rootfoot {
-    flex: none;
-    padding: 4px 8px 10px;
-  }
-
+     not a pane. Padding/flex live in the shared .panefoot rule. */
   .rootfoot .mrow {
     color: var(--text-dim);
   }
@@ -944,28 +1446,71 @@
     color: var(--text-dim);
   }
 
-  /* --- Appearance pane (the old gear-popover settings) ------------------- */
-  .appearance {
+    /* --- pane bodies: Appearance + Accent ---------------------------------
+     Rhythm is deliberately UNEVEN (layout critique): ~10px inside a group,
+     30px between groups. The old uniform 16px cadence across five
+     heterogeneous controls gave the eye no group seams, so it read as one
+     block ("crammed") even though 40% of the column below it is empty.
+     Group labels use DESIGN.md's Label tier — the tier this pane never
+     used, and the one reserved for exactly these seams. */
+  .panebody {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 16px 14px;
+    padding: 14px 14px 8px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 30px;
   }
 
-  .appearance label {
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .glabel {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* Fields that belong to an enable checkbox, revealed underneath it. Indented
+     12px so the dependency is visible without a card (inset translucent panels
+     on the 0.7 glass are banned app-wide), and it MOUNTS with the checkbox
+     rather than animating its own height — a height transition on a block that
+     can hold 11 sliders needs a magic max-height, and 200ms of fade+rise reads
+     the same. app.css's reduced-motion rule covers the animation. */
+  .reveal {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-left: 12px;
+    animation: reveal-in 200ms var(--ease-out);
+  }
+
+  @keyframes reveal-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
+  /* A control's label is its row's primary content: list tier at full
+     strength (the old 12px/400 dim was a tier DESIGN.md doesn't declare). */
+  .ctl {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 12px;
-    color: var(--text-dim);
+    font-size: 13px;
+    color: var(--text);
   }
 
   /* Glass sliders: the native uniform track is replaced by the inline
      fill gradient (accent → hover wash); the thumb is an accent dot. */
-  .appearance input[type="range"] {
+  .panebody input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
     height: 4px;
@@ -974,7 +1519,7 @@
     cursor: pointer;
   }
 
-  .appearance input[type="range"]::-webkit-slider-thumb {
+  .panebody input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 14px;
     height: 14px;
@@ -983,102 +1528,186 @@
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   }
 
-  .appearance input[type="range"]:focus-visible {
+  .panebody input[type="range"]:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 4px;
   }
 
-  .theme {
+  /* Value readout: the pane's whole job is picking a number and the sliders
+     said nothing. Right-aligned in the count column like the artist rows'
+     counts, tabular so the digits don't jitter while dragging. */
+  .ctlhead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .val {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+  }
+
+  /* Glass segmented control: the state space shown at full width — Light /
+     Dark / System, the active one on the accent wash. Hover stays NEUTRAL
+     (row language: neutral wash on hover, accent wash for state/press). */
+  .seg {
+    display: grid;
+    /* 2..4 segments; the group sets --seg-n (Theme 3, Repeat 2, Shuffle 3). */
+    grid-template-columns: repeat(var(--seg-n, 3), 1fr);
+    gap: 2px;
+    padding: 2px;
+    height: 32px;
     border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--hover);
+  }
+
+  .segbtn {
+    border: none;
+    /* 7px = the icon tier. A 2px inset inside an 8px trough would compute to
+       6px, but 6 is not on the radius ladder and 7 is indistinguishable here
+       — no documented exception needed. */
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 140ms var(--ease-out), color 140ms var(--ease-out);
+  }
+
+  .segbtn:hover:not(.on) {
     background: var(--hover);
     color: var(--text);
-    font-size: 12px;
-    border-radius: 8px;
-    padding: 6px 8px;
-    cursor: pointer;
   }
 
-  .theme:hover {
+  .segbtn.on {
     background: var(--active);
+    color: var(--text);
+    font-weight: 600;
   }
 
-  /* Glass checkbox (impeccable critique 2026-08-30): the OS-default square
-     was the only non-glass control in the app. The native input stays
-     focusable and drives everything; .box is its visual. */
-  .toggle {
-    flex-direction: row !important;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .toggle input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    opacity: 0;
-    margin: 0;
-  }
-
-  .toggle .box {
-    width: 16px;
-    height: 16px;
-    flex: none;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--hover);
-    transition: background 160ms ease-out, border-color 160ms ease-out;
-  }
-
-  .toggle .box svg {
-    width: 10px;
-    height: 10px;
-    fill: none;
-    /* accent-text: the App's luminance-aware variable (white on dark
-       accents, dark on light ones) — a white check on a white accent
-       would vanish. */
-    stroke: var(--accent-text, #fff);
-    stroke-width: 1.8;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    opacity: 0;
-    transform: scale(0.7);
-    transition: opacity 160ms ease-out, transform 160ms ease-out;
-  }
-
-  .toggle input:checked + .box {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .toggle input:checked + .box svg {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  .toggle input:focus-visible + .box {
+  .segbtn:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
 
-  .accent {
+  /* Glass checkbox (impeccable critique 2026-08-30): the OS-default square
+     was the only non-glass control in the app. The native input stays
+     focusable and drives everything; .box is its visual. The !important is
+     gone now that the label rules are split per control. */
+  /* The checkbox itself moved to components/Toggle.svelte (the playbar's
+     equalizer popover needs the same control; copying the CSS was worse). */
+
+  /* Accent summary row: name · current color · drill. The 12-dot grid lives
+     one level deeper now — it was the densest thing in the sidebar for the
+     rarest decision in the pane. */
+  .subrow .tail {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-left: auto;
   }
 
-  .accent > span {
-    font-size: 12px;
+  .subrow .cur {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+  }
+
+  .subrow .cur.stock {
+    background: linear-gradient(135deg, #a78bfa 50%, #7c58f0 50%);
+  }
+
+  .subrow .curname {
+    font-size: 11px;
     color: var(--text-dim);
   }
 
-  .swatches {
+  /* --- pane footers ------------------------------------------------------
+     One dim row per detail layer: an action where a real reset exists, a
+     status line where it doesn't. .frow is an ACTION, so it sits at 0.82 of
+     --text rather than --text-dim — that measures ≈4.6:1 over the worst case
+     (bright wallpaper under the 0.7 chrome tier), where --text-dim does not
+     clear AA. The status line is caption-grade and may stay dim. */
+  .panefoot,
+  .rootfoot {
+    flex: none;
+    padding: 4px 8px 10px;
+  }
+
+  .frow {
     display: flex;
     align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
+    width: 100%;
+    height: var(--sidebar-row-size);
+    padding: 0 10px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    opacity: 0.82;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .frow:hover {
+    background: var(--hover);
+    opacity: 1;
+  }
+
+  .frow:active {
+    background: var(--active);
+  }
+
+  .frow:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    opacity: 1;
+  }
+
+  .fstat {
+    padding: 6px 10px 2px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+  }
+
+  /* Swatches (sub layer): 6 per row — 11 presets + the custom picker is 12,
+     so the grid is two even rows instead of the old ragged 7 + 5. */
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(6, 20px);
+    justify-content: space-between;
+    /* Row gap 14px: the selection/hover outline reaches 4px past a dot, and
+       with no row gap the outlined dot's ring touched the dot above it.
+       Column gap MUST stay 0: the tracks are fixed 20px and `space-between`
+       is what centers the row, so any minimum column gap makes the tracks
+       overflow their own box (6*20 + 5*20 = 220 in a 207px pane) and the last
+       dot runs into the sidebar border — measured after the first attempt at
+       this rule. Horizontal spacing is then fluid ((207-120)/5 = 17px, still
+       clearing the 4px outline twice over) and both edges sit on the pane's
+       14px padding, aligned with the seam above and the picker row below. */
+    gap: 14px 0;
+  }
+
+  /* Custom picker row (its own group, outside the preset grid). */
+  .colorrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .colorrow .ctlhead {
+    flex: 1;
   }
 
   .swatch {
@@ -1097,6 +1726,14 @@
     outline-color: var(--text-dim);
   }
 
+  /* The outline channel is shared with hover/selected, so focus needs its own
+     color or keyboard users get nothing. The custom picker's input is
+     opacity: 0 inside the label — :focus-within is its only ring. */
+  .swatch:focus-visible,
+  .swatch.custom:focus-within {
+    outline-color: var(--accent);
+  }
+
   .swatch.selected {
     outline-color: var(--text);
   }
@@ -1109,8 +1746,29 @@
 
   .swatch.custom input {
     position: absolute;
-    inset: -4px;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    /* appearance:none: WebKit otherwise draws its own ~14px color swatch
+       inside the box, which read as a shrunken, mis-centered dot. */
+    -webkit-appearance: none;
+    appearance: none;
+    border: none;
+    padding: 0;
     opacity: 0;
     cursor: pointer;
+  }
+
+  /* Once a custom color is picked, the dot IS that color and a conic corner
+     marks it as the picker (a twelfth identical rainbow taught nothing). */
+  .swatch.custom.picked::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: conic-gradient(#e5484d, #ffb224, #46a758, #00a2c7, #7c58f0, #e5484d);
   }
 </style>

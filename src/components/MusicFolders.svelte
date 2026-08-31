@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ui } from "../lib/stores/ui.svelte";
+  import SurfaceClose from "./SurfaceClose.svelte";
   import {
     addMusicFolderRoot,
     removeMusicFolderRoot,
@@ -39,15 +40,18 @@
 {#if ui.musicFoldersOpen}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
-    class="mf-backdrop"
+    class="mf-backdrop scrim"
     role="presentation"
     onclick={(e) => e.target === e.currentTarget && (ui.musicFoldersOpen = false)}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mf-modal glass" role="dialog" aria-modal="true" aria-label="Music folders">
       <header class="mf-head">
+        <!-- Was a font-glyph ✕ at the right: a third typographic family in a
+             glass surface, and the one modal whose dismissal disagreed with
+             every other one. -->
+        <SurfaceClose label="Close" onclick={() => (ui.musicFoldersOpen = false)} />
         <h2>Music folders</h2>
-        <button class="mf-close" aria-label="Close" onclick={() => (ui.musicFoldersOpen = false)}>✕</button>
       </header>
 
       <div class="mf-body">
@@ -102,15 +106,6 @@
 {/if}
 
 <style>
-  .mf-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 150;
-    display: grid;
-    place-items: center;
-    background: rgba(0, 0, 0, 0.35);
-  }
-
   .mf-modal {
     width: min(560px, calc(100vw - 80px));
     max-height: calc(100vh - 140px);
@@ -139,21 +134,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .mf-close {
-    width: 24px;
-    height: 24px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-dim);
-    cursor: pointer;
-  }
-
-  .mf-close:hover {
-    background: var(--hover);
-    color: var(--text);
   }
 
   .mf-body {

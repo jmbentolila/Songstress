@@ -290,8 +290,17 @@ structure (panels, stack), not to tiles.
 
 ## Shapes
 
-Generous but quiet radii: window 14px, panels 12px, covers 10px, controls
-8px, icon buttons 7px, pills 999px. The radius ladder decreases with
+Generous but quiet radii: window 14px (`--radius-window`), panels 12px, covers
+10px, controls 8px, icon buttons 7px, pills 999px. The window rung is a token,
+not a literal, because the modal scrim (`.scrim` in app.css — About, Music
+folders, Tag editor all use it) has to be clipped to it: `overflow: hidden` on
+`.app` does not clip a `position: fixed` descendant, so an unrounded scrim paints
+square corners over the window's transparent ones. Two defenses, both load-bearing:
+the scrim carries `border-radius: var(--radius-window)`, and `.app` carries
+`contain: paint`, which makes it the containing block for fixed descendants so
+**every** overlay is clipped to the window shape — a future surface cannot
+re-introduce the artifact even if it forgets the radius. Any future full-window
+overlay takes `.scrim`, never a private copy of it. The radius ladder decreases with
 object size — the biggest surface gets the softest corner. Borders are
 always the 1px Glass Line; nothing has a double border, and the sidebar
 deliberately has **no** bottom border (the playbar's top line is the only
@@ -345,18 +354,59 @@ Two families, split by role — every glyph in the chrome belongs to one:
   (13px, ellipsis) · duration (12px dim, tabular); current track = accent
   text + 600 weight with a ▶/❚❚ glyph replacing the number; missing file =
   Amber Caution alert triangle replacing the number.
-- **Sidebar menu stack:** three absolute layers (home → Settings root → pane)
-  sliding transform-only on `cubic-bezier(0.32, 0.72, 0, 1)` @ 320ms;
-  root recedes -100% while a pane enters from the right; ✕ pops all
-  levels as one conveyor (home in from left, root out left in parallel,
-  pane out right) and teleports the root back to its entry side off-screen.
-  Arrow keys walk the focused layer's buttons (Tab still works). The
-  sidebar's tree is SIDEBAR-shaped, not a mirror of the Global Menu
+- **Sidebar menu stack:** four absolute layers (home → Settings root → pane →
+  sub-pane) sliding transform-only on `cubic-bezier(0.32, 0.72, 0, 1)` @ 320ms.
+  Each push takes the layer behind it a FULL width left (no parallax peek in a
+  flat glass column); ✕ pops all levels as one conveyor (home in from left,
+  root out left in parallel, pane/sub-pane out right), with the off-screen
+  layers teleporting back to their entry slots under a one-frame transition
+  suppressor. Arrow keys walk the focused layer's buttons (Tab still works).
+  The sidebar's tree is SIDEBAR-shaped, not a mirror of the Global Menu
   (menu-bar shape): Appearance / Playback / Library + a dim "About
   Songstress" footer row. View's theme item lives in Appearance; Playback
   drops its transport rows (the PlayBar owns them); "Save imported music"
   hides when nothing is staged. The About footer opens an in-glass dialog
   (name, Tauri version, one-line description — no native dialogs).
+- **Pane bodies (Appearance, Playback):** grouped by meaning with Label-tier
+  seams ("SIZES", "THEME", "PRESETS", "CUSTOM") and a deliberately UNEVEN
+  rhythm — ~10px inside a group, 30px between groups (the old uniform 16px
+  cadence read as one crammed block even though 40% of the column below was
+  empty). A control's label is its row's primary content: List tier at full
+  `--text`, never dim. Rare, high-option-count decisions sit one push deeper —
+  the accent grid is a sub-pane behind an `Accent · <name> · ›` summary row
+  (11 presets in a 6-track grid, the picker in its own group), the 10 EQ
+  presets behind `Preset · <name> · ›`.
+- **Enable checkbox owns "off" (Playback pane).** A setting whose value space
+  is off + N modes is a checkbox plus a segmented control of the N modes, never
+  one cycling row labelled `Repeat: Off` (the value welded into the label
+  changes width while you watch and hides the state space) and never a segment
+  that includes Off (two controls, one truth). The fields the checkbox owns
+  reveal UNDERNEATH it, indented 12px — no card, because inset translucent
+  panels on the 0.7 chrome glass are banned — and they mount and unmount with
+  it, which is also how a dependent field stops being a dead row: `Preset`
+  simply does not exist while the equalizer is off. Reveals fade+rise 4px over
+  200ms rather than animating height (a height transition on a block that can
+  hold 11 sliders needs a magic max-height). Un-checking remembers the stage, so
+  re-checking restores what you had.
+  Ordering is genre, not law: a pane is a form read top-down, so its gate sits
+  above what it gates. The equalizer popover is an instrument surface, so the
+  curve comes first and its master sits at the base, above the seam. Do not
+  "fix" one toward the other.
+- **Pane footers:** every detail layer ends in one dim row — an action where a
+  real reset exists (`Reset appearance`, `Reset playback`) or a status line
+  where it doesn't (`248 albums · 4434 tracks · scanned 14:02`, tabular, and
+  the time clause only appears once a scan has actually run). A footer action
+  resets EVERYTHING its pane shows and is named for that scope — `Reset
+  equalizer` under Repeat/Shuffle/Equalizer reset only the third. Footer actions
+  sit at 0.82 of `--text` (≈4.6:1 over the worst case: bright wallpaper under
+  the 0.7 chrome tier); `--text-dim` is caption-only there because it does not
+  clear AA over glass.
+- **Sidebar panes are store-driven, the Global Menu is menu-model-driven.**
+  Appearance and Playback render from the Svelte stores; the menu bar keeps its
+  flat cycling rows. Both write through the same setters (`setShuffleStage`,
+  `setRepeatStage`, `setEqEnabled`, `applyEqPreset`), and `pushMenuState()`
+  re-renders the menu from the same state, so the two surfaces can render
+  differently and cannot disagree.
 
 ### Cards / Containers
 - **Album tile:** square cover (10px radius, cover-mass shadow) + caption
@@ -368,7 +418,40 @@ Two families, split by role — every glyph in the chrome belongs to one:
   the shell must stay unclipped for the height animation).
 - **Popovers/modals:** `panel-strong` near-opaque tier, 10–12px radius,
   popover-seat shadow; destructive confirmations render *inside* the glass
-  (no native confirm — GTK dialogs are banned).
+  (no native confirm — GTK dialogs are banned). **No native form widgets** in
+  glass: a `<select>`'s open menu is the toolkit's own chrome (same category of
+  problem as the banned GTK chooser) — the equalizer popover shows its preset
+  NAME in Micro tier and routes the rest to the Playback pane through a
+  `Playback settings ›` footer action, so the button that opened it is also the
+  way to everything it no longer owns. The popover keeps the one thing worth
+  having next to the transport: the curve, editable while something plays.
+
+### Dismissal — the traffic-light family
+- **One family, two dots.** The titlebar's close dot quits the **window**;
+  `SurfaceClose` dismisses a **surface**. Same device on purpose: 13px circle,
+  the user's own KWin close colour (`--tb-x`, published on `<html>` by
+  `decoVars()` so titlebar and surfaces cannot drift), ✕ glyph revealed on hover
+  *and* on keyboard focus, press = brightness 0.82. No transition: the Plasma
+  dots change instantly and the family is one behaviour.
+- **Red only.** A lone dot never shows a yellow or green it cannot honour —
+  a popover has no minimize and no zoom.
+- **Dismissal sits top-left**, where the app has always put its close dot, in
+  every floating surface: popovers, modals. The header row above the content *is*
+  the surface's chrome.
+- **The settings stack is the exception** and keeps its boxed ✕ top-right: its
+  header row is the same row as the real window dots, and two red dots 200px
+  apart — one closing a drawer, one closing the app — is a worse confusion than
+  the shape difference being removed.
+- **Hit area:** the button is 26px around the 13px dot (a 13px target is under
+  this app's own ~28px minimum, and a popover has no drag region forgiving it).
+  The titlebar dots grow to 21px with a transparent `::before`, capped by the 8px
+  gap between them.
+- **Dismissal returns focus to the opener** (recorded at open: `openAbout(from)`,
+  the popover's own `eqBtn`/`qBtn`) so Tab continues where the user was. The
+  opener is captured when the surface opens, not when it unmounts — by then the
+  dialog's autofocus has already moved `activeElement` inside.
+- **`.q-x` stays an ✕.** "Remove this row" is not dismissal; giving it the close
+  colour would teach the wrong verb.
 
 ### Inputs / Fields
 - **Search fields (sidebar 30px, titlebar-less era):** 8px radius, 1px
@@ -378,14 +461,54 @@ Two families, split by role — every glyph in the chrome belongs to one:
   base with an inline accent fill gradient sized to the value) + 14px
   accent-dot thumb; focus = accent ring. The equalizer's vertical sliders
   are horizontal inputs rotated -90° in fixed slots (WebKitGTK ignores
-  `writing-mode` on ranges).
-- **Checkbox:** hidden native input (stays focusable) + 16px rounded-square
+  `writing-mode` on ranges). Every slider carries its **value** — Micro tier,
+  `tabular-nums`, dim, updating live while dragging (the Tabular Rule: nothing
+  that changes while you watch may jitter or stay hidden) — in the row's right
+  column in the panes, above the slot in the equalizer's 11-column popover,
+  where there is no right column. `dB` is stated **once per group**, on its
+  first row (Preamp), not repeated eleven times; `aria-valuetext` carries it in
+  full for the screen reader either way.
+- **Segmented control (2–4 exclusive modes; `--seg-n` sets the column count):**
+  32px tall, 1px Glass Line stroke, `--hover` trough, 7px inner radius on the
+  segments (icon tier — the nested 8px−2px arithmetic gives 6, which is off the
+  ladder and indistinguishable here). Active segment takes the accent wash +
+  600 weight (state, not hover); inactive segments are dim and hover NEUTRAL —
+  hover never spends the accent. `role="radiogroup"` + `role="radio"` /
+  `aria-checked`, one Tab stop with a roving tabindex, inset accent ring on
+  focus, Left/Right/Home/End inside the group (one shared `segKeys` handler).
+  Used for Theme (**System | Light | Dark**), Repeat and Shuffle.
+  System goes LEFTMOST: reading left to right, the first segment is where the
+  default belongs, and following the OS is the default for a desktop player
+  (user decision, 2026-08-31). Segment order is also the group's arrow /
+  Home / End order, so Home lands on the default.
+- **Checkbox** (`components/Toggle.svelte`, the only checkbox in the app — four
+  sidebar call sites and the equalizer popover; the popover's bare native
+  checkbox was the last widget outside the system): 16px rounded-square
   box (5px radius — deliberate, below the control tier for a 16px object):
   hover-wash fill + Glass Line at rest, accent fill + check in
   `--accent-text` (luminance-aware: white on dark accents, dark on light
   ones) when checked; 160ms fill/check-in; focus = inset accent ring.
-- **Color picker:** hidden native input inside a conic-gradient swatch;
-  preset swatches are 20px circles, selected = 2px Chalk outline.
+- **Color picker:** preset swatches are 20px circles in a 6-track grid,
+  `gap: 14px 0` — 14px rows because the selection outline reaches 4px past a
+  dot, and **zero column gap** because the tracks are fixed 20px and
+  `justify-content: space-between` is what centers the row: any minimum column
+  gap pushes the tracks past their own box (6×20 + 5×20 = 220 inside a 207px
+  pane) and the last dot runs into the sidebar border. Spacing is then fluid
+  (≈17px between dots, clearing the 4px outline twice over) and both edges sit
+  on the pane's 14px padding. selected = 2px Chalk outline.
+  The native color input lives in its OWN group under a `CUSTOM` seam, as a
+  readout row (`Pick any color · not set / #rrggbb | conic swatch`) — the same
+  label-left / Micro-value-right language as the slider rows, and the whole row
+  is the label so the text opens the chooser. It is not a twelfth dot in the
+  grid: the picker is an editor, not another named choice, and among named
+  colors a permanent rainbow promised something the presets didn't need. Once a
+  custom color is picked the swatch becomes that color with a 9px conic corner.
+  Accent presets render their raw hex, and any preset whose lightness the theme
+  clamps (`accent.ts` CLAMP — Black in the dark theme becomes light grey) wears
+  a 2px ring in the color it actually produces, plus a tooltip naming it. The
+  ring appears only where the promise and the result differ, and NOT on the
+  selected dot: two near-identical concentric rings read as a rendering glitch
+  and make the selected dot look disabled.
 
 ### Chips / Badges
 - **Pill badges (999px radius):** 3×9 padding, 10px/600 UPPERCASE label,
@@ -412,7 +535,8 @@ Two families, split by role — every glyph in the chrome belongs to one:
 - **Do** keep the keyboard accelerators: `/` focuses library search, `s`
   toggles the Settings stack (both inert while typing or with modifiers),
   Escape pops menu levels and clears-then-blurs the search field.
-- **Do** mirror the system: KWin palette for traffic lights, button order
+- **Do** mirror the system: KWin palette for traffic lights (and for every
+  surface's close dot — same `--tb-*`), button order
   from the decoration config, kdialog for pickers, Plasma Global Menu as
   the primary menu surface.
 

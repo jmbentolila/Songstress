@@ -287,34 +287,66 @@ export function toggleMute() {
 // Rust owns the behavior (order building, eof handling); we mirror the stage,
 // persist it (localStorage mirror + SQLite write-through), and push it.
 
+/** Last non-off stage, so the enable checkbox restores instead of resetting.
+ *  Module-private: it is a UI memory, not player state, so it is not persisted
+ *  and not pushed to the menu (the menu only ever reads playback.*). */
+let lastShuffle: Exclude<ShuffleStage, "off"> = "album";
+let lastRepeat: Exclude<RepeatStage, "off"> = "album";
+
+// Seeded here, not in the restore block above: `let` cells are in TDZ until
+// this point in module evaluation.
+if (playback.shuffle !== "off") lastShuffle = playback.shuffle;
+if (playback.repeat !== "off") lastRepeat = playback.repeat;
+
 function persistStage(key: "shuffle" | "repeat", value: string) {
   localStorage.setItem(`songstress.${key}`, JSON.stringify(value));
   void invoke("set_setting", { key, value: JSON.stringify(value) }).catch(() => {});
 }
 
-export async function cycleShuffle() {
-  const order: ShuffleStage[] = ["off", "album", "artist", "all"];
-  const next = order[(order.indexOf(playback.shuffle) + 1) % order.length];
-  playback.shuffle = next;
-  persistStage("shuffle", next);
+// Direct stage setters. The Global Menu CYCLES, the sidebar's segmented
+// control PICKS a stage — both must go through one door so state, persistence
+// and the Rust side stay in step.
+export async function setShuffleStage(stage: ShuffleStage) {
+  if (stage !== "off") lastShuffle = stage;
+  playback.shuffle = stage;
+  persistStage("shuffle", stage);
   // Rust rebuilds the queue anchored at the current track when playing.
   try {
-    await invoke("playback_set_shuffle", { stage: next });
+    await invoke("playback_set_shuffle", { stage });
   } catch (err) {
     console.error("set shuffle failed", err);
   }
 }
 
-export async function cycleRepeat() {
-  const order: RepeatStage[] = ["off", "album", "track"];
-  const next = order[(order.indexOf(playback.repeat) + 1) % order.length];
-  playback.repeat = next;
-  persistStage("repeat", next);
+export async function setRepeatStage(stage: RepeatStage) {
+  if (stage !== "off") lastRepeat = stage;
+  playback.repeat = stage;
+  persistStage("repeat", stage);
   try {
-    await invoke("playback_set_repeat", { stage: next });
+    await invoke("playback_set_repeat", { stage });
   } catch (err) {
     console.error("set repeat failed", err);
   }
+}
+
+/** The enable checkbox. Unchecking stores "off" but remembers the stage, so
+ *  re-checking gives back what you had instead of silently picking a mode
+ *  (the thing every app that forgets your filter gets dinged for). */
+export function setShuffleOn(on: boolean) {
+  return setShuffleStage(on ? lastShuffle : "off");
+}
+export function setRepeatOn(on: boolean) {
+  return setRepeatStage(on ? lastRepeat : "off");
+}
+
+export async function cycleShuffle() {
+  const order: ShuffleStage[] = ["off", "album", "artist", "all"];
+  return setShuffleStage(order[(order.indexOf(playback.shuffle) + 1) % order.length]);
+}
+
+export async function cycleRepeat() {
+  const order: RepeatStage[] = ["off", "album", "track"];
+  return setRepeatStage(order[(order.indexOf(playback.repeat) + 1) % order.length]);
 }
 
 // --- equalizer (Step 6) --------------------------------------------------------

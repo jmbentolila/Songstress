@@ -4,6 +4,11 @@
   --sidebar-width: 236px;
   --playbar-h: 84px;
   --gap: 20px;
+  /* The window rung exists so the modal scrim can be clipped to it: `.app`
+     clips its own background to this radius, but a position:fixed descendant
+     escapes that clip, so an unrounded scrim paints square corners over the
+     transparent ones. */
+  --radius-window: 14px;
   --radius-panel: 12px;
   --radius-cover: 10px;
   /* Motion tokens — extend these, don't hand-type curves per component.
@@ -136,3 +141,15 @@ button {
   border: 0;
 }
 
+/* Modal scrim (About, Music folders): the same full-window wash, the same tier.
+   z-index and the wash strength are part of the tier, not per-dialog choices —
+   and the radius keeps the wash inside the window's own rounded corners. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-window);
+}
