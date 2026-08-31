@@ -70,8 +70,8 @@
     top: 50%;
     left: 50%;
     translate: -50% -50%;
-    width: 13px;
-    height: 13px;
+    width: var(--tb-dot, 15px);
+    height: var(--tb-dot, 15px);
     border-radius: 50%;
     border: 1px solid rgba(0, 0, 0, 0.18);
     background: var(--tb-x);

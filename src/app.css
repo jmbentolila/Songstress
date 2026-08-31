@@ -7,8 +7,11 @@
   /* The window rung exists so the modal scrim can be clipped to it: `.app`
      clips its own background to this radius, but a position:fixed descendant
      escapes that clip, so an unrounded scrim paints square corners over the
-     transparent ones. */
-  --radius-window: 14px;
+     transparent ones. It follows the user's decoration (Klassy's
+     WindowCornerRadius, published as --tb-radius) because a frameless window
+     that rounds itself differently from every other window on the desktop is
+     visibly lying; 14px is both this app's own value and the default. */
+  --radius-window: var(--tb-radius, 14px);
   --radius-panel: 12px;
   --radius-cover: 10px;
   /* Motion tokens — extend these, don't hand-type curves per component.

@@ -761,6 +761,61 @@ struct WindowDecoration {
     /// Background opacity in percent, as configured in the decoration theme.
     bg_opacity_active: u8,
     bg_opacity_inactive: u8,
+    /// Geometry, so the cluster is not merely coloured like the user's
+    /// decoration but sized and spaced like it: visible dot, gap between dots,
+    /// left margin of the titlebar, window corner radius.
+    dot_size: u8,
+    button_gap: u8,
+    margin_left: u8,
+    corner_radius: u8,
+}
+
+/// The button square Klassy lays out for each standard icon tier (KDE's
+/// StandardGuiSizes). The small circle a shape draws fills the rect minus 1px —
+/// calibrated against the user's own render: at screen scale 1.6 Konsole's
+/// Klassy dots measure 24x24 px = 15 logical, on a 42px = 26 logical pitch,
+/// which is rect 16 + `ButtonSpacingLeft=10`.
+fn klassy_rect(icon_size: Option<&String>) -> u8 {
+    match icon_size.map(|s| s.as_str()) {
+        Some("IconTiny") => 12,
+        Some("IconMedium") => 24,
+        Some("IconLarge") => 32,
+        Some("IconHuge") => 48,
+        _ => 16, // IconSmall, and the fallback for an unknown tier
+    }
+}
+
+#[cfg(test)]
+mod deco_geometry {
+    use super::klassy_rect;
+    fn tier(t: &str) -> Option<String> {
+        Some(t.to_string())
+    }
+    #[test]
+    fn button_rect_follows_the_configured_icon_tier() {
+        assert_eq!(klassy_rect(tier("IconTiny").as_ref()), 12);
+        assert_eq!(klassy_rect(tier("IconMedium").as_ref()), 24);
+        assert_eq!(klassy_rect(tier("IconLarge").as_ref()), 32);
+        // IconSmall, and anything unrecognised, keeps the calibrated default.
+        assert_eq!(klassy_rect(None), 16);
+        assert_eq!(klassy_rect(tier("IconNonsense").as_ref()), 16);
+    }
+    #[test]
+    fn small_circle_and_visible_gap_match_the_render() {
+        // Konsole under this config: 24px dots at 1.6 scale = 15 logical, on a
+        // 26 logical pitch = rect 16 + ButtonSpacingLeft 10.
+        let rect = klassy_rect(tier("IconSmall").as_ref());
+        let dot = rect - 1;
+        assert_eq!(dot, 15);
+        assert_eq!(dot + 10 + (rect - dot), 26);
+    }
+}
+
+fn u8_field(group: Option<&HashMap<String, String>>, key: &str, fallback: u8) -> u8 {
+    group
+        .and_then(|g| g.get(key))
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(fallback)
 }
 
 const DEFAULT_CLOSE: DecoButton = DecoButton {
@@ -849,6 +904,15 @@ fn kde_window_decoration() -> WindowDecoration {
     let klassy = read_ini(&config_dir().join("klassy").join("klassyrc"));
     let colors = klassy.get("ButtonColors");
     let color = |key: &str| colors.and_then(|s| s.get(key));
+    let sizing = klassy.get("ButtonSizing");
+    let spacing = klassy.get("TitleBarSpacing");
+    let windeco = klassy.get("Windeco");
+
+    // Klassy spaces the button RECTS; the circle inside each rect is 1px
+    // smaller, so the visible gap is the configured spacing plus that slack.
+    let rect = klassy_rect(windeco.and_then(|g| g.get("IconSize")));
+    let dot = rect.saturating_sub(1);
+    let spacing_left = u8_field(sizing, "ButtonSpacingLeft", 10);
 
     WindowDecoration {
         buttons_left: get("ButtonsOnLeft").cloned().unwrap_or_else(|| "XIA".into()),
@@ -858,6 +922,10 @@ fn kde_window_decoration() -> WindowDecoration {
         maximize: klassy_button(color("ButtonOverrideColorsActiveMaximize"), DEFAULT_MAXIMIZE),
         bg_opacity_active: opacity_percent(color("ButtonBackgroundOpacityActive")),
         bg_opacity_inactive: opacity_percent(color("ButtonBackgroundOpacityInactive")),
+        dot_size: dot,
+        button_gap: spacing_left + (rect - dot),
+        margin_left: u8_field(spacing, "TitleBarLeftMargin", 15),
+        corner_radius: u8_field(windeco, "WindowCornerRadius", 14),
     }
 }
 
@@ -1367,7 +1435,7 @@ async fn save_imports(
     state: tauri::State<'_, AppState>,
     album_id: Option<String>,
     track_id: Option<String>,
-) -> Result<usize, String> {
+) -> Result<library::import::SaveReport, String> {
     let cache_dir = app
         .path()
         .app_cache_dir()
@@ -1381,29 +1449,40 @@ async fn save_imports(
     .await
     .map_err(|e| e.to_string())??;
     if staged.is_empty() {
-        return Ok(0);
+        return Ok(Default::default());
     }
 
     let music_dir = music_root(&state);
+    // Where a staged album may land. The staging dir is deliberately NOT one of
+    // these: merging into a copy that is about to be deleted is how an album ends
+    // up pointing at nothing.
+    let adopt_roots = music_roots(&state);
     let emitter = app.clone();
     let cache = cache_dir.clone();
     let db_path = state.db_path.clone();
     let staged_clone = staged.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let saved = tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::import::save_to_library(&conn, &cache, &music_dir, &staged_clone, |done, total| {
-            let _ = emitter.emit(
-                "scan-progress",
-                serde_json::json!({ "phase": "import", "done": done, "total": total }),
-            );
-        })
+        library::import::save_to_library(
+            &conn,
+            &cache,
+            &adopt_roots,
+            &music_dir,
+            &staged_clone,
+            |done, total| {
+                let _ = emitter.emit(
+                    "scan-progress",
+                    serde_json::json!({ "phase": "import", "done": done, "total": total }),
+                );
+            },
+        )
     })
     .await
     .map_err(|e| e.to_string())??;
 
     let roots = scan_roots(&state, &cache_dir, None);
     run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
-    Ok(staged.len())
+    Ok(saved)
 }
 
 /// Discard staged music: delete the staged files (library untouched).
@@ -1430,13 +1509,38 @@ async fn discard_imports(
         return Ok(0);
     }
     let n = staged.len();
-    tauri::async_runtime::spawn_blocking(move || library::import::discard(&staged))
-        .await
-        .map_err(|e| e.to_string())??;
+    let db_path = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        library::import::discard(&conn, &staged)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     let roots = scan_roots(&state, &cache_dir, None);
     run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
     Ok(n)
+}
+
+/// The staged albums and the folder each would move to, for the manage-imports
+/// modal: the destination is what the decision is about, so it has to be on
+/// screen before Apply, not in a dialog afterwards.
+#[tauri::command]
+async fn staged_import_plan(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<library::import::StagedAlbum>, String> {
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let roots = music_roots(&state);
+    let music_dir = music_root(&state);
+    let staging = library::import::import_dir(&cache_dir);
+    let db = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = library::db::open(&db).map_err(|e| e.to_string())?;
+        library::import::staged_plan(&conn, &roots, &music_dir, &staging)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(serde::Serialize)]
@@ -1834,6 +1938,7 @@ pub fn run() {
             album_colors,
             fix_viewport,
             kde_window_decoration,
+            staged_import_plan,
             get_settings,
             set_menu_state,
             get_menu,

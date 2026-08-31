@@ -10,10 +10,55 @@ import { openContextMenu } from "./contextMenu.svelte";
  */
 export const scanner = $state({
   running: false,
-  phase: "" as "" | "scan" | "artwork" | "import",
+  /** Which verb is running. The Library pane hangs its progress ring off this,
+   * on the row whose own action is in flight — so it is set by the operation,
+   * never by the caller: a scan started from the Global Menu, the empty state or
+   * a relink has no click in the pane to hang it off. */
+  kind: "" as "" | Kind,
+  /** Which row keeps showing a COMPLETE arc after its operation finished. See
+   * `end()`. */
+  heldKind: "" as "" | Kind,
+  phase: "" as "" | Phase,
   done: 0,
   total: 0,
 });
+
+type Kind = "scan" | "full" | "import" | "save" | "discard" | "folder";
+type Phase = "scan" | "artwork" | "import";
+
+/** A determinate indicator that vanishes at 85% reads as an interruption: the
+ * backend's last progress event is usually short of the end, so unmounting the
+ * arc in the same frame as the run leaves an unfinished ring on the row that was
+ * just asked to do something. So the arc is held at full for a beat — long enough
+ * to register as "finished", too short to feel like a stage. Only runs that
+ * reported progress get the frame; an operation that never emitted an event never
+ * showed an arc to complete. */
+const HOLD_MS = 300;
+
+function end() {
+  const kind = scanner.kind;
+  const reported = scanner.total > 0;
+  scanner.running = false;
+  scanner.kind = "";
+  if (!reported) return;
+  scanner.heldKind = kind;
+  setTimeout(() => {
+    if (scanner.heldKind === kind) scanner.heldKind = "";
+  }, HOLD_MS);
+}
+
+/** Every operation starts from no news. `done`/`total` survive a finished run,
+ * so without this the ring appears at the PREVIOUS run's 100% and the first
+ * progress event unwinds it counter-clockwise before it starts climbing — which
+ * reads as "it did a lap before it began". Same for `phase`: a re-read must not
+ * announce itself as last run's artwork pass. */
+function begin(kind: Kind) {
+  scanner.running = true;
+  scanner.kind = kind;
+  scanner.phase = "";
+  scanner.done = 0;
+  scanner.total = 0;
+}
 
 let started = false;
 export function initScanner() {
@@ -30,7 +75,7 @@ export function initScanner() {
 
 export async function rescan() {
   if (scanner.running) return;
-  scanner.running = true;
+  begin("scan");
   try {
     await invoke("scan_library");
   } catch (err) {
@@ -38,7 +83,7 @@ export async function rescan() {
   } finally {
     // scan-finished also flips library.scanning, but make sure a failed/
     // no-op run never leaves us stuck.
-    scanner.running = false;
+    end();
   }
 }
 
@@ -46,13 +91,13 @@ export async function rescan() {
  *  grouping after scanner-logic changes (skipped files never regroup). */
 export async function rescanFull() {
   if (scanner.running) return;
-  scanner.running = true;
+  begin("full");
   try {
     await invoke("scan_library", { full: true });
   } catch (err) {
     console.error("full scan failed", err);
   } finally {
-    scanner.running = false;
+    end();
   }
 }
 
@@ -75,7 +120,7 @@ export function openMusicFolders(): void {
  *  Returns the updated folder list, or null if the user cancelled the picker. */
 export async function addMusicFolderRoot(): Promise<void> {
   if (scanner.running) return;
-  scanner.running = true;
+  begin("folder");
   try {
     // path = null ⇒ backend opens kdialog starting at the primary root.
     const updated = await invoke<string[] | null>("add_music_folder", { path: null });
@@ -85,7 +130,7 @@ export async function addMusicFolderRoot(): Promise<void> {
     // and a console line is invisible in the webview.
     notifyError(err);
   } finally {
-    scanner.running = false;
+    end();
   }
 }
 
@@ -93,14 +138,14 @@ export async function addMusicFolderRoot(): Promise<void> {
  *  files on disk are NEVER touched. */
 export async function removeMusicFolderRoot(path: string): Promise<void> {
   if (scanner.running) return;
-  scanner.running = true;
+  begin("folder");
   try {
     const updated = await invoke<string[]>("remove_music_folder", { path });
     ui.musicFolders = updated;
   } catch (err) {
     notifyError(err);
   } finally {
-    scanner.running = false;
+    end();
   }
 }
 
@@ -109,13 +154,13 @@ export async function removeMusicFolderRoot(path: string): Promise<void> {
 /** Copy files/folders into the import staging area, then rescan. */
 export async function importMusic(paths: string[]): Promise<void> {
   if (paths.length === 0 || scanner.running) return;
-  scanner.running = true;
+  begin("import");
   try {
     await invoke("import_music", { paths });
   } catch (err) {
     console.error("import failed", err);
   } finally {
-    scanner.running = false;
+    end();
   }
 }
 
@@ -135,26 +180,26 @@ export async function addMusicFolder(): Promise<void> {
  * everything staged. */
 export async function saveImports(albumId?: string, trackId?: string): Promise<void> {
   if (scanner.running) return;
-  scanner.running = true;
+  begin("save");
   try {
     await invoke("save_imports", { albumId: albumId ?? null, trackId: trackId ?? null });
   } catch (err) {
     console.error("save imports failed", err);
   } finally {
-    scanner.running = false;
+    end();
   }
 }
 
 /** Delete staged music (same scoping); library untouched. */
 export async function discardImports(albumId?: string, trackId?: string): Promise<void> {
   if (scanner.running) return;
-  scanner.running = true;
+  begin("discard");
   try {
     await invoke("discard_imports", { albumId: albumId ?? null, trackId: trackId ?? null });
   } catch (err) {
     console.error("discard imports failed", err);
   } finally {
-    scanner.running = false;
+    end();
   }
 }
 

@@ -156,11 +156,11 @@ pub fn build() -> Vec<Menu> {
             items: vec![
                 item(
                     "library.rescan",
-                    if s.scanning { "Scanning…" } else { "Rescan Library" },
+                    if s.scanning { "Scanning…" } else { "Scan for changes" },
                     !s.scanning,
                     None,
                 ),
-                item("library.rescan-full", "Full rescan (all files)", !s.scanning, None),
+                item("library.rescan-full", "Re-read all files", !s.scanning, None),
                 item("library.add-files", "Import music files…", !s.scanning, None),
                 item("library.add-folder", "Import music folder…", !s.scanning, None),
                 item(

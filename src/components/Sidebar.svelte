@@ -4,6 +4,7 @@
   import { ACCENT_PRESETS, accentVariants, hexToHsl } from "../lib/accent";
   import { menu, activateMenuItem } from "../lib/stores/menu.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
+  import { openImportManager } from "../lib/stores/imports.svelte";
   import { fold } from "../lib/search";
   import {
     windowClose,
@@ -12,6 +13,7 @@
   } from "../lib/window";
   import { decoState, decoVars, loadDecoration } from "../lib/stores/decoration.svelte";
   import Toggle from "./Toggle.svelte";
+  import ProgressRing from "./ProgressRing.svelte";
   import {
     playback,
     applyEqPreset,
@@ -41,6 +43,7 @@
   // frontend-only (the old gear-popover settings).
   const APPEARANCE = "appearance";
   const PLAYBACK = "playback";
+  const LIBRARY = "library";
 
   // Stage labels for the Playback pane's reveals. "off" is deliberately NOT a
   // segment: the group's checkbox owns Off, so the segmented control only ever
@@ -93,7 +96,13 @@
   ]);
 
   let detailItems = $derived.by(() => {
-    if (!atDetail || ui.menuDetail === APPEARANCE || ui.menuDetail === PLAYBACK) return [];
+    if (
+      !atDetail ||
+      ui.menuDetail === APPEARANCE ||
+      ui.menuDetail === PLAYBACK ||
+      ui.menuDetail === LIBRARY
+    )
+      return [];
     return (detailMenu?.items ?? []).filter(
       (i) =>
         !PLAYBACK_TRANSPORT.has(i.id) &&
@@ -217,20 +226,73 @@
     setEqPreamp(0);
   }
   let libStats = $derived(
-    `${library.albums.length} albums · ${library.trackCount} tracks`,
+    `${library.albums.length.toLocaleString()} albums · ${library.trackCount.toLocaleString()} tracks`,
   );
   // "never scanned" would be a lie on a library built before this readout
-  // existed — the time clause only appears once a scan happened in anger.
-  let libLine = $derived(
-    scanner.running
-      ? `${libStats} · scanning…`
-      : ui.lastScan === null
-        ? libStats
-        : `${libStats} · scanned ${new Date(ui.lastScan).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}`,
+  // existed — the time clause only appears once a scan happened in anger. The
+  // live scan progress is NOT here: it belongs next to the rows it disables
+  // (see scanLine), and the footer stays the truth about what the library IS.
+  let scanTime = $derived(
+    ui.lastScan === null
+      ? ""
+      : new Date(ui.lastScan).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
   );
+
+  // --- Library pane (store-driven, like Appearance and Playback) ---------
+  // The generic row list could not say the two things that matter here: that
+  // N albums are sitting staged, and where a running scan has got to. Actions
+  // still go through activateMenuItem, so a click here and a click in the
+  // Global Menu are the same door into the same Rust command.
+  let stagedAlbums = $derived(
+    library.albums.reduce((n, a) => n + (a.staged ? 1 : 0), 0),
+  );
+  let stagedLabel = $derived(
+    `${stagedAlbums} ${stagedAlbums === 1 ? "album" : "albums"}`,
+  );
+  let folderLabel = $derived(
+    `${ui.musicFolders.length} ${ui.musicFolders.length === 1 ? "folder" : "folders"}`,
+  );
+  const PHASE_LABELS: Record<string, string> = {
+    scan: "Scanning",
+    artwork: "Reading artwork",
+    import: "Importing",
+  };
+  // Operations that emit no progress events (discard, a folder added or removed)
+  // still owe assistive tech a sentence, and "Scanning…" would misreport what
+  // the disabled rows are waiting for.
+  const KIND_LABELS: Record<string, string> = {
+    scan: "Scanning",
+    full: "Re-reading all files",
+    import: "Copying files in",
+    save: "Saving imported music",
+    discard: "Discarding imported music",
+    folder: "Updating music folders",
+  };
+  let scanWords = $derived(
+    PHASE_LABELS[scanner.phase] ?? KIND_LABELS[scanner.kind] ?? "Working",
+  );
+  let scanLine = $derived(
+    !scanner.running
+      ? ""
+      : scanner.total > 0
+        ? `${scanWords} ${scanner.done.toLocaleString()} of ${scanner.total.toLocaleString()}`
+        : `${scanWords}\u2026`,
+  );
+  // Determinate: the ring fills, it does not spin. No events yet (total 0) is an
+  // empty ring, not a fake halfway — "started, no news" is the honest state.
+  // Finished runs report 1: the hold frame exists precisely to show a complete
+  // arc, so an operation that ended at its last coarse event still lands full.
+  let scanProgress = $derived(
+    scanner.running ? (scanner.total > 0 ? scanner.done / scanner.total : 0) : 1,
+  );
+  let ringKind = $derived(scanner.running ? scanner.kind : scanner.heldKind);
+  // The ring goes on the row whose own verb is running, so a disabled pane is
+  // never disabled without saying which row is the reason.
+  const ringOn = (kind: string) => ringKind === kind;
+
   // Theme modes, in the order the segmented control shows them. "system" is
   // the shipped default and was unreachable once touched: the old button
   // cycled dark|light, which resolves system to a fixed value.
@@ -661,29 +723,33 @@
                 >{t.label}</button>
               {/each}
             </div>
-            <Toggle
-              checked={ui.playbarGradient}
-              label="Playbar artwork gradient"
-              onchange={(on) => (ui.playbarGradient = on)}
-            />
-            <!-- Accent folded one level deep: the 12-dot grid was the highest
-                 element count in the sidebar for the lowest-frequency
-                 decision. Summary row here, grid in the sub layer. -->
-            <button class="mrow subrow" onclick={() => openSub("accent")}>
-              <span class="name">Accent</span>
-              <span class="tail">
-                <span
-                  class="cur"
-                  class:stock={ui.accentColor === null}
-                  style:background={ui.accentColor ?? undefined}
-                  aria-hidden="true"
-                ></span>
-                <span class="curname">{accentName}</span>
-                <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
-                  <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-              </span>
-            </button>
+            <!-- Both are rows, so they touch: the run of rows starts here and
+                 the group's 12px peer gap applies above it, to the segment. -->
+            <div class="rows">
+              <Toggle
+                checked={ui.playbarGradient}
+                label="Playbar artwork gradient"
+                onchange={(on) => (ui.playbarGradient = on)}
+              />
+              <!-- Accent folded one level deep: the 12-dot grid was the highest
+                   element count in the sidebar for the lowest-frequency
+                   decision. Summary row here, grid in the sub layer. -->
+              <button class="mrow subrow" onclick={() => openSub("accent")}>
+                <span class="name">Accent</span>
+                <span class="tail">
+                  <span
+                    class="cur"
+                    class:stock={ui.accentColor === null}
+                    style:background={ui.accentColor ?? undefined}
+                    aria-hidden="true"
+                  ></span>
+                  <span class="curname">{accentName}</span>
+                  <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
+                    <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </span>
+              </button>
+            </div>
           </section>
         </div>
         <div class="panefoot">
@@ -700,120 +766,227 @@
              state through the same setters, so the two surfaces cannot drift. -->
         <div class="panebody">
           <section class="group">
-            <Toggle
-              checked={playback.repeat !== "off"}
-              label="Repeat"
-              onchange={setRepeatOn}
-            />
-            {#if playback.repeat !== "off"}
-              <div class="reveal" style="--seg-n: {REPEAT_MODES.length}">
-                <div
-                  class="seg"
-                  role="radiogroup"
-                  aria-label="Repeat mode"
-                  tabindex="-1"
-                  onkeydown={segKeys(REPEAT_IDS, () => playback.repeat, (id) => setRepeatStage(id as "album" | "track"))}
-                >
-                  {#each REPEAT_MODES as m (m.id)}
-                    <button
-                      class="segbtn"
-                      class:on={playback.repeat === m.id}
-                      role="radio"
-                      aria-checked={playback.repeat === m.id}
-                      tabindex={playback.repeat === m.id ? 0 : -1}
-                      onclick={() => setRepeatStage(m.id)}
-                    >{m.label}</button>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </section>
-
-          <section class="group">
-            <Toggle
-              checked={playback.shuffle !== "off"}
-              label="Shuffle"
-              onchange={setShuffleOn}
-            />
-            {#if playback.shuffle !== "off"}
-              <div class="reveal" style="--seg-n: {SHUFFLE_MODES.length}">
-                <div
-                  class="seg"
-                  role="radiogroup"
-                  aria-label="Shuffle scope"
-                  tabindex="-1"
-                  onkeydown={segKeys(SHUFFLE_IDS, () => playback.shuffle, (id) => setShuffleStage(id as "album" | "artist" | "all"))}
-                >
-                  {#each SHUFFLE_MODES as m (m.id)}
-                    <button
-                      class="segbtn"
-                      class:on={playback.shuffle === m.id}
-                      role="radio"
-                      aria-checked={playback.shuffle === m.id}
-                      tabindex={playback.shuffle === m.id ? 0 : -1}
-                      onclick={() => setShuffleStage(m.id)}
-                    >{m.label}</button>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          </section>
-
-          <section class="group">
-            <Toggle
-              checked={playback.eq.enabled}
-              label="Equalizer"
-              onchange={setEqEnabled}
-            />
-            {#if playback.eq.enabled}
-              <div class="reveal">
-                <!-- 10 named presets is too many for a segment: same drill
-                     language as Accent, value shown in the count column. -->
-                <button class="mrow subrow" onclick={() => openSub("eq-preset")}>
-                  <span class="name">Preset</span>
-                  <span class="tail">
-                    <span class="curname">{playback.eq.preset ?? "Custom"}</span>
-                    <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
-                      <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-                    </svg>
-                  </span>
-                </button>
-                <div class="glabel">Custom</div>
-                <label class="ctl">
-                  <span class="ctlhead"
-                    ><span>Preamp</span><span class="val">{fmtDb(playback.eq.preampDb)} dB</span></span
+            <div class="subject">
+              <Toggle
+                checked={playback.repeat !== "off"}
+                label="Repeat"
+                onchange={setRepeatOn}
+              />
+              {#if playback.repeat !== "off"}
+                <div class="reveal" style="--seg-n: {REPEAT_MODES.length}">
+                  <div
+                    class="seg"
+                    role="radiogroup"
+                    aria-label="Repeat mode"
+                    tabindex="-1"
+                    onkeydown={segKeys(REPEAT_IDS, () => playback.repeat, (id) => setRepeatStage(id as "album" | "track"))}
                   >
-                  <input
-                    type="range" min={-EQ_MAX_DB} max={EQ_MAX_DB} step="0.5"
-                    value={playback.eq.preampDb}
-                    aria-valuetext={`${fmtDb(playback.eq.preampDb)} decibels`}
-                    style:background={fill(playback.eq.preampDb, -EQ_MAX_DB, EQ_MAX_DB)}
-                    oninput={(e) => setEqPreamp(+e.currentTarget.value)}
-                  />
-                </label>
-                {#each EQ_BANDS as hz, i (hz)}
+                    {#each REPEAT_MODES as m (m.id)}
+                      <button
+                        class="segbtn"
+                        class:on={playback.repeat === m.id}
+                        role="radio"
+                        aria-checked={playback.repeat === m.id}
+                        tabindex={playback.repeat === m.id ? 0 : -1}
+                        onclick={() => setRepeatStage(m.id)}
+                      >{m.label}</button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <div class="subject">
+              <Toggle
+                checked={playback.shuffle !== "off"}
+                label="Shuffle"
+                onchange={setShuffleOn}
+              />
+              {#if playback.shuffle !== "off"}
+                <div class="reveal" style="--seg-n: {SHUFFLE_MODES.length}">
+                  <div
+                    class="seg"
+                    role="radiogroup"
+                    aria-label="Shuffle scope"
+                    tabindex="-1"
+                    onkeydown={segKeys(SHUFFLE_IDS, () => playback.shuffle, (id) => setShuffleStage(id as "album" | "artist" | "all"))}
+                  >
+                    {#each SHUFFLE_MODES as m (m.id)}
+                      <button
+                        class="segbtn"
+                        class:on={playback.shuffle === m.id}
+                        role="radio"
+                        aria-checked={playback.shuffle === m.id}
+                        tabindex={playback.shuffle === m.id ? 0 : -1}
+                        onclick={() => setShuffleStage(m.id)}
+                      >{m.label}</button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <div class="subject">
+              <Toggle
+                checked={playback.eq.enabled}
+                label="Equalizer"
+                onchange={setEqEnabled}
+              />
+              {#if playback.eq.enabled}
+                <div class="reveal">
+                  <!-- 10 named presets is too many for a segment: same drill
+                       language as Accent, value shown in the count column. -->
+                  <button class="mrow subrow" onclick={() => openSub("eq-preset")}>
+                    <span class="name">Preset</span>
+                    <span class="tail">
+                      <span class="curname">{playback.eq.preset ?? "Custom"}</span>
+                      <svg class="drill" viewBox="0 0 10 14" aria-hidden="true">
+                        <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                  <div class="glabel">Custom</div>
                   <label class="ctl">
                     <span class="ctlhead"
-                      ><span>{fmtHz(hz)}</span><span class="val">{fmtDb(playback.eq.gains[i])}</span></span
+                      ><span>Preamp</span><span class="val">{fmtDb(playback.eq.preampDb)} dB</span></span
                     >
                     <input
                       type="range" min={-EQ_MAX_DB} max={EQ_MAX_DB} step="0.5"
-                      value={playback.eq.gains[i]}
-                      aria-label={`${fmtHz(hz)} hertz`}
-                      aria-valuetext={`${fmtDb(playback.eq.gains[i])} decibels`}
-                      title="Double-click to zero"
-                      style:background={fill(playback.eq.gains[i], -EQ_MAX_DB, EQ_MAX_DB)}
-                      ondblclick={() => setEqBand(i, 0)}
-                      oninput={(e) => setEqBand(i, +e.currentTarget.value)}
+                      value={playback.eq.preampDb}
+                      aria-valuetext={`${fmtDb(playback.eq.preampDb)} decibels`}
+                      style:background={fill(playback.eq.preampDb, -EQ_MAX_DB, EQ_MAX_DB)}
+                      oninput={(e) => setEqPreamp(+e.currentTarget.value)}
                     />
                   </label>
-                {/each}
-              </div>
-            {/if}
+                  {#each EQ_BANDS as hz, i (hz)}
+                    <label class="ctl">
+                      <span class="ctlhead"
+                        ><span>{fmtHz(hz)}</span><span class="val">{fmtDb(playback.eq.gains[i])}</span></span
+                      >
+                      <input
+                        type="range" min={-EQ_MAX_DB} max={EQ_MAX_DB} step="0.5"
+                        value={playback.eq.gains[i]}
+                        aria-label={`${fmtHz(hz)} hertz`}
+                        aria-valuetext={`${fmtDb(playback.eq.gains[i])} decibels`}
+                        title="Double-click to zero"
+                        style:background={fill(playback.eq.gains[i], -EQ_MAX_DB, EQ_MAX_DB)}
+                        ondblclick={() => setEqBand(i, 0)}
+                        oninput={(e) => setEqBand(i, +e.currentTarget.value)}
+                      />
+                    </label>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </section>
         </div>
         <div class="panefoot">
           <button class="frow" onclick={resetPlayback}>Reset playback</button>
+        </div>
+      {:else if ui.menuDetail === LIBRARY}
+        <!-- Bespoke for the same reason the other two are: six undifferentiated
+             rows hid which decisions were about getting files in, which about
+             re-reading them, and that anything was staged at all. Three groups,
+             one door for the staged pile, and the live scan line where it
+             explains the disabled rows. -->
+        <div class="panebody">
+          <section class="group">
+            <div class="glabel">Import</div>
+            <div class="rows">
+              <button
+                class="mrow"
+                disabled={scanner.running}
+                onclick={() => activateMenuItem("library.add-files")}
+              >
+                <span class="name">Import music files…</span>
+                {#if ringOn("import")}
+                  <span class="tail"><ProgressRing value={scanProgress} label={scanLine || "Finished"} phase={scanner.phase} /></span>
+                {/if}
+              </button>
+              <button
+                class="mrow"
+                disabled={scanner.running}
+                onclick={() => activateMenuItem("library.add-folder")}
+              >
+                <span class="name">Import music folder…</span>
+                {#if ringOn("import")}
+                  <span class="tail"><ProgressRing value={scanProgress} label={scanLine || "Finished"} phase={scanner.phase} /></span>
+                {/if}
+              </button>
+              {#if stagedAlbums > 0}
+                <!-- One door for the pile, and the amount as its tail: the two
+                     verbs this replaced acted on the whole pile before saying
+                     where it would go, and the destination is what the decision
+                     is about. The modal states it per album. -->
+                <button
+                  class="mrow"
+                  data-imports-door
+                  disabled={scanner.running}
+                  onclick={() => void openImportManager()}
+                >
+                  <span class="name">Manage imported music…</span>
+                  <span class="tail">
+                    {#if ringOn("save") || ringOn("discard")}
+                      <ProgressRing value={scanProgress} label={scanLine || "Finished"} phase={scanner.phase} />
+                    {:else}
+                      <span class="curname">{stagedLabel}</span>
+                    {/if}
+                  </span>
+                </button>
+              {/if}
+            </div>
+          </section>
+
+          <section class="group">
+            <div class="glabel">Scan</div>
+            <div class="rows">
+              <button
+                class="mrow"
+                disabled={scanner.running}
+                onclick={() => activateMenuItem("library.rescan")}
+              >
+                <span class="name">Scan for changes</span>
+                {#if ringOn("scan")}
+                  <span class="tail"><ProgressRing value={scanProgress} label={scanLine || "Finished"} phase={scanner.phase} /></span>
+                {/if}
+              </button>
+              <button
+                class="mrow"
+                disabled={scanner.running}
+                onclick={() => activateMenuItem("library.rescan-full")}
+              >
+                <span class="name">Re-read all files</span>
+                {#if ringOn("full")}
+                  <span class="tail"><ProgressRing value={scanProgress} label={scanLine || "Finished"} phase={scanner.phase} /></span>
+                {/if}
+              </button>
+            </div>
+          </section>
+
+          <section class="group">
+            <div class="glabel">Storage</div>
+            <button class="mrow" onclick={() => activateMenuItem("library.choose-folder")}>
+              <span class="name">Music folders…</span>
+              <span class="tail">
+                {#if ringOn("folder")}
+                  <ProgressRing value={scanProgress} label={scanLine || "Finished"} phase={scanner.phase} />
+                {:else}
+                  <span class="curname">{folderLabel}</span>
+                {/if}
+              </span>
+            </button>
+          </section>
+        </div>
+        <div class="panefoot">
+          <!-- status, not padding: this pane had no idea when the library was
+               last built (heuristic 1 gap). Two lines by design — one long
+               joined line wrapped mid-clause as the counts grew. -->
+          <div class="fstat">
+            <span>{libStats}</span>
+            {#if ui.lastScan !== null}
+              <span class="fsub">last scan {scanTime}</span>
+            {/if}
+          </div>
         </div>
       {:else}
         <div class="scroll items">
@@ -832,13 +1005,6 @@
             </button>
           {/each}
         </div>
-        {#if ui.menuDetail === "library"}
-          <!-- status, not padding: this pane had no idea when the library was
-               last built (heuristic 1 gap) -->
-          <div class="panefoot">
-            <div class="fstat">{libLine}</div>
-          </div>
-        {/if}
       {/if}
     </div>
 
@@ -961,32 +1127,38 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 16px 10px 10px 14px;
+    padding: 16px 10px 10px var(--tb-margin, 15px);
   }
 
   .tb-traffic {
     display: flex;
-    gap: 8px;
+    /* Mirror, not imitation: the spacing Klassy puts between its button rects
+       (10) plus the 1px a small-circle button loses to its rect, all read from
+       klassyrc by `kde_window_decoration` and published as --tb-gap. */
+    gap: var(--tb-gap, 11px);
   }
 
   .tb-light {
     position: relative;
-    width: 13px;
-    height: 13px;
+    width: var(--tb-dot, 15px);
+    height: var(--tb-dot, 15px);
     border-radius: 50%;
     border: 1px solid rgba(0, 0, 0, 0.18);
     padding: 0;
     cursor: pointer;
   }
 
-  /* Hit area: a 13px target is under this app's own ~28px minimum. The dots sit
-     in the drag region, which forgives a little, but the invisible box is grown
-     to 21px anyway — capped by the 8px gap between dots. Same trick the surface
-     dots don't need (their button is 26px around the same dot). */
+  /* Hit area: the dot alone is a 15px target, under this app's own ~28px
+     minimum, so the invisible box grows by half the gap on each side — which
+     makes it exactly the cluster's pitch, by construction, for whatever the
+     decoration asks for. Any more and neighbouring targets overlap and the later
+     button steals the shared strip, putting the close dot's east edge inside
+     minimize. Same trick the surface dots don't need (their button is 26px
+     around the same dot). */
   .tb-light::before {
     content: "";
     position: absolute;
-    inset: -4px;
+    inset: calc(var(--tb-gap, 11px) / -2);
   }
 
   /* Absolute centering — place-items:center on a native <button> drifts
@@ -1354,7 +1526,8 @@
     font-weight: 600;
   }
 
-  .irow:disabled {
+  .irow:disabled,
+  .mrow:disabled {
     color: var(--text-dim);
     cursor: default;
   }
@@ -1463,10 +1636,49 @@
     gap: 30px;
   }
 
+  /* Spacing ladder inside a pane — three rungs, each one a relationship:
+       6px  a thing and the thing it owns or labels
+       12px peers within one subject
+       30px between subjects (.panebody's own gap)
+     One undifferentiated gap made a toggle's own reveal sit exactly as far from
+     it as an unrelated subject did, so the spacing described no hierarchy. */
+  /* Two distances inside a subject: 12px between anything and its neighbour —
+     a group label included, because a title crammed 6px onto the first control
+     reads as a caption glued to it, not as a heading — and 6px from a row to the
+     fields it owns, the only hug in the pane. The hug is a negative margin on a
+     parent-template element, because that is the only way to go BELOW the
+     container gap. Mechanism matters:
+     a parent's scoped selector does not reach a child component's root element,
+     so `* + *` margins silently skipped every <Toggle> in the pane and its
+     neighbours collapsed to zero separation. gap works regardless of who
+     compiled the child. */
   .group {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+  }
+
+  /* One setting and the fields it owns. The 6px lives here, as a container gap —
+     not as a negative margin on the reveal — so it also applies when the owner is
+     a component root (<Toggle>), which a parent's scoped selector cannot reach.
+     The three Playback subjects are ONE group of three rows, not three groups:
+     30px between them said "unrelated subjects" and made the pane look like a
+     list with the pages falling out of it. */
+  .subject {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* A run of action rows is ONE block: rows touch at the app's row rhythm
+     (--sidebar-row-size pitch, no gap), exactly as they do in the root layer
+     and in the generic model-driven list. The group's 10px gap is air for
+     mixed content — a label, a slider, a reveal — and letting it fall between
+     rows too is what made this pane's rows float apart from every other list
+     in the sidebar. */
+  .rows {
+    display: flex;
+    flex-direction: column;
   }
 
   .glabel {
@@ -1486,7 +1698,7 @@
   .reveal {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     padding-left: 12px;
     animation: reveal-in 200ms var(--ease-out);
   }
@@ -1603,7 +1815,10 @@
   /* Accent summary row: name · current color · drill. The 12-dot grid lives
      one level deeper now — it was the densest thing in the sidebar for the
      rarest decision in the pane. */
-  .subrow .tail {
+  /* Readout column of a pane row ("3 albums", "1 folder", "Rock"). Selector is
+     .panebody, not .subrow: a row that carries a number is not necessarily a
+     drill, and the number is the same language either way. */
+  .panebody .tail {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1611,7 +1826,7 @@
     margin-left: auto;
   }
 
-  .subrow .cur {
+  .panebody .cur {
     width: 16px;
     height: 16px;
     flex: none;
@@ -1619,11 +1834,11 @@
     border-radius: 50%;
   }
 
-  .subrow .cur.stock {
+  .panebody .cur.stock {
     background: linear-gradient(135deg, #a78bfa 50%, #7c58f0 50%);
   }
 
-  .subrow .curname {
+  .panebody .curname {
     font-size: 11px;
     color: var(--text-dim);
   }
@@ -1672,10 +1887,18 @@
   }
 
   .fstat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     padding: 6px 10px 2px;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
+  }
+
+  /* The second clause is subordinate: same tier, quieter. */
+  .fstat .fsub {
+    opacity: 0.75;
   }
 
   /* Swatches (sub layer): 6 per row — 11 presets + the custom picker is 12,

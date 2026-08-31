@@ -239,11 +239,12 @@ the upstream report.
   (now scaleX-driven) stays. Nothing in the motion-audit changes should
   conflict (the audit's one additive suggestion — TagEditor modal
   entrance — is parked with the modal work below on purpose).
-- **Modal work (later, user-owned)**: TagEditor + any future modals. The
-  audit noted the TagEditor mounts with zero entrance motion
-  (TagEditor.svelte:251 `{#if open}`) — a ~180ms scale(0.97)+fade from
-  center is the planned direction (transform+opacity only; center origin
-  is correct for a centered modal).
+- **Modal work (later, user-owned)**: TagEditor's entrance. The audit noted
+  it mounts with zero entrance motion (TagEditor.svelte:251 `{#if open}`) —
+  a ~180ms scale(0.97)+fade from center is the planned direction
+  (transform+opacity only; center origin is correct for a centered modal).
+  The first real modal of this round — the imported-music manager — shipped
+  without entrance motion too, matching MusicFolders/About on purpose.
 
 ### Explicitly deferred
 
@@ -1922,7 +1923,9 @@ with a red traffic-light dot at **top-left**, and the EQ popover's rows were
 reordered so the header is chrome, the middle is the curve, the base is
 ownership (`[✓] Equalizer …… Rock`).
 
-- **`components/SurfaceClose.svelte`** — 13px dot, `--tb-x` (the user's KWin
+- **`components/SurfaceClose.svelte`** — 14px dot (was 13; the titlebar dots grew
+  to 14 and the gap to 10, making the cluster 24px on center — bigger dots, bigger
+  hit area, and the family keeps one size), `--tb-x` (the user's KWin
   close colour, now published on `<html>` by `decoVars()` in the decoration
   store, shared with the titlebar instead of duplicated), 26px transparent hit
   box, glyph on hover AND keyboard focus, press = brightness 0.82, **red only**.
@@ -2010,6 +2013,278 @@ User: still square on my view. Two findings.
 - If a user still sees a square corner in the wash, the candidate is the compositor
   rounding the window at a radius ≠ our 14px clip (then: read the radius from the
   decoration instead of hardcoding the rung).
+
+## Library pane, rebuilt (2026-08-31)
+
+The last pane still rendering the flattened menu model: six rows at one
+undifferentiated tier, in an order that put the rarest action first, with the
+one live fact (two albums sitting staged) buried fifth and unstated.
+
+- Bespoke branch like Appearance and Playback, three groups: **Import** (files /
+  folder, then a reveal that exists only while anything is staged — the amount as
+  a state line, then `Save imported music` and `Discard imported music`),
+  **Scan** (`Scan for changes`, `Re-read all files` + the live progress line),
+  **Storage** (`Music folders…` with the folder count as readout). Footer keeps
+  the counts and adds the last-scan time on a subordinate second line.
+- **`.gstat`** (in-group status, caption tier, tabular nums): the live scan
+  progress — `Scanning 1,810 of 4,434` — inside the group whose rows it explains,
+  `role="status"`. The footer stopped carrying `scanning…`: the footer is what the
+  library IS, the group is what is happening to it.
+- **`Discard imported music`** is a new door, not a new mechanism:
+  `discardImports()` with no scope already existed and was reachable only as a
+  Delete keypress on one staged track, so a pile of staged imports had no way to
+  be dropped at once. No dialog — the label asks (`Discard 2 albums now?`),
+  leaving the pane disarms, no timeout, no color (the documented caution amber is
+  still not a token).
+- `.subrow .tail/.curname/.cur` became `.panebody .tail/…`: a row that carries a
+  readout is not necessarily a drill. Rows now share one `.irow:disabled,
+  .mrow:disabled` dim.
+- menu.rs labels moved to match the pane ("Scan for changes", "Re-read all
+  files") — "Full rescan (all files)" and "Rescan Library" both undersold what
+  the incremental scan does (it sweeps orphans too). Rust tests unaffected (65
+  green; they assert enabled-flags and the scanning label, not these two).
+- Verified live: `{groups: [Import, Scan, Storage], rows: [… "Save imported music
+  2 albums" …], foot: "248 albums · 4,434 tracks", reveal: true}`; arming the
+  discard → `Discard 2 albums now?`; leaving and re-entering the pane → disarmed;
+  real "Scan for changes" completed in <0.6s and the footer gained
+  `last scan 04:07 PM`; fake progress through the live store module → `.gstat`
+  "Scanning 1,810 of 4,434", role=status, 6 rows disabled. Screenshots
+  `/tmp/lib0-crop.png` (before), `/tmp/lib1-crop.png` (armed),
+  `/tmp/lib2-crop.png` (scanning), `/tmp/lib3-crop.png` (final).
+### Row separation fix (user catch)
+
+First render put the action rows directly in `.group`, so the group's 10px gap
+fell between them: 50px pitch where every row list in the app is exactly
+`--sidebar-row-size` (the user's setting is 40px, measured root layer 98/138/178).
+Now runs of rows live in a `.rows` wrapper with no gap (measured Library
+136/176, 250/290, 384/424 — 40px pitch, and the reveal's rows at x=26 = the
+14px panebody pad + 12px indent). `/tmp/lib4-crop.png`.
+
+Not changed, and logged as a real question rather than an oversight: Appearance
+and Playback are forms, so their children keep the 10px group gap (Appearance
+toggle @298 / Accent @324; Playback Repeat @112, seg @138, Shuffle @200,
+Equalizer @246, Preset @272). The candidate improvement there is proximity by
+relationship — an owner row and its own reveal closer together than two sibling
+toggles — not a blanket gap change.
+
+### Ownership spacing: 6 / 12 / 30 (the fix I said I'd offer)
+
+Done in the same pass, in Appearance and Playback (the panes whose content is
+mixed controls). `.group` went from `gap: 10px` to a ladder expressed as sibling
+margins — `* + *` 12, `.glabel + *` 6, `.reveal` 6, and inside a reveal the label
+hug `-6` — so the tightest distance in a pane is now the ownership relation.
+Measured after (bottom → top): Repeat 128→134 (6), subject→subject 166→196 and
+212→242 (30), Equalizer 258→Preset 264 (6), Preset 304→CUSTOM 316 (12), CUSTOM
+330→Preamp 336 (6), slider→slider 364→376 (12). `/tmp/pb9-crop.png`.
+
+`.reveal`'s internal gap moved 10 → 12 so the ladder has three rungs and not
+three-and-a-half; the EQ block grows ~22px taller for eleven sliders, which is
+inside a pane that already scrolls.
+
+Side effect of the measurement session: **Repeat is now ON (Album)** in the user's
+settings — left over from the pass-B keyboard test (clicking a segment enables its
+subject through `setRepeatStage`, which is the single door working as designed).
+Reported rather than silently reverted, since it changes playback behaviour.
+
+### Second catch: the checkbox was not a row (Appearance spacing)
+
+The ladder was right and Appearance still looked off, because `Toggle.svelte` was
+a 16px label: the checkbox row sat as a caption between two 40px rows, so its
+pane's rhythm could not match its neighbours' no matter what the gaps said. Fix is
+genus, not spacing — `.toggle { min-height: var(--sidebar-row-size) }` (the
+compact popover variant opts out; the popover is still 250px tall and its toggle
+16px), and the two row-height children in Appearance's Theme group (the checkbox,
+the Accent drill) went into a `.rows` run so they touch.
+
+Measured after: Appearance — label→slider 6, slider→slider 12, group→group 30,
+label→segment 6, segment→row-run 12, checkbox 294–334 → Accent 334–374 (touching,
+40 pitch, same as the root layer). Playback — Repeat 112–152 → segment 158 (6),
+segment → Shuffle 30, Equalizer → Preset 6 with both rows 40 tall, CUSTOM → its
+sliders 6. `/tmp/ap3-crop.png`, `/tmp/pb10-crop.png`.
+
+The general lesson for this codebase: when a pane "feels misaligned" but the gap
+ladder checks out, measure the *children's heights*, not just the gaps — the row
+height is the unit every list is built on, and one component opting out of it
+silently makes the whole pane read as though the spacing were wrong.
+
+### Third catch: a group title needs air (user, plain words this time)
+
+"SIZES and its slider are basically right after each other." I had made every
+label hug its content at 6px, which is the right distance for a *caption* and the
+wrong one for a *heading*: a title's job is to stand slightly apart and name what
+follows. The label hug is gone — group labels and the `CUSTOM` label now sit at
+the 12px neighbour distance, and 6px survives for exactly one relation: a row and
+the fields it owns. Measured: `SIZES` 112–126 → first slider 138 (12); slider→slider
+12; group→group 30; `THEME` 250–262 → segment 12; rows touching at 40.
+`/tmp/ap5-crop.png`. Fewer rules, two rungs of real meaning instead of three
+competing ones — the user's complaint was the design over-reaching, not the
+numbers being wrong.
+
+### Fourth catch: three checkbox rows are one subject, not three (user)
+
+"Too much separation between the three checkbox rows." Correct, and the cause was
+mine: Playback had one `.group` per toggle, so the 30px *between-subjects* rung
+separated Repeat from Shuffle. Those three are not subjects, they are three rows
+of the one subject the pane is named after. Now a `.subject` wrapper (owner + what
+it owns, gap 6) sits inside a single `.group` (peers, gap 12), and the 30px rung is
+reserved for panes that actually have titled subjects — Appearance's two, Library's
+three.
+
+Measured: Repeat 112–152 → segment 158 (6); segment → Shuffle 202 (12, was 30);
+Shuffle → Equalizer 254 (12); Equalizer 294 → Preset 300 (6); Library's staged
+reveal, being group state rather than a row's own field, sits at 12 (was the
+removed 6px hug). `/tmp/pb11-crop.png`.
+
+The ladder also lost its only negative margin: `.group > .reveal { margin-top:
+-6px }` became `.subject { gap: 6px }`, which is the same distance expressed the
+way the rest of the ladder already worked — on the container, where it reaches
+component roots too. Two user-visible corrections in a row were caused by
+expressing a distance on the *element* instead of the *container* that owns the
+relationship.
+
+### Fifth catch: "did it according to my klassy settings"
+
+I had set gap 10 and dot 14 by eye and by argument. The honest answer was no — the
+app already read Klassy's *colours* and titlebar opacity, but not its geometry, so
+the cluster was an imitation with the right palette. Now `WindowDecoration` carries
+`dotSize`, `buttonGap`, `marginLeft`, `cornerRadius`, published as `--tb-dot`,
+`--tb-gap`, `--tb-margin`, `--tb-radius`, and the CSS consumes them (`.head`'s left
+padding, `.tb-traffic`'s gap, `.tb-light`'s size, `--radius-window` itself).
+
+Calibrated against the user's actual render rather than Klassy's docs — screen
+scale 1.6, Konsole's buttons 24x24 px (15 logical) on a 42 px pitch (26 logical),
+which is button rect 16 (KDE Small icon tier) + `ButtonSpacingLeft=10`, the
+small-circle shape filling the rect minus 1px. So dot = tier size − 1, gap =
+spacing + slack. After: **pixel identical** to Konsole in one screenshot — 24 px
+dots, 42 px pitch, `/tmp/cmp_dots.png`. Two tests in `deco_geometry` lock it.
+
+The lesson is narrower than "read the config": the app already had a pipeline for
+one kind of Klassy truth (colour) and I kept hand-tuning the other kind (size) as
+if it were a design decision. Where the user has already declared a value, the
+design decision is *which* values are ours to make.
+
+### Scan progress moves onto the row, as a filling arc (user)
+
+The text loader under the Scan group grew the pane mid-action and shoved the rows
+below it downward while the user was watching them. Now the two Scan rows carry
+their own progress: a determinate ring in the row tail (`ProgressRing.svelte`,
+16px, `stroke-dasharray` on a fixed 16-unit viewBox so the stroke scales with the
+box, sweep starts at 12 o'clock, butt caps so 0% draws nothing, 120ms linear on
+the offset because the value is data and an ease would lag the truth it reports).
+`scanner.kind` is the plumbing: set by the operation, read by the row. Live during
+a full re-read: `aria-valuenow` 37 → 67 → 98, `aria-valuetext` "Scanning 1,677 of
+4,487" — the sentence the arc replaced, kept for assistive tech. `/tmp/ring-pane.png`,
+`/tmp/r3z.png` (8x).
+
+Two judgement calls worth keeping: the accent is the wrong-looking token at first
+(`--accent-text` is #1b1b1f, built for glyphs *on* accent fills, not on chrome), so
+the arc takes `--accent`, the same token as the seek fill — the app has one idea of
+what "your colour is working" looks like; and the track is 20% of `--text`, which
+with a White accent is faint, deliberately — the arc is the message, the track is
+only the promise of how much is left.
+
+### The arc died at 85% (user: "check their fills")
+
+Two tail bugs, one mechanism — the ring was unmounting in the same frame the run
+ended, and the run ended wherever the last progress event happened to land:
+* started full and unwound, because `done`/`total` outlive a finished run → every
+  operation now calls `begin(kind)`, which clears the counts and the phase;
+* vanished before completing, because the last event was 85%, not 100% → `end()`
+  holds that row's arc at full for 300ms (`heldKind`), and only for runs that
+  reported progress at all.
+
+Sampled in-page, 200ms apart, after the fix: `200ms:25 401ms:54 601ms:83
+801ms:100 1001ms:100 1201ms:gone`, and for the incremental scan, which finishes
+almost at once: `348ms:100 496ms:100 648ms:100 797ms:gone`. The rule the pane
+follows now: the ring's only direction is forward, and it is allowed to say
+"finished".
+
+- Not touched: the footer time follows the browser locale (`04:07 PM`), which is
+  not KDE's default 24h convention — left as-is rather than imposing `h23`.
+
+## Import destinations: cascade, not template (2026-08-31, user's library as the witness)
+
+- The old save rebuilt `<musicDir>/<Artist>/<Album>` from tags, which is a guess
+  about a layout the user already has. Real library proved it wrong: the
+  collection lives one level below the configured root (248 of 250 albums under
+  `<root>/Music Files/`), so template saves wrote `Music/Ghost/Impera` beside it.
+- `album_destination()` now READS the library, three rules, tested in
+  `library/import.rs` (74 → 77 tests over the pass):
+  1. **merge** — the album is already on disk: use the folder holding most of its
+     tracks (a staged addition to an indexed album joins the album, no sibling).
+  2. **artist** — new album, known artist: the parent of that artist's existing
+     album folders, by count.
+  3. **new** — new artist: `<collection home>/<Artist>/<Album>`, where the home is
+     the folder holding more albums than any other (grandparent of each album
+     folder, counted by DISTINCT album so one 68-file box set cannot swing it:
+     `Blind Guardian/Legacy Of The Dark Lands/CD1, Album/`). Empty library → the
+     primary root. Ties: shallowest, then lexicographic.
+- The `al.id != staged` exclusion in rule 1 was a bug the user's library caught:
+  staged files are folded into the album row their tags name, so the album
+  excluded ITSELF, rule 1 saw nothing, rule 2 built a sibling folder and split
+  `03. Spillways.mp3` from its ten siblings. The staging-path filter is the only
+  exclusion needed. `an_addition_to_an_indexed_album_joins_the_album_it_belongs_to`
+  fails on the old code (`"artist"` vs `"merge"`).
+- `save_to_library` MOVES (rename, copy+remove fallback), and a moved track takes
+  its id with it (`UPDATE tracks SET id = stable_id("tr", new), path = new`),
+  because id = f(path) — otherwise re-importing the same file collides on UNIQUE.
+- Duplicate = blake3 hash (size only when nothing matches by size), so a move
+  never deletes a file on a byte count. `SaveReport { moved, duplicates, vanished }`.
+- Rows whose file vanished are FORGOTTEN and reported, which healed the 28
+  copy-era ghosts (Impera 21 → 11, Rite Here Rite Now 36 → 18) the first time
+  Save ran. Two stray albums later moved by hand into `Music Files/Ghost/` at
+  the user's request; the whole library is now one regime (0 rows outside it).
+
+## "Manage imported music": the staged pile gets a modal (2026-08-31)
+
+- Two verbs that acted on the whole pile before saying where it would go are
+  replaced by ONE door row (`Manage imported music…`, tail = `N albums`), which
+  opens `ManageImports.svelte` (sibling of MusicFolders: same `.scrim`, same
+  glass tier, SurfaceClose in the head).
+- Per album: artist group label, title + year + count, the resolved destination
+  in plain words (`merges into Ghostlights  Music Files/Avantasia/Ghostlights`,
+  short path + full path in `title`), and the file list (auto-expanded when one
+  album is staged — the list is the reassurance the decision wants).
+- Decisions are MARKED, not executed: Save / Discard per album (toggle off by
+  pressing again), `Save all` / `Discard all` in the footer (press again to clear
+  the pile's marks), and one **Apply**. An undecided album stays staged — closing
+  the window loses nothing, which is what makes it safe to leave halfway.
+- Footer states the files, not the UI: `1 album to save · 1 album to discard`,
+  `Mark an album to apply`; Apply is disabled while nothing is marked. While
+  running, the footer's arc is albums-applied + the backend's copy fraction
+  (`phase == import` only; the scan after a save has its own totals).
+- Pure logic in `src/lib/importPlan.ts` (+16 tests, 57 → 73): grouping, the
+  order Apply follows (on-screen order, so the list and the operations cannot
+  disagree), path shortening, the wording, durations.
+- `discard()` now DELETES THE ROWS too. Deleting only the file left the row for
+  the scan, whose policy for a vanished file is to keep it as missing — right for
+  a file the user moved, a lie about one they threw away: it still points into
+  the staging dir, so the album reads as staged and the freshly emptied door
+  lights up again. That is how the 28 ghosts were born. `a_discard_leaves_no_row_behind`.
+- Live round-trips, both verified against the real library and cleaned up after
+  (Ghostlights 36/36, Popestar 5/5, 4,439 rows, 0 rows missing on disk): two
+  unmodified copies → hash duplicates → moved 0, no phantom rows; a modified copy
+  → moved into the album folder (37 files, 37 rows); a discarded copy → gone
+  without a trace. Modal closes itself when the pile empties, and focus returns
+  to the door row (`[data-imports-door]`) unless the door is gone with the pile.
+- Spacing in the tree follows the pane's ladder with no new numbers: a group and
+  its cards hug at 6, groups are 12 apart inside the body, 4px inside a card
+  between the title, its destination and its files. (Open question raised with
+  the user: one card per artist with touching rows, as the panes do, would make
+  the 6/12 signal unambiguous — deferred, no user direction yet.)
+- Found while screenshotting: five accent-filled buttons hardcoded `color: #fff`,
+  which with a light accent (the user runs White) is white on white. All now use
+  the luminance-aware `--accent-text` (ManageImports, MusicFolders, TagEditor,
+  EmptyState, ExpandedPanel).
+
+### Still open on this feature
+
+- Staging without the copy: stage in place (index the original path), so Save
+  moves the file the user actually imported and the cache import dir retires.
+- Multi-disc merge into an album that keeps a folder per disc: rule 1 targets the
+  folder holding most of its tracks; matching on the disc number is the
+  refinement. No album in this library needs it today.
+- TagEditor entrance motion, parked with the modal work above.
 
 ## Environment quick facts (for fresh sessions)
 

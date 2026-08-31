@@ -5,6 +5,7 @@
   import TagEditor from "./components/TagEditor.svelte";
   import About from "./components/About.svelte";
   import MusicFolders from "./components/MusicFolders.svelte";
+  import ManageImports from "./components/ManageImports.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import { ui, resolvedTheme, initSettings, pushSetting } from "./lib/stores/ui.svelte";
   import { accentVariants } from "./lib/accent";
@@ -116,6 +117,7 @@
   <TagEditor />
   <About />
   <MusicFolders />
+  <ManageImports />
   <ContextMenu />
 </div>
 

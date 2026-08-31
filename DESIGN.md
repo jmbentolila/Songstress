@@ -426,9 +426,128 @@ Two families, split by role — every glyph in the chrome belongs to one:
   way to everything it no longer owns. The popover keeps the one thing worth
   having next to the transport: the curve, editable while something plays.
 
+### Settings panes are bespoke
+All three sidebar panes (Appearance, Playback, Library) are store-driven
+components, not renderings of the Rust menu model. The generic row list is the
+**fallback** for a pane without a branch — `rootPanes` still comes from the model,
+so a new pane added in `menu.rs` appears in the root layer and renders from the
+model until someone builds its branch. Actions inside a bespoke pane go through
+`activateMenuItem`, so a click in the pane and a click in the Global Menu are the
+same door into the same Rust command. The one exception so far: the Library
+pane's `Manage imported music…` opens a modal, and a modal has no menu id to
+carry — the Global Menu keeps its own save-everything verb.
+
+- **An amount is stated once, as a state** — never welded into a row label
+  (`Manage imported music…` with `2 albums` in its tail, not `Save 2 albums`,
+  which changes width while you watch and ellipsises the label). Same rule that
+  killed `Repeat: Off`. Inside the imported-music modal the footer states the
+  pile (`2 albums · 36 tracks`) and, separately, what Apply will do to it
+  (`1 album to save · 1 album to discard`).
+- **Progress rides on the row that caused it, and it fills.** The scan and
+  re-read rows carry a determinate ring in their tail (`ProgressRing.svelte`) —
+  no text line under the group, which grew the pane mid-action and pushed the
+  rows below it around while the user was reading them. An operation that runs
+  from a modal carries its arc in the modal's footer instead, and the pane's row
+  ring lights up behind it because `scanner.kind` does not care where the verb
+  came from. `scanner.kind` names the
+  verb in flight, set by the operation and not the click, because a scan can
+  start from the Global Menu, the empty state or a relink and the pane would
+  otherwise be disabled with nothing to point at. Six rows, six kinds: import,
+  save, discard, scan, full, folder. A ring is never decorative — if every row is
+  disabled, exactly one of them says why.
+  It is a sweep and not a spinner on purpose: rotation says "busy", an arc says
+  "40 seconds in, 30 to go", and a scan you cannot see finishing reads as a hang.
+  No events yet (total 0) draws an empty track, which is the honest "started, no
+  news"; a fake halfway would be a lie that happens to look like progress — and
+  that is not a hypothetical: because `done`/`total` outlive a finished run, the
+  first version of this appeared on the row at the PREVIOUS run's 100%, unwound
+  counter-clockwise, then started climbing, which read as an arc that did a lap
+  before it began. Every operation therefore begins by clearing the counts
+  (`begin(kind)`), so the arc's only direction is forward; and because a run's
+  later phases carry their own totals, the arc is keyed on the phase — a new
+  phase restarts the node instead of animating backwards through what it already
+  reported. **And it lands full**: the backend's last progress event is short of
+  the end, so unmounting on completion left the arc dying at 85% on the row that
+  had just been asked to do something, which reads as an interruption. `end()`
+  holds that row's arc at 100% for 300ms (`heldKind`) — long enough to register as
+  finished, too short to feel like a stage — and only for runs that reported
+  progress, so a no-op operation never flashes a ring it had no data for. Stroke
+  is `--accent` — the same token the seek fill and the focus rings use, so the
+  app's idea of "your colour is doing something" is one idea. The sentence the
+  arc replaces ("Scanning 1,677 of 4,487") survives as `aria-valuetext`.
+- **`role="status"` goes where a number moves** (scan progress) — a process you
+  cannot see finishing reads as a hang. `.gstat` is caption tier with tabular
+  nums; it sits inside the group whose rows it explains, not in the footer.
+- **The footer states what the library IS** (counts, last scan), never what it is
+  doing — two lines, the second subordinate (`.fstat .fsub`), so growth in the
+  counts can't wrap a joined line mid-clause.
+- **A destructive action with no dialog asks in place**: the button's own label
+  becomes the question, naming the amount (`Discard 2 albums now?`), and leaving
+  the pane disarms it. No timeout — the question would vanish under the cursor.
+  It spends no color: the caution amber is documented but not yet a token, and an
+  armed button is a bigger claim than a label change needs.
+
+### The pane spacing ladder — 6 / 12 / 30
+Spacing inside a settings pane encodes a relationship, and there are exactly
+three relationships to encode:
+
+| gap | lives on | meaning |
+|---|---|---|
+| **6px** | `.subject` | a row and the fields **it owns** — the only hug in the app |
+| **12px** | `.group`, `.reveal` | anything and its neighbour in one group, group labels included |
+| **0** | `.rows` | a run of rows — pitch is the row height itself |
+| **30px** | `.panebody` | one titled group against the next |
+
+Every rung is a **container gap**, never a margin on the thing itself: a parent's
+scoped CSS does not reach a child component's root element, so `Repeat` (a
+`<Toggle>`) is invisible to `.group > *`. The one place a negative margin is
+correct is where you must go *below* a container's gap, and after the second round
+of this only that remained — the label hug came out, because an uppercase 11.5px
+micro title 6px above a control reads as a caption glued to it, and headings want
+air at any size.
+
+**A pane is as many groups as it has titled subjects.** Playback's
+Repeat / Shuffle / Equalizer are three rows of one subject, so they are one
+`.group` of three `.subject` blocks at 12px, each hugging its own reveal at 6px —
+not three `.group`s at 30px, which said "unrelated subjects" and made the pane
+read as a list whose pages were falling out of it. Appearance (SIZES, THEME) and
+Library (Import, Scan, Storage) do have titled subjects and keep the 30px.
+
+Before all of this, one undifferentiated 10px gap did everything, so a toggle's own
+reveal sat exactly as far from it as an unrelated subject did. Ownership is now the
+*tightest* distance in the pane and the only special case, which is why no divider,
+box or second indent level is needed to say what belongs to what.
+
+### A checkbox row is a row
+`Toggle.svelte` takes `min-height: var(--sidebar-row-size)`. It used to be a
+16px label, which made every pane that contained one fall off the row rhythm —
+Appearance's "Playbar artwork gradient" sat as a caption between two 40px rows,
+so the pane's spacing looked unlike its neighbours' even while the gap ladder was
+identical. Now: the whole row is the click target, and a run of checkbox + drill
+rows touches at exactly the pitch of the root layer, the artist list and the
+Library pane. (The compact variant used in the equalizer popover opts out — a
+popover header is not a list.)
+
+
+### Row rhythm: lists touch, forms breathe
+Inside a pane group, consecutive action rows go in a `.rows` wrapper with **no
+gap** — pitch exactly `--sidebar-row-size`, the same rhythm as the root layer, the
+artist list, the queue and the model-driven list. A group's own 10px gap is air
+for **mixed content** (a label, a slider, a segmented control, a reveal); letting
+it fall between rows too is what made the Library pane's rows float apart from
+every other list in the sidebar — its first render was 50px pitch against the
+app's 40.
+
+The boundary is genre, same as the enable-checkbox rule: a pane that is a **list
+of things you can do** (Library) keeps the list rhythm; a pane that is a **form of
+mixed controls** (Appearance, Playback) uses group air, because each control owns
+the field that reveals under it. If a form's spacing starts reading as arbitrary,
+the fix is proximity-by-relationship (owner→owned tighter than sibling→sibling),
+not a global gap.
+
 ### Dismissal — the traffic-light family
 - **One family, two dots.** The titlebar's close dot quits the **window**;
-  `SurfaceClose` dismisses a **surface**. Same device on purpose: 13px circle,
+  `SurfaceClose` dismisses a **surface**. Same device on purpose: one circle, sized by `--tb-dot`,
   the user's own KWin close colour (`--tb-x`, published on `<html>` by
   `decoVars()` so titlebar and surfaces cannot drift), ✕ glyph revealed on hover
   *and* on keyboard focus, press = brightness 0.82. No transition: the Plasma
@@ -442,10 +561,36 @@ Two families, split by role — every glyph in the chrome belongs to one:
   header row is the same row as the real window dots, and two red dots 200px
   apart — one closing a drawer, one closing the app — is a worse confusion than
   the shape difference being removed.
-- **Hit area:** the button is 26px around the 13px dot (a 13px target is under
-  this app's own ~28px minimum, and a popover has no drag region forgiving it).
-  The titlebar dots grow to 21px with a transparent `::before`, capped by the 8px
-  gap between them.
+- **Hit area:** the button is 26px around the dot (a bare dot is under this
+  app's own ~28px minimum, and a popover has no drag region forgiving it). In the
+  titlebar the dot grows its own box by half the configured gap
+  (`::before { inset: calc(var(--tb-gap) / -2) }`), which makes the target
+  exactly the cluster's pitch for *whatever* the decoration asks for. One more
+  pixel and neighbouring targets overlap, and the later button steals the shared
+  strip — which would bury the close dot's east edge inside minimize. Tune the
+  decoration, and the hit area follows by construction: a cluster whose target is
+  always its pitch cannot be resized into a miss.
+- **The geometry is read, not eyeballed.** `kde_window_decoration` publishes
+  `--tb-dot`, `--tb-gap`, `--tb-margin`, `--tb-radius` from klassyrc
+  (`ButtonSpacingLeft`, `TitleBarLeftMargin`, `WindowCornerRadius`, `IconSize`),
+  because a cluster coloured like the user's decoration but sized like an
+  imitation still reads as one. Calibration, measured off the user's own screen
+  (scale 1.6, so divide the pixels by 1.6 for CSS): Konsole's Klassy buttons are
+  24x24 px = **15 logical**, centers on a 42 px = **26 logical** pitch — button
+  rect 16 (KDE's Small icon tier) + `ButtonSpacingLeft=10`, the small circle
+  filling the rect minus 1. So: dot = standard icon size for the configured tier
+  minus 1, visible gap = configured spacing + that 1px of slack.
+  `cargo test`'s `deco_geometry` locks the mapping and the calibration.
+  Verified after the change, in the same screenshot, our cluster: 24 px dots on a
+  42 px pitch, starts 1945/1987/2029 against Konsole's 25/67/109 — **pixel
+  identical**, `/tmp/cmp_dots.png`.
+- **Known deviations, in case they matter later:** our titlebar is taller than
+  Klassy's would be (`TitleBarTopMargin=10` + rect 16 + `TitleBarBottomMargin=10`
+  = 36 logical; the head is ~44, because the gear and the stack's close need a
+  28px target), the dot's rim is `rgba(0,0,0,.18)` where Klassy draws the same
+  hue opaque (`VaryColorCloseOutlineActive=Opaque`), and the glyphs are ours, not
+  Klassy's `StyleArk`. The fill is not a deviation: both draw at
+  `ButtonBackgroundOpacityActive`, 85% on this system, applied by `decoVars`.
 - **Dismissal returns focus to the opener** (recorded at open: `openAbout(from)`,
   the popover's own `eqBtn`/`qBtn`) so Tab continues where the user was. The
   opener is captured when the surface opens, not when it unmounts — by then the

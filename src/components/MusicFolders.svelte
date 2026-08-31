@@ -252,7 +252,9 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--accent);
-    color: #fff;
+    /* --accent-text, not #fff: with a light accent ("White") white text on a
+       white fill is no text at all. */
+    color: var(--accent-text, #fff);
     font-size: 13px;
     cursor: pointer;
   }

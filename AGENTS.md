@@ -162,6 +162,11 @@ public/covers/            album art for the fake library (real folder.jpg files)
   nothing. Use `:global(.ab-close)` — and give it one more class of specificity
   (`:global(.ab .ab-close)`) when the child sets the same property, because the
   child's stylesheet loads later and an equal-specificity tie goes to it.
+- **A parent's scoped CSS does not reach a child component's root element.** Two
+  bites: About needed `:global(.ab .ab-close)` to position `<SurfaceClose>`, and a
+  `.group > * + * { margin-top }` rule silently gave `<Toggle>` no separation
+  (0px, no warning). Put box/spacing rules on the **container** (`gap` works
+  whoever compiled the child) and use `:global()` only for per-element offsets.
 - **Child effects run before parent effects.** Never capture `document.activeElement`
   in a parent `$effect` to remember "who opened this" — by then the child's
   autofocus has already moved focus inside. Record the trigger at open time

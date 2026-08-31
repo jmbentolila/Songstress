@@ -14,6 +14,12 @@ export interface WindowDeco {
   maximize: DecoButton;
   bgOpacityActive: number;
   bgOpacityInactive: number;
+  /** Geometry, mirrored from Klassy: dot size, gap between dots, the titlebar's
+   * left margin, the window corner radius. All in CSS px. */
+  dotSize: number;
+  buttonGap: number;
+  marginLeft: number;
+  cornerRadius: number;
 }
 
 // Mirrors the user's KWin decoration (layout + Klassy button palette) so our
@@ -38,6 +44,7 @@ export function loadDecoration() {
 // family and must draw from the user's own decoration, not a hardcoded red.
 export function decoVars(d: WindowDeco | null = decoState.value): Array<[string, string]> {
   const op = (d?.bgOpacityActive ?? 100) / 100;
+  const px = (v: number | undefined, fallback: number) => `${v ?? fallback}px`;
   const rgba = (c: [number, number, number]) => `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${op})`;
   const close = d?.close ?? { normal: [255, 95, 87], hover: [195, 63, 69] };
   const min = d?.minimize ?? { normal: [254, 188, 46], hover: [218, 165, 5] };
@@ -49,5 +56,11 @@ export function decoVars(d: WindowDeco | null = decoState.value): Array<[string,
     ["--tb-i-hover", rgba(min.hover)],
     ["--tb-a", rgba(max.normal)],
     ["--tb-a-hover", rgba(max.hover)],
+    // Geometry travels with the palette: a cluster that matches the user's
+    // colours but not their sizes still looks like an imitation.
+    ["--tb-dot", px(d?.dotSize, 15)],
+    ["--tb-gap", px(d?.buttonGap, 11)],
+    ["--tb-margin", px(d?.marginLeft, 15)],
+    ["--tb-radius", px(d?.cornerRadius, 14)],
   ];
 }

@@ -715,7 +715,7 @@
 
   .play-all:hover {
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-text, #fff);
   }
 
   .play-all svg {

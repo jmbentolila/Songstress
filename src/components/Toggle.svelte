@@ -36,15 +36,21 @@
 
 <style>
   .toggle {
+  /* A checkbox IS a row: it takes the app's row height, so a toggle sits on the
+     same rhythm as the menu rows, the artist list and every .mrow/.irow around
+     it — and the whole row, not just the 16px box + caption, is the click
+     target. The compact variant (equalizer popover header) opts out. */
     display: flex;
     align-items: center;
     gap: 8px;
+    min-height: var(--sidebar-row-size);
     font-size: 13px;
     color: var(--text);
     cursor: pointer;
   }
 
   .toggle.small {
+    min-height: 0;
     font-size: 12.5px;
     font-weight: 600;
     gap: 7px;

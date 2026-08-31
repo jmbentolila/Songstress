@@ -87,7 +87,7 @@
   .primary {
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-text, #fff);
   }
 
   .primary:hover {
