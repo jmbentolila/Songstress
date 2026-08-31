@@ -190,9 +190,28 @@ pub fn run_scan(
 /// `full = true` reparses every file even when (mtime, size) is unchanged —
 /// required whenever GROUPING or TAG-CONSENSUS logic changes, since skipped
 /// files never re-enter the grouping pass (their album_id just persists).
+/// Convenience for the whole-roots case — the app's own scans pass a filter, so
+/// this is the shape the tests and any future unfiltered caller reach for.
+#[allow(dead_code)]
 pub fn run_scan_roots(
     conn: &mut Connection,
     roots: &[PathBuf],
+    progress: impl FnMut(usize, usize),
+    full: bool,
+) -> Result<ScanCounts, String> {
+    run_scan_files(conn, roots, None, progress, full)
+}
+
+/// `only` restricts INDEXING to a set of files, while the roots are still
+/// walked in full. That is what an import needs: the album identity of a file
+/// comes from the directory it sits in, so a single-file import scans its
+/// folder and indexes the one file the user asked for. A filtered run also skips
+/// the removal sweep — a partial survey of a root has no standing to call the
+/// files it did not look at missing.
+pub fn run_scan_files(
+    conn: &mut Connection,
+    roots: &[PathBuf],
+    only: Option<&HashSet<PathBuf>>,
     mut progress: impl FnMut(usize, usize),
     full: bool,
 ) -> Result<ScanCounts, String> {
@@ -202,6 +221,9 @@ pub fn run_scan_roots(
             return Err(format!("music root {} does not exist", root.display()));
         }
         files.extend(walk(root)?);
+    }
+    if let Some(only) = only {
+        files.retain(|f| only.contains(Path::new(&f.path)));
     }
     let total = files.len();
 
@@ -586,11 +608,11 @@ pub fn run_scan_roots(
     // rows are KEPT and flagged missing in the dump (existence check), so the
     // user can relink the file or remove the track explicitly (Step 2a
     // follow-up). Nothing is auto-deleted anymore.
-    let removed_existing: Vec<String> = existing
-        .keys()
-        .filter(|p| !seen.contains(*p))
-        .cloned()
-        .collect();
+    let removed_existing: Vec<String> = if only.is_some() {
+        Vec::new()
+    } else {
+        existing.keys().filter(|p| !seen.contains(*p)).cloned().collect()
+    };
     counts.missing = removed_existing.len();
 
     // Orphan cleanup after removals.

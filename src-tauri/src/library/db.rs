@@ -37,6 +37,14 @@ pub const MIGRATIONS: &[&str] = &[
          key   TEXT PRIMARY KEY,
          value TEXT NOT NULL
      );",
+    // v2 — staging is a FLAG, not a folder. Imported files are indexed where
+    // they are and carry `staged` until the user saves (the app moves them into
+    // the library) or discards them (the row is forgotten, the file is left
+    // alone). The cache directory that used to hold a second copy of everything
+    // imports is retired by this. Rows the copy era left under the staging dir
+    // are flagged at startup by `import::mark_legacy_staged`, which knows where
+    // the cache lives and a migration here does not.
+    "ALTER TABLE tracks ADD COLUMN staged INTEGER NOT NULL DEFAULT 0;",
 ];
 
 fn apply_migrations(conn: &Connection) -> rusqlite::Result<()> {
@@ -112,7 +120,7 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-1', 'Helloween', 'helloween');
              INSERT INTO albums VALUES ('al-1', 'ar-1', 'Giants & Monsters', 2021, NULL, 'ff8800', '0044cc');
              INSERT INTO tracks VALUES ('tr-1', 'al-1', 1, 1, 'Silent Echoes', 336.0,
-                 '/music/helloween/giants/01.flac', 123, 456);",
+                 '/music/helloween/giants/01.flac', 123, 456, 0);",
         )
         .expect("seed");
         let (title, c1): (String, String) = conn

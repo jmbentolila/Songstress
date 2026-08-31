@@ -32,6 +32,37 @@
   import ProgressRing from "./ProgressRing.svelte";
 
   const groups = $derived(groupByArtist(imports.plan));
+  const held = $derived(imports.report?.already ?? []);
+  const was = (n: number) => (n === 1 ? "was" : "were");
+  // What Apply did, in the order the verbs matter in. The duplicate line is the
+  // one that earns its space: it reports the only deletion of a file the user
+  // owns that this app performs, so it names which file went and which stayed.
+  const applyLines = $derived.by(() => {
+    const a = imports.applied;
+    if (!a) return [] as string[];
+    const out: string[] = [];
+    if (a.moved) out.push(`${plural(a.moved, "file")} moved into your library`);
+    if (a.duplicates) {
+      // Which file went, said in the same number as the count above it: this line
+      // reports a deletion of the user's own file, so it would be rude to be
+      // ungrammatical in it.
+      const one = a.duplicates === 1;
+      out.push(
+        `${plural(a.duplicates, "file")} ${was(a.duplicates)} identical to music you already own — your ${
+          one ? "copy was" : "copies were"
+        } deleted, the ${one ? "one" : "ones"} in your library stayed`,
+      );
+    }
+    if (a.discarded)
+      out.push(
+        `${plural(a.discarded, "file")} ${was(a.discarded)} dropped from the library; your files stay where they are`,
+      );
+    if (a.vanished)
+      out.push(
+        `${plural(a.vanished, "file")} ${was(a.vanished)} already gone from disk and forgotten`,
+      );
+    return out;
+  });
   const sum = $derived(summarize(imports.plan, imports.decisions));
   const busy = $derived(imports.applying || scanner.running);
 
@@ -149,8 +180,9 @@
       <div class="mi-body">
         {#if groups.length === 0}
           <p class="mi-empty">
-            Nothing is waiting to be imported. Files you import will show up here
-            with the folder they are about to move to.
+            {applyLines.length
+              ? "Nothing is waiting."
+              : "Nothing is waiting to be imported. Files you import will show up here with the folder they are about to move to."}
           </p>
         {:else}
           {#each groups as g (g.artist)}
@@ -236,13 +268,41 @@
             </div>
           {/each}
         {/if}
+
+        {#if held.length}
+          <!-- Half of an import that needs explaining: pointing at files the
+               library already indexes is not a failure, and a progress ring that
+               ends with nothing on screen is how a failure looks. -->
+          <div class="mi-held" role="group" aria-label="Already in your library">
+            <div class="mi-glabel">Already in your library</div>
+            {#each held as a (`${a.artist}|${a.title}`)}
+              <div class="mi-heldrow">
+                <span class="mi-heldname">{a.artist} — {a.title}</span>
+                <span class="mi-meta">{plural(a.tracks, "track")}</span>
+              </div>
+            {/each}
+            <p class="mi-note">
+              Nothing was added and nothing was moved: you already own these.
+            </p>
+          </div>
+        {/if}
+
+        {#if applyLines.length}
+          <ul class="mi-applied" role="status">
+            {#each applyLines as line}
+              <li>{line}</li>
+            {/each}
+          </ul>
+        {/if}
       </div>
 
       <footer class="mi-foot">
         <div class="mi-sum">
-          <span class="mi-counts"
-            >{plural(sum.albums, "album")} · {plural(sum.tracks, "track")}</span
-          >
+          {#if sum.albums > 0}
+            <span class="mi-counts"
+              >{plural(sum.albums, "album")} · {plural(sum.tracks, "track")}</span
+            >
+          {/if}
           <span class="mi-line" aria-live="polite">
             {#if imports.applying}
               <ProgressRing value={progress} label={footLine} phase="apply" />
@@ -571,6 +631,48 @@
     border-color: #ff8f8f88;
     color: #ff8f8f;
     font-weight: 600;
+  }
+
+  /* The receipt: quieter than the pile, because it reports a decision that was
+     already obvious to the app and to nobody else. */
+  .mi-held {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .mi-heldrow {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12.5px;
+  }
+
+  .mi-heldname {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mi-note {
+    margin: 2px 0 0;
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+
+  .mi-applied {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+    color: var(--text-dim);
   }
 
   .mi-foot {

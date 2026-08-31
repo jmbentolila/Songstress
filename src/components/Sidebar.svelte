@@ -266,7 +266,7 @@
   const KIND_LABELS: Record<string, string> = {
     scan: "Scanning",
     full: "Re-reading all files",
-    import: "Copying files in",
+    import: "Indexing",
     save: "Saving imported music",
     discard: "Discarding imported music",
     folder: "Updating music folders",

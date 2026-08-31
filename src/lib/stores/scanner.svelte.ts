@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { library } from "./library.svelte";
 import { ui } from "./ui.svelte";
 import { openContextMenu } from "./contextMenu.svelte";
+import type { ImportReport, SaveReport } from "../importPlan";
 
 /**
  * Shared scan orchestration for the title-bar menu and the empty state:
@@ -149,55 +150,62 @@ export async function removeMusicFolderRoot(path: string): Promise<void> {
   }
 }
 
-// --- Import staging (PLAN.md Step 2a) ----------------------------------------
+// --- Import staging -------------------------------------------------------
+// `importMusic` lives in `imports.svelte.ts`: an import returns a receipt and
+// opens the window that explains it, which is the store's business. What stays
+// here is the work itself, because the scan state below is shared by every
+// operation that rewrites the library.
 
-/** Copy files/folders into the import staging area, then rescan. */
-export async function importMusic(paths: string[]): Promise<void> {
-  if (paths.length === 0 || scanner.running) return;
+/** Index files where they are and flag them pending — no copy is made. The
+ *  receipt says what became pending and which of the files the library already
+ *  held; the caller decides where to show it. */
+export async function runImport(paths: string[]): Promise<ImportReport | null> {
+  if (paths.length === 0 || scanner.running) return null;
   begin("import");
   try {
-    await invoke("import_music", { paths });
+    return await invoke<ImportReport>("import_music", { paths });
   } catch (err) {
     console.error("import failed", err);
+    return null;
   } finally {
     end();
   }
 }
 
-/** kdialog multi-file picker → importMusic. */
-export async function addMusicFiles(): Promise<void> {
-  const files = await invoke<string[] | null>("choose_import_files");
-  if (files) await importMusic(files);
-}
-
-/** kdialog folder picker → importMusic. */
-export async function addMusicFolder(): Promise<void> {
-  const folder = await invoke<string | null>("choose_import_folder");
-  if (folder) await importMusic([folder]);
-}
-
 /** Copy staged music into the library dir. Scope: one album, one track, or
  * everything staged. */
-export async function saveImports(albumId?: string, trackId?: string): Promise<void> {
-  if (scanner.running) return;
+export async function saveImports(
+  albumId?: string,
+  trackId?: string,
+): Promise<SaveReport> {
+  const none: SaveReport = { moved: 0, duplicates: 0, vanished: 0 };
+  if (scanner.running) return none;
   begin("save");
   try {
-    await invoke("save_imports", { albumId: albumId ?? null, trackId: trackId ?? null });
+    return await invoke<SaveReport>("save_imports", {
+      albumId: albumId ?? null,
+      trackId: trackId ?? null,
+    });
   } catch (err) {
     console.error("save imports failed", err);
+    return none;
   } finally {
     end();
   }
 }
 
 /** Delete staged music (same scoping); library untouched. */
-export async function discardImports(albumId?: string, trackId?: string): Promise<void> {
-  if (scanner.running) return;
+export async function discardImports(albumId?: string, trackId?: string): Promise<number> {
+  if (scanner.running) return 0;
   begin("discard");
   try {
-    await invoke("discard_imports", { albumId: albumId ?? null, trackId: trackId ?? null });
+    return await invoke<number>("discard_imports", {
+      albumId: albumId ?? null,
+      trackId: trackId ?? null,
+    });
   } catch (err) {
     console.error("discard imports failed", err);
+    return 0;
   } finally {
     end();
   }

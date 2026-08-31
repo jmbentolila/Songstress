@@ -44,6 +44,9 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Settings panes: pass A (clarify: theme segments, slider values, copy) | ✅ 2026-08-31 |
 | Settings panes: pass B (audit: focus handoff, inert, contrast) | ✅ 2026-08-31 |
 | Settings panes: polish (P3s) | ✅ 2026-08-31 · critique re-run ⬜ |
+| Settings stack: one dismissal family, platform geometry, spacing ladder | ✅ 2026-08-31 |
+| Manage-imports window (one card per artist, per-album Apply) | ✅ 2026-08-31 |
+| Import staging: cache copy → in-place row flag (migration v2) | ✅ 2026-08-31 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -671,6 +674,19 @@ tag issues (wrong albumartist, wrong year, split albums).
 ---
 
 ## Step 2a — Import music ✅ (redesigned 2026-08-24: two-step staging flow)
+
+> **Redesigned 2026-08-31: staging is a row flag, not a folder.** Everything below that describes a copy into `<cache>/import/` is the
+> copy era; the two-step decision (import to listen, save to own) is unchanged, the *where* is not. `import_music` now indexes the user's
+> files **where they are** and sets `tracks.staged` (migration v2), so a pending album is playable *with* cover art, waveform and play
+> counts instead of being an alien under the cache dir — and a scan leaves it alone rather than mourning it as missing. Save **moves** the
+> file into its resolved folder and re-points the row (`scan::relink_track`, history intact); Discard **forgets the row and deletes no
+> file**, because deleting a file the user never asked us to delete is how 28 ghost rows were born in one session. Three ownership rules, all
+> user-decided: a file that lands on a name the destination folder already holds byte for byte deletes the copy the user just pointed at and
+> says so (a collision rule, not library-wide dedupe — see AGENTS.md); a file already indexed is never staged; a folder the app did not write
+> is never removed. `import_music` returns `ImportReport { staged, already }` and the window opens to show it. The staging root survives only
+> as the place legacy rows are flagged at startup and pruned from; `import_paths` and `KnownFiles` are deleted. Details: **AGENTS.md**
+> "Import staging", **DESIGN.md** "Import staging, and the window that owns it", and the "Settings stack…" / "Import staging moved…" sections
+> at the foot of this file.
 
 **Flow (user decision)**: importing is TWO separate steps —
 1. **Import** = copy into a staging area; tracks are playable immediately
@@ -2313,3 +2329,51 @@ follows now: the ring's only direction is forward, and it is allowed to say
   tools/inspect.mjs probe kept for the record.
   Svelte scoped CSS silently drops cross-component :has() — use explicit
   state for cross-component CSS hooks.)
+
+## Settings stack rebuilt around KDE fidelity (2026-08-31)
+
+Four panes were four dialects of "settings screen"; they are one dialect now, and the details are borrowed from the platform rather than
+invented, which is the point of a KDE-styled DE app:
+
+- **One dismissal family.** `SurfaceClose` is the Klassy dot (fill = KWin's own palette colour via `deco.buttonColors`, corner radius =
+  `--tb-radius`, glyph on hover/focus only, 26 px hit box at the platform pitch), used by every floating surface; popovers also dismiss on
+  outside-pointer-down and Escape, panes on the dot. The About footer opens an in-glass dialog instead of a native one, so no surface in the
+  stack is a different windowing paradigm from its neighbours.
+- **Geometry is measured, not eyeballed.** `kde_window_decoration` reads Klassy's own config (and `kdeglobals` for the palette) and publishes
+  `--tb-dot` / `--tb-gap` / `--tb-margin` / `--tb-radius` on `<html>`, so the cluster and the panes' left edge match a theme we do not
+  implement and a DPI we do not choose. Measured against Konsole's Klassy-rendered buttons: 15 px dots, 11 px gap, 41 px pitch, 41 px targets.
+- **One row rhythm.** `Toggle` is the row primitive and takes `--sidebar-row-size` (40) as its min-height — the user's own setting, so the
+  stack obeys a change made in Appearance. No borders, no inset cards (translucent cards on 0.7 glass read as a surface with a hole in it).
+- **A three-rung spacing ladder carries all the hierarchy**: 6 content-under-own-label / 12 label-to-first-row / 30 between groups, so no
+  rule, caption or background is needed. Playback's three options are one group of three label+control blocks: touching inside, ladder outside.
+- **The sidebar's bottom row is a cluster** (Save, Rescan, Settings): a door to a settings screen does not get a full row of the sidebar whose
+  job is the collection.
+
+**Modal containment (the rule that took three tries).** `contain: paint` on `.app` makes it the containing block of fixed descendants, so
+`overflow: clip` + `--radius-window` on the app frame rounds *everything in the window* to the window's own shape — set `--radius-window` from
+KWin-reported `--tb-radius`. A scrim inside the frame must never paint its own radius or a square corner escapes the clip; the shared `.scrim`
+in `app.css` is the only place the dim exists, and each surface clips itself because a child's own paint containment clips its border-box.
+Verifying a change to containment needs a **cold restart**: HMR re-injects styles without recomputing the containment tree, and reloading does
+not fix it.
+
+## Import staging moved out of the cache directory (2026-08-31)
+
+Staging was a place: `import_music` copied files into `<cache>/import/`, and a scan indexed that root with no album identity of its own. Being
+a place, it cost more than it bought — an interrupted copy left a half-written duplicate only a hash check could find; a staged album could not
+show the cover sitting two directories away from its own files; a user-moved file came back as an undeletable ghost; a 400-file import meant
+400 writes before the first note played. Staging is now a **state of the row** (`tracks.staged`, migration v2): the import indexes the files the
+user pointed at, exactly those files, wherever they are.
+
+- **Identity is separated by verb, not shared by rule**: **path** at import (already a row ⇒ nothing to decide, reported), **blake3 hash on
+  the colliding name** at save (identical bytes ⇒ the file just pointed at is deleted and the library's copy stays; different bytes ⇒ a
+  ` (2)` name), **(artist, album, disc, track)** at scan. The old name+size dedupe collapsed all three into one guess, and "same name,
+  different size" silently created an album twin.
+- **Save moves, and the row moves with it.** `relink_track` re-points path and id (id is derived from path; if the id did not travel, the next
+  re-import of the same file would hit the UNIQUE constraint and lose the play history that was the point of keeping the row).
+- **Discard deletes nothing** outside our own staging root — including the row, which the old code left behind for a scan to find, and which is
+  exactly how a discarded album came back as an undeletable "missing" ghost.
+- **We never remove a folder we did not write.** The app prunes directories under its own root; the folder you imported from stays, empty or
+  not. It is yours.
+- **Import reports itself.** `ImportReport { staged, already }` renders in the window the import opens ("Already in your library", with the
+  album named), and the Apply receipt reports the moved / deleted-as-duplicate / discarded / vanished counts. 93 tests: 4 new, 6 retired
+  together with the code they covered (a test for a deleted rule is deleted with it).

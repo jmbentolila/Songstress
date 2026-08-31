@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { applyOrder, type Decision, type StagedAlbum } from "../importPlan";
-import { discardImports, saveImports, scanner } from "./scanner.svelte";
+import {
+  applyOrder,
+  type Decision,
+  type ImportReport,
+  type SaveReport,
+  type StagedAlbum,
+} from "../importPlan";
+import { discardImports, runImport, saveImports, scanner } from "./scanner.svelte";
 
 /**
  * State behind the "Manage imported music" modal.
@@ -28,6 +34,13 @@ export const imports = $state({
   failed: [] as string[],
   /** Apply is pausing for a scan it did not start (see `waitForIdle`). */
   waiting: false,
+  /** What the last import did. Shown until the window closes: pointing at files
+   *  the library already holds is not a failure, but it looks like one when the
+   *  progress ring ends and the screen is unchanged. */
+  report: null as ImportReport | null,
+  /** What the last Apply did, including the one deletion of a file the user owns
+   *  that this app performs (an identical file they just pointed at). */
+  applied: null as (SaveReport & { discarded: number }) | null,
 });
 
 export async function refreshImportPlan(): Promise<void> {
@@ -57,6 +70,8 @@ export async function openImportManager(): Promise<void> {
 
 export function closeImportManager(): void {
   imports.open = false;
+  imports.report = null;
+  imports.applied = null;
   imports.applying = false;
   imports.active = "";
   imports.done = 0;
@@ -113,6 +128,11 @@ export async function applyImportDecisions(): Promise<void> {
   if (ops.length === 0) return;
   imports.applying = true;
   imports.failed = [];
+  imports.applied = null;
+  let moved = 0;
+  let duplicates = 0;
+  let vanished = 0;
+  let discarded = 0;
   imports.total = ops.length;
   imports.done = 0;
   for (const op of ops) {
@@ -125,8 +145,15 @@ export async function applyImportDecisions(): Promise<void> {
     }
     // The shared verbs own the scan state and the progress events; they report
     // failure by leaving the album staged, which is what the check below reads.
-    if (op.decision === "save") await saveImports(op.albumId);
-    else await discardImports(op.albumId);
+    if (op.decision === "save") {
+      const report = await saveImports(op.albumId);
+      moved += report.moved;
+      duplicates += report.duplicates;
+      vanished += report.vanished;
+    } else {
+      discarded += await discardImports(op.albumId);
+    }
+    imports.applied = { moved, duplicates, vanished, discarded };
     await refreshImportPlan();
     if (imports.plan.some((a) => a.albumId === op.albumId)) imports.failed.push(op.label);
     imports.done++;
@@ -135,6 +162,33 @@ export async function applyImportDecisions(): Promise<void> {
   imports.waiting = false;
   imports.applying = false;
   // Everything staged is decided and gone: the door it was opened from is about
-  // to disappear from the pane, so the window goes with it.
-  if (imports.plan.length === 0) closeImportManager();
+  // to disappear from the pane, so the window goes with it — UNLESS something
+  // needs reporting. A save that removed a file the user owns stays open and
+  // says so; a window that vanishes on a deletion is a window that hides the one
+  // thing they should read.
+  const needsReport =
+    (imports.applied?.duplicates ?? 0) > 0 || (imports.applied?.vanished ?? 0) > 0;
+  if (imports.plan.length === 0 && !needsReport) closeImportManager();
+}
+
+/** Import, then show what it did. The window opens itself because the
+ *  alternative is a progress ring that ends with nothing visibly changed. */
+export async function importMusic(paths: string[]): Promise<void> {
+  const report = await runImport(paths);
+  if (!report) return;
+  imports.report = report;
+  imports.applied = null;
+  await openImportManager();
+}
+
+/** kdialog multi-file picker → import. */
+export async function addMusicFiles(): Promise<void> {
+  const files = await invoke<string[] | null>("choose_import_files");
+  if (files) await importMusic(files);
+}
+
+/** kdialog folder picker → import. */
+export async function addMusicFolder(): Promise<void> {
+  const folder = await invoke<string | null>("choose_import_folder");
+  if (folder) await importMusic([folder]);
 }

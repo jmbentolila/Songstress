@@ -38,6 +38,31 @@ export interface StagedAlbum {
   destination: Destination;
 }
 
+/** One album as the import receipt names it: no destination, because the point
+ *  of the receipt is that there was nothing to decide. */
+export interface ImportedAlbum {
+  artist: string;
+  title: string;
+  tracks: number;
+}
+
+/** What an import did. `already` is the half that needs explaining: pointing at
+ *  files the library already indexes is not a failure, but a progress ring that
+ *  ends with nothing on screen reads as one. */
+export interface ImportReport {
+  staged: ImportedAlbum[];
+  already: ImportedAlbum[];
+}
+
+/** What one Save did, from Rust. `duplicates` means the user's file was removed
+ *  because the library already held those bytes — the only deletion of a file
+ *  they own that this app performs. */
+export interface SaveReport {
+  moved: number;
+  duplicates: number;
+  vanished: number;
+}
+
 export interface ArtistGroup {
   artist: string;
   albums: StagedAlbum[];

@@ -428,6 +428,27 @@ async fn run_library_scan(
     roots: Vec<PathBuf>,
     full: bool,
 ) -> Result<ScanSummary, String> {
+    scan_inner(app, db_path, cache_dir, roots, None, None, full).await
+}
+
+/// `only` restricts INDEXING to a set of files while the roots are still walked
+/// in full — what an import of one or two files needs, since a file's album
+/// identity comes from the directory it sits in and indexing the whole folder
+/// would index things the user never pointed at.
+///
+/// `flag_pending` marks rows staged immediately after indexing and BEFORE the
+/// dump is emitted, so the badge and the modal's door see the pile in the same
+/// frame the library refreshed in. A badge that appeared a beat later would read
+/// as an unrelated event.
+async fn scan_inner(
+    app: tauri::AppHandle,
+    db_path: PathBuf,
+    cache_dir: PathBuf,
+    roots: Vec<PathBuf>,
+    only: Option<std::collections::HashSet<std::path::PathBuf>>,
+    flag_pending: Option<Vec<std::path::PathBuf>>,
+    full: bool,
+) -> Result<ScanSummary, String> {
     use std::sync::atomic::Ordering;
     if SCAN_RUNNING.swap(true, Ordering::SeqCst) {
         return Err("scan already running".into());
@@ -439,9 +460,12 @@ async fn run_library_scan(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
         let t_files = std::time::Instant::now();
-        let counts = library::scan::run_scan_roots(&mut conn, &roots, |done, total| {
+        let counts = library::scan::run_scan_files(&mut conn, &roots, only.as_ref(), |done, total| {
             let _ = emitter.emit("scan-progress", serde_json::json!({ "done": done, "total": total }));
         }, full)?;
+        if let Some(paths) = &flag_pending {
+            library::import::mark_staged(&conn, paths)?;
+        }
         let files_elapsed = t_files.elapsed();
         // M3 post-pass: thumbs + colors for albums still missing them.
         // Shares the progress channel; cheap when everything is filled.
@@ -1160,10 +1184,12 @@ async fn remove_music_folder(
     Ok(music_roots(&state).into_iter().map(|p| p.to_string_lossy().into_owned()).collect())
 }
 
-// --- Import staging (PLAN.md Step 2a) ----------------------------------------
-// Two-step flow: import_music COPIES into the staging area (playable right
-// away, outside the library dir); save_imports copies staged files into
-// <musicDir> and deletes the staged copies; discard_imports just deletes.
+// --- Import staging ---------------------------------------------------------
+// Two-step flow, indexing-first: import_music indexes the files where they are
+// and flags the rows (so a pending import plays, shows artwork, and survives a
+// scan like anything else); save_imports MOVES them into the library and re-points
+// the rows; discard_imports forgets the rows and touches no file the app did not
+// write itself. What is pending lives in tracks.staged — not in a folder.
 
 /// Native KDE multi-file picker (kdialog --getopenfilename --multiple).
 /// Returns None on cancel. kdialog separates multiple hits with " \n"? —
@@ -1390,40 +1416,93 @@ async fn delete_missing_tracks(
 }
 
 #[tauri::command]
+/// Import indexes the files where they are and flags them pending — it does not
+/// copy them into the cache the way the first version did. The copy doubled the
+/// disk an import cost, could end up disagreeing with the original, and made
+/// "pending" a fact about a path prefix instead of a fact about the row.
+///
+/// Returns a receipt rather than a scan summary: what is now pending, and which
+/// of the files pointed at the library already indexes. The second half is the
+/// half that needs explaining — a progress ring that ends with nothing on screen
+/// reads as a failure, when the truth is "you already own these".
 async fn import_music(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     paths: Vec<String>,
-) -> Result<ScanSummary, String> {
+) -> Result<library::import::ImportReport, String> {
     let cache_dir = app
         .path()
         .app_cache_dir()
         .map_err(|e| e.to_string())?;
-    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    let emitter = app.clone();
-    let cache = cache_dir.clone();
     let db_path = state.db_path.clone();
+    let requested: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let files = library::import::import_targets(&requested)?;
+    if files.is_empty() {
+        return Ok(Default::default());
+    }
+
+    // Walk the folders the files live in, so album identity (which is directory
+    // authoritative) sees each file in context; index only what was asked for, so
+    // importing one file out of ~/Downloads does not import ~/Downloads.
+    let mut roots: Vec<PathBuf> = files
+        .iter()
+        .filter_map(|f| f.parent().map(|p| p.to_path_buf()))
+        .collect();
+    roots.sort();
+    roots.dedup();
+
+    // A path the library already indexes is not pending, it is already here.
+    let (fresh, already) = {
+        let db = db_path.clone();
+        let files = files.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let conn = library::db::open(&db).map_err(|e| e.to_string())?;
+            let mut fresh: Vec<PathBuf> = Vec::new();
+            let mut already: Vec<PathBuf> = Vec::new();
+            for f in &files {
+                let known = conn
+                    .query_row(
+                        "SELECT 1 FROM tracks WHERE path = ?1",
+                        [f.display().to_string()],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
+                if known {
+                    already.push(f.clone());
+                } else {
+                    fresh.push(f.clone());
+                }
+            }
+            Ok::<(Vec<PathBuf>, Vec<PathBuf>), String>((fresh, already))
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
+
+    let only: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
+    scan_inner(
+        app.clone(),
+        db_path.clone(),
+        cache_dir,
+        roots,
+        Some(only),
+        // Only the new files: flagging a row the library already had would put an
+        // album the user owns into the pile for re-deciding.
+        Some(fresh.clone()),
+        false,
+    )
+    .await?;
+
+    let db = db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        // Skip anything we already hold (library rows + staged files) so
-        // "add file, then add its folder" can never duplicate tracks.
-        let mut known = library::import::KnownFiles::from_db(
-            &library::db::open(&db_path).map_err(|e| e.to_string())?,
-        );
-        for (name, size) in library::import::KnownFiles::from_dir(&library::import::import_dir(&cache)).0 {
-            known.0.insert((name, size));
-        }
-        library::import::import_paths(&cache, &paths, &known, |done, total| {
-            let _ = emitter.emit(
-                "scan-progress",
-                serde_json::json!({ "phase": "import", "done": done, "total": total }),
-            );
+        let conn = library::db::open(&db).map_err(|e| e.to_string())?;
+        Ok(library::import::ImportReport {
+            staged: library::import::album_groups(&conn, &fresh)?,
+            already: library::import::album_groups(&conn, &already)?,
         })
     })
     .await
-    .map_err(|e| e.to_string())??;
-
-    let roots = scan_roots(&state, &cache_dir, None);
-    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await
+    .map_err(|e| e.to_string())?
 }
 
 /// Save staged music into the library dir. `album_id` scopes to one album,
@@ -1441,10 +1520,9 @@ async fn save_imports(
         .app_cache_dir()
         .map_err(|e| e.to_string())?;
     let db_path = state.db_path.clone();
-    let cache = cache_dir.clone();
     let staged = tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::import::staged_tracks(&conn, &cache, album_id.as_deref(), track_id.as_deref())
+        library::import::staged_tracks(&conn, album_id.as_deref(), track_id.as_deref())
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1498,10 +1576,9 @@ async fn discard_imports(
         .app_cache_dir()
         .map_err(|e| e.to_string())?;
     let db_path = state.db_path.clone();
-    let cache = cache_dir.clone();
     let staged = tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::import::staged_tracks(&conn, &cache, album_id.as_deref(), track_id.as_deref())
+        library::import::staged_tracks(&conn, album_id.as_deref(), track_id.as_deref())
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1510,9 +1587,10 @@ async fn discard_imports(
     }
     let n = staged.len();
     let db_path = state.db_path.clone();
+    let staging_dir = library::import::import_dir(&cache_dir);
     tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::import::discard(&conn, &staged)
+        library::import::discard(&conn, &staging_dir, &staged)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1527,17 +1605,14 @@ async fn discard_imports(
 /// screen before Apply, not in a dialog afterwards.
 #[tauri::command]
 async fn staged_import_plan(
-    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<library::import::StagedAlbum>, String> {
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let roots = music_roots(&state);
     let music_dir = music_root(&state);
-    let staging = library::import::import_dir(&cache_dir);
     let db = state.db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db).map_err(|e| e.to_string())?;
-        library::import::staged_plan(&conn, &roots, &music_dir, &staging)
+        library::import::staged_plan(&conn, &roots, &music_dir)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1554,13 +1629,8 @@ struct LibraryDump {
 /// single payload the right call (see PHASE2.md §7); revisit only if it
 /// exceeds ~20 MB.
 #[tauri::command]
-fn get_library(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<LibraryDump, String> {
+fn get_library(state: tauri::State<AppState>) -> Result<LibraryDump, String> {
     let conn = state.db.lock().unwrap();
-    let import_root = app
-        .path()
-        .app_cache_dir()
-        .map(|d| library::import::import_dir(&d))
-        .unwrap_or_default();
 
     let mut artists = Vec::new();
     {
@@ -1610,7 +1680,7 @@ fn get_library(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<L
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, album_id, disc, track, title, duration_sec, path
+                "SELECT id, album_id, disc, track, title, duration_sec, path, staged
                   FROM tracks
                   ORDER BY album_id, disc, (track IS NOT NULL), track, title",
             )
@@ -1620,8 +1690,10 @@ fn get_library(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<L
                 let id: String = r.get(0)?;
                 let album_id: String = r.get(1)?;
                 let path: String = r.get(6)?;
-                let staged = !import_root.as_os_str().is_empty()
-                    && Path::new(&path).starts_with(&import_root);
+                // The column, not a path prefix: staging moved out of the cache
+                // directory and into the row, so the badge and the door follow
+                // the file wherever it happens to sit.
+                let staged = r.get::<_, i64>(7)? != 0;
                 if staged {
                     staged_albums.insert(album_id.clone());
                 }
@@ -1786,6 +1858,18 @@ pub fn run() {
             std::fs::create_dir_all(&db_dir).expect("create data dir");
             let conn = library::db::open(&db_dir.join("songstress.db"))
                 .expect("open library database");
+            // Migration v2 made staging a column instead of a folder. Rows the
+            // copy era left under the cache directory are pending too, and the
+            // pile has to survive the upgrade — a door that went quiet overnight
+            // would read as the app having thrown the import away.
+            if let Ok(cache) = app.path().app_cache_dir() {
+                if let Err(e) = library::import::mark_legacy_staged(
+                    &conn,
+                    &library::import::import_dir(&cache),
+                ) {
+                    eprintln!("[staging] could not flag pre-existing imports: {e}");
+                }
+            }
             // Persisted volume (JSON number in settings) drives the mpv spawn
             // flag — the first track must not blare at the default 80.
             let volume: f64 = library::settings::all(&conn)
@@ -2180,9 +2264,9 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-x','X','x');
              INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);
              INSERT INTO albums VALUES ('al-2','ar-x','B',2021,NULL,NULL,NULL);
-             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/track.flac',1,123);
-             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/track.flac',1,123);
-             INSERT INTO tracks VALUES ('tr-3','al-2',1,1,'t3',10.0,'/music/bc/other.flac',1,456);",
+             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/track.flac',1,123,0);
+             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/track.flac',1,123,0);
+             INSERT INTO tracks VALUES ('tr-3','al-2',1,1,'t3',10.0,'/music/bc/other.flac',1,456,0);",
         )
         .expect("seed");
         let n = super::delete_tracks_under_root(&conn, std::path::Path::new("/music/b"))

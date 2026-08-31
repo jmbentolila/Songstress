@@ -667,6 +667,99 @@ not a global gap.
   queue counts. Staging badges on covers flip to solid `rgba(0,0,0,0.62)`
   + white because they sit on artwork, not glass.
 
+## Settings fidelity is the point
+
+The Settings panes borrow KDE's own vocabulary, so their details are not
+decorative: a traffic-light dot is a Klassy button (`--tb-radius`, never a
+pill), its fill is the KWin palette colour, and it takes a hover before it
+shows a glyph, because an icon that is always drawn is chrome and one that
+appears is an affordance. Size and spacing are measured from the platform,
+not guessed: `kde_window_decoration` reads the user's Klassy config and the
+effective stylesheet and publishes `--tb-dot` / `--tb-gap` / `--tb-margin`,
+which the cluster and the panes' left edge consume, so we match a theme we
+did not write and a DPI we did not choose. The dot's hit area is the full
+pitch (`gap / -2` each side), so adjacent targets never overlap and every
+target clears 24 px while staying under the 41 px of a window button.
+
+A row of options is a **row of options**, not a list of cards: 40 px min
+height (the user's own `--sidebar-row-size`), no borders, no background, the
+whole row being the click target — 24 px of label plus 16 px of padding is a
+40 px target wearing padding. Inset translucent cards on the 0.7-alpha glass
+read as a surface with a hole cut in it, and every pane that does it makes
+the stack look like a settings screen from a different app.
+
+Spacing is a ladder of three rungs — **6 / 12 / 30** — and the ladder carries
+all of the hierarchy, so no rule, caption or background is needed: content
+under its own label 6 (a caption wants to be touching), a group's label to
+its first row 12 (a heading wants to be near its subject, not tight against
+it: 4–6 px reads as a caption of the row), between groups 30. A
+multi-part group (Playback's three checkboxes) puts each part's control
+*touching* its own label and separates the parts by the group gap — 6px/12px
+on, 6px/12px off, 6px/12px crossfade — which reads as one thing made of
+three parts. The previous shape, 6 px above a label and 12 px below it, made
+every heading a caption of the row beneath and turned a stack of groups into
+a stack of rows.
+
+The sidebar's bottom row is a **cluster** — Save, Rescan, Settings,
+side by side, one visual unit. A door to a settings screen does not deserve
+an entire row of a sidebar whose whole job is the collection.
+
+## Import staging, and the window that owns it
+
+Staging is a **state of the row**, not a location on disk: a file the app is
+holding a decision about is flagged, wherever it sits, so a pending import
+gets cover art, a waveform, play counts and scan-safety the moment it is
+imported instead of after the user remembers to press Save. The
+consequence that justifies the machinery is failure: an interrupted copy
+left a half-written duplicate that only a hash check could find, and an
+app that cannot tell you which of two identical files it is holding has no
+business deleting either.
+
+**Files you already own are a receipt, not a no-op.** The honest answer to
+pointing at a folder the library already indexes is "those 12 tracks are
+already here, in Ghostlights", and the import window opens to say it — with
+the destination, since the one question a staging UI must answer before you
+commit is *where will this end up*. The window opens on import because the
+alternative is a progress ring that ends and a library that looks exactly
+the size it was, which is how "nothing happened" looks even when the app
+correctly did nothing.
+
+**A pile is a set of albums, and albums group by artist.** One card per
+artist, one row per album, rows touching and divided by a rule: the card
+*is* the group, so no gap is wasted to say "these belong together". A gap is
+used once for one job — 30 px between cards means separate artists, 12 px
+under a card's label means that label owns everything below it, a 1 px rule
+between touching rows means sibling. The same gap doing two jobs at once is
+how a list stops reading as a structure.
+
+**Every pending thing is a floor under the button that decides it.** An
+album's Save/Discard pair sits in the row it belongs to — the association is
+layout, not memory — and the album's folder, which cannot be changed there,
+is *shown* there. A control that is not bound to the thing it acts on is the
+mistake the old sidebar made twice: an album-scoped button that saved
+everything, and a global Save label that actually saved one album.
+
+**The footer is an action, not a status light.** Its counts are of the
+pending pile; `Apply` runs each marked row's own decision, which is why the
+verb is Apply and not Save — one button doing two things is fine when the
+button says "the decisions above", not when it says "Save" and means it
+sometimes. Per-row buttons are marked rather than executed so the decision
+stays reversible up to the commit; the ring fills from the real number of
+albums already applied, so it cannot start from a stale count or spin in
+place.
+
+**Nothing here can be undone later, so it is decided now.** A file whose
+resolved name the destination folder already holds byte for byte is a
+duplicate at Apply: **the file the user just pointed at is deleted** and the
+library's copy stays, and the window's receipt states it, because a silent
+deletion of someone's own file is not acceptable even when it is a copy of
+one they own. (Same name, different bytes gets ` (2)`; the rule is about the
+destination, not about the whole library — the same song on a compilation and
+on an album is a thing people own on purpose.) A file the library
+already indexes is never staged. And the app removes folders it wrote in
+its own staging area and nothing else — the folder you imported from stays
+where it is, empty or not, because it is yours.
+
 ## Do's and Don'ts
 
 ### Do:

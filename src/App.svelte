@@ -12,7 +12,8 @@
   import { decoVars } from "./lib/stores/decoration.svelte";
   import { initMenu, pushMenuState } from "./lib/stores/menu.svelte";
   import { startViewportGuard } from "./lib/viewportGuard";
-  import { initScanner, importMusic, scanner } from "./lib/stores/scanner.svelte";
+  import { initScanner, scanner } from "./lib/stores/scanner.svelte";
+  import { importMusic } from "./lib/stores/imports.svelte";
   import { library } from "./lib/stores/library.svelte";
   import { playback, initEq } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
