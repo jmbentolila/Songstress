@@ -154,7 +154,7 @@
           </p>
         {:else}
           {#each groups as g (g.artist)}
-            <div class="mi-group">
+            <div class="mi-group" role="group" aria-label={g.artist}>
               <div class="mi-glabel">{g.artist}</div>
               {#each g.albums as a (a.albumId)}
                 {@const open = !!imports.expanded[a.albumId]}
@@ -324,26 +324,38 @@
     padding: 10px 0 0;
     display: flex;
     flex-direction: column;
-    /* Titled groups get the pane's rung: an artist label and its albums are
-       neighbours, not one hug. */
+    /* Artists are neighbours. With one card each, that is the only distance this
+       window measures between groups. */
     gap: 12px;
   }
 
+  /* One card PER ARTIST, with the albums as touching rows inside it — the
+     grouped-list idiom the panes use for `.rows`, and the reason the spacing
+     question in this tree went away. When each album was its own card, the 6px
+     that bound an album to its artist label had to compete with the 12px that
+     separates neighbours, and the reader had to decide which rung was which.
+     Now the grouping is structural: the card IS the artist, the albums are its
+     rows, and every gap in the window means one thing. */
   .mi-group {
     display: flex;
     flex-direction: column;
-    /* An album and the folder it is about to join are one thing. The only hug in
-       this window. */
-    gap: 6px;
+    background: var(--hover);
+    border-radius: 8px;
+    /* clip, not hidden: `hidden` makes the card a scroll port, and focusing a
+       row inside it would scroll the card underneath the reader. */
+    overflow: clip;
   }
 
+  /* The artist is the card's header, not a caption floating above it: 10px of
+     inset, then the 6px hug to the first row, with no divider — a divider would
+     separate the artist from the albums it owns. */
   .mi-glabel {
     font-size: 11.5px;
     font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--text-dim);
-    padding: 0 8px;
+    padding: 10px 10px 6px;
   }
 
   .mi-album {
@@ -351,16 +363,21 @@
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
     gap: 10px;
-    padding: 8px;
-    border-radius: 8px;
-    background: var(--hover);
+    padding: 8px 10px;
+  }
+
+  /* Rows are divided, not spaced — the pane's `.rows` touch, made legible at
+     this content height. */
+  .mi-album + .mi-album {
+    border-top: 1px solid var(--border);
   }
 
   .mi-main {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    /* The destination and the file list belong to this album: the ladder's hug. */
+    gap: 6px;
   }
 
   .mi-row {

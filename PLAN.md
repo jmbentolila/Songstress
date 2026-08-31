@@ -2267,11 +2267,16 @@ follows now: the ring's only direction is forward, and it is allowed to say
   → moved into the album folder (37 files, 37 rows); a discarded copy → gone
   without a trace. Modal closes itself when the pile empties, and focus returns
   to the door row (`[data-imports-door]`) unless the door is gone with the pile.
-- Spacing in the tree follows the pane's ladder with no new numbers: a group and
-  its cards hug at 6, groups are 12 apart inside the body, 4px inside a card
-  between the title, its destination and its files. (Open question raised with
-  the user: one card per artist with touching rows, as the panes do, would make
-  the 6/12 signal unambiguous — deferred, no user direction yet.)
+- Spacing: ONE CARD PER ARTIST, albums as touching rows inside it divided by a
+  hairline (`border-top`, the panes' `.rows` idiom at content height). That
+  resolved a rung ambiguity the first version had: with a card per album, the 6px
+  binding an album to its artist label competed with the 12px separating
+  neighbours and the reader had to guess which distance meant what. Now the
+  grouping is structural — the card IS the artist — and every gap means one
+  thing: 6 between an album and its destination/file list (the hug), 0 plus a
+  divider between albums, 12 between artists. Card is `overflow: clip`, not
+  hidden, so focusing a row cannot scroll the card. Verified live with two Ghost
+  albums under one card beside Ghost B.C.'s (`/tmp/mi6-crop.png`).
 - Found while screenshotting: five accent-filled buttons hardcoded `color: #fff`,
   which with a light accent (the user runs White) is white on white. All now use
   the luminance-aware `--accent-text` (ManageImports, MusicFolders, TagEditor,

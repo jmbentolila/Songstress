@@ -437,6 +437,12 @@ same door into the same Rust command. The one exception so far: the Library
 pane's `Manage imported music…` opens a modal, and a modal has no menu id to
 carry — the Global Menu keeps its own save-everything verb.
 
+- **Grouped lists, not card grids.** Inside the imported-music modal each artist
+  is ONE card with its albums as touching rows divided by a hairline — the sidebar
+  `.rows` idiom at content height. A card per album forces every distance in the
+  window to argue about hierarchy; a card per subject makes the structure
+  structural. Card bodies clip (`overflow: clip`) so focusing a row cannot scroll
+  the card under the reader.
 - **An amount is stated once, as a state** — never welded into a row label
   (`Manage imported music…` with `2 albums` in its tail, not `Save 2 albums`,
   which changes width while you watch and ellipsises the label). Same rule that
