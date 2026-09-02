@@ -5,6 +5,7 @@
   import { trapTab } from "../lib/focusTrap";
 
   let panel = $state<HTMLElement | null>(null);
+  let out = $state(false);
 
   // The version comes from Tauri itself (tauri.conf.json) — the RPM and
   // the About card can never disagree.
@@ -29,7 +30,34 @@
   });
 
   function close() {
+    // The outro. `ui.aboutOpen` stays TRUE until the animation has finished, which is
+    // what keeps the rest of the window honest: `inert={modalOpen()}` and the Escape
+    // ownership in surfaces.svelte.ts both read that flag, and while a dialog is still
+    // on screen both of those claims are still true. So nothing needed to learn about
+    // the exit — the flag simply stopped meaning "requested" and kept meaning
+    // "visible". (`out` is deliberately local for the same reason: four modals, eight
+    // lines each, no shared state to get out of sync.)
+    if (out) {
+      // Second press — Escape, the ✕ or a click on the fading scrim — stops waiting.
+      // Without this, a `animationend` that never arrives (a throttled hidden webview
+      // is not hypothetical here) would leave a dialog on screen that refused to close.
+      ui.aboutOpen = false;
+      out = false;
+      return;
+    }
+    out = true;
+  }
+
+  // The scrim's own animation is the longer of the pair (190ms against the panel's
+  // 150ms), so ending on it means the dim has finished dissolving before the surface
+  // is removed. The panel holds its end state with `forwards` meanwhile. Under
+  // prefers-reduced-motion this fires in ~0.01ms, which is exactly why the exit is an
+  // animation and not a setTimeout: a fixed delay would be a dead wait for the users
+  // who asked for no motion.
+  function onOutroEnd(e: AnimationEvent) {
+    if (e.animationName !== "scrim-out") return;
     ui.aboutOpen = false;
+    out = false;
   }
 
   // About owns its own Escape, like every other surface: while a surface is up the
@@ -51,7 +79,9 @@
 {#if ui.aboutOpen}
   <div
     class="ab-backdrop scrim"
+    class:out
     role="presentation"
+    onanimationend={onOutroEnd}
     onclick={(e) => e.target === e.currentTarget && close()}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->

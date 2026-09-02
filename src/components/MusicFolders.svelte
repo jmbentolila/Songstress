@@ -32,6 +32,29 @@
   function add() {
     void addMusicFolderRoot();
   }
+
+  // --- the outro ------------------------------------------------------------
+  // Same shape as About.svelte: `out` puts the class on the scrim, and the OPEN flag
+  // stays true until the animation has ended — so `modalOpen()` (which feeds `inert`
+  // on `.stage`) and this modal's own Escape ownership both keep telling the truth
+  // while the dialog is still on screen. The second press force-closes, which is the
+  // backstop for an `animationend` that never arrives.
+  let out = $state(false);
+
+  function close() {
+    if (out) {
+      ui.musicFoldersOpen = false;
+      out = false;
+      return;
+    }
+    out = true;
+  }
+
+  function onOutroEnd(e: AnimationEvent) {
+    if (e.animationName !== "scrim-out") return;
+    ui.musicFoldersOpen = false;
+    out = false;
+  }
 </script>
 
 <svelte:window
@@ -41,7 +64,7 @@
       trapTab(e, panel);
       return;
     }
-    if (e.key === "Escape") ui.musicFoldersOpen = false;
+    if (e.key === "Escape") close();
   }}
 />
 
@@ -49,8 +72,10 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     class="mf-backdrop scrim"
+    class:out
     role="presentation"
-    onclick={(e) => e.target === e.currentTarget && (ui.musicFoldersOpen = false)}
+    onanimationend={onOutroEnd}
+    onclick={(e) => e.target === e.currentTarget && close()}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mf-modal glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="Music folders">
@@ -61,7 +86,7 @@
              family, not its side: a text ✕ is a third typographic voice in a
              glass surface, and this header now draws the same cross the sidebar
              gear morphs into.) -->
-        <SurfaceClose label="Close" onclick={() => (ui.musicFoldersOpen = false)} />
+        <SurfaceClose label="Close" onclick={close} />
       </header>
 
       <div class="mf-body">

@@ -102,6 +102,7 @@
   let edit = $state<Editable>(toEditable({}));
   let disputed = $state<Record<string, boolean>>({});
   let loading = $state(false);
+  let out = $state(false);
   let saving = $state(false);
   let error = $state("");
   let panelEl = $state<HTMLElement>();
@@ -179,7 +180,29 @@
 
   function cancel() {
     if (saving) return;
+    // The outro — same shape as About.svelte: `out` starts the exit, and the OPEN flag
+    // stays true until the animation ends, so `modalOpen()` (which drives `inert`) and
+    // the Escape ownership above both keep telling the truth while the dialog is still
+    // on screen. A second press force-closes: the backstop for an `animationend` that
+    // never arrives.
+    if (out) {
+      finish();
+      return;
+    }
+    out = true;
+  }
+
+  function finish() {
     ui.tagEditor.open = false;
+    out = false;
+  }
+
+  function onOutroEnd(e: AnimationEvent) {
+    // `scrim-out` (190ms) rather than the panel's 150ms: it is the longer of the pair,
+    // so the surface is removed once the dim has finished dissolving. The keyframes
+    // live in app.css, so this name is not component-scoped and cannot drift.
+    if (e.animationName !== "scrim-out") return;
+    finish();
   }
 
   async function save() {
@@ -231,7 +254,11 @@
           },
         });
       }
-      ui.tagEditor.open = false;
+      // The save is done; the window leaves the same way the ✕ leaves it. The
+      // vanish-guard below still closes INSTANTLY, and that asymmetry is on purpose: a
+      // dismissal the user asked for gets the exit, a surface whose subject ceased to
+      // exist gets removed.
+      out = true;
       // Edited mtimes re-parse through the real grouping path; scan-finished
       // refreshes the frontend. The vanish-guard above closes us if the
       // album merged away.
@@ -257,7 +284,14 @@
 
 {#if ui.tagEditor.open}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="te-backdrop scrim" role="presentation" onclick={(e) => e.target === e.currentTarget && cancel()}>
+  <div
+    class="te-backdrop scrim"
+    class:out
+    class:waiting={loading}
+    role="presentation"
+    onanimationend={onOutroEnd}
+    onclick={(e) => e.target === e.currentTarget && cancel()}
+  >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="te glass" bind:this={panelEl} role="dialog" aria-modal="true" aria-label={heading}>
       <header class="te-head">
@@ -313,6 +347,19 @@
 {/if}
 
 <style>
+  /* The panel's entrance is timed to its CONTENT, not to the click.
+     `get_album_tags` / `get_track_tags` is a lofty walk over the album's files (an
+     eighteen-track album is eighteen reads), not a cached query — so this is the one
+     modal where "fetch, then open" is off the table: the window has to appear the moment
+     it was asked for. Holding the panel invisible until the fields exist keeps the
+     entrance honest: the surface never animates a box it is about to outgrow. The dim
+     still arrives on the click, so the press is answered in the frame it was made, and
+     the content arrives inside the same 240ms language as every other modal. */
+  .te-backdrop.waiting > .te {
+    animation: none;
+    opacity: 0;
+  }
+
   .te {
     width: min(620px, calc(100vw - 80px));
     max-height: calc(100vh - 120px);

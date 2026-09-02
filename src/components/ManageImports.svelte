@@ -120,8 +120,8 @@
       trapTab(e, panel);
       return;
     }
-    if (e.key === "Escape" && !imports.applying) {
-      closeImportManager();
+    if (e.key === "Escape") {
+      requestClose();
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -134,6 +134,157 @@
     const next =
       e.key === "ArrowDown" ? Math.min(i + 1, btns.length - 1) : Math.max(i - 1, 0);
     btns[next]?.focus({ preventScroll: true });
+  }
+
+  // --- the file list's disclosure ---------------------------------------------
+  //
+  // The height has to be MEASURED. This webview reports
+  // `CSS.supports("interpolate-size", "allow-keywords") === false`, so `height: 0 → auto`
+  // cannot be transitioned in CSS and there is no clever-CSS version of this motion —
+  // which is the same wall the album panel hit and for the same reason (see
+  // ExpandedPanel: "Height is driven in px on .inner"). This borrows its two rules and
+  // none of its machinery: px driven, `auto` at rest, and the exit ends on
+  // `transitionend`, never on a timer.
+  //
+  // Deliberately local and deliberately not a primitive: one list, one motion, one file.
+  const OPEN_MS = 200;
+  const SHUT_MS = 150; // the same path, the shorter beat — leaving is the system response
+
+  function disc(node: HTMLElement, arg: { open: boolean }) {
+    let open = arg.open;
+    let settle: (() => void) | undefined;
+    let guard: ReturnType<typeof setTimeout> | undefined;
+    // The authored display value, read before this function ever touches the property.
+    const restDisplay = getComputedStyle(node).display;
+
+    function end() {
+      if (guard) {
+        clearTimeout(guard);
+        guard = undefined;
+      }
+      const fn = settle;
+      settle = undefined;
+      fn?.();
+    }
+
+    function onTransitionEnd(e: TransitionEvent) {
+      if (e.target === node && e.propertyName === "height") end();
+    }
+
+    /** Animate the box from its CURRENT height to `to` px. `auto` cannot interpolate,
+     *  so the current value is pinned first; mid-flight that pin is the animated height,
+     *  which is what makes a second click reverse instead of restarting. */
+    function moveTo(from: number, to: number, ms: number, done: () => void) {
+      if (guard) clearTimeout(guard);
+      settle = done;
+      node.style.transition = "none";
+      node.style.height = `${from}px`;
+      void node.offsetHeight; // commit the pin before aiming anywhere
+      node.style.transition = `height ${ms}ms var(--ease-out), opacity ${ms}ms var(--ease-out)`;
+      node.style.height = `${to}px`;
+      // opacity is written HERE rather than from a CSS rule on purpose: an `opacity`
+      // that changes via an attribute selector in the same batch as the `transition`
+      // string gets no transition at all on this engine (measured with
+      // `getAnimations()`), so the fade would silently snap while the box moved.
+      node.style.opacity = to > 0 ? "1" : "0";
+      guard = setTimeout(end, ms + 150);
+    }
+
+    const openHeight = () => {
+      const prev = node.style.height;
+      node.style.transition = "none";
+      node.style.height = "auto";
+      const px = node.offsetHeight;
+      node.style.height = prev;
+      return px;
+    };
+
+    const restOpen = () => {
+      node.style.height = "auto";
+      node.style.opacity = "1";
+      // Unclip at rest: the rows are text, and a clipped box would cut an ellipsized
+      // title's descender at the bottom edge. Clipping is only needed while moving.
+      node.style.overflow = "visible";
+      node.style.transition = "";
+    };
+
+    const restClosed = () => {
+      // `display: none`, not `height: 0`: the card is a grid, and a zero-height item
+      // still occupies row 2 — so the album would keep paying its 6px row gap and sit
+      // that much away from its own collapsed summary forever. It also takes the rows
+      // out of the accessibility tree, which is what `aria-expanded="false"` on the
+      // summary claims, and out of the scroller's content box.
+      node.style.display = "none";
+      node.style.height = "0px";
+      node.style.opacity = "0";
+      node.style.overflow = "hidden";
+      node.style.transition = "";
+    };
+
+    node.addEventListener("transitionend", onTransitionEnd);
+    // Mount is a rest state, never a performance: the window opens with one album
+    // unfolded, and that list must not replay its unfold under the window's own
+    // entrance.
+    if (open) restOpen();
+    else restClosed();
+
+    return {
+      update(next: { open: boolean }) {
+        if (next.open === open) return;
+        open = next.open;
+        if (open) {
+          const wasHidden = node.style.display === "none";
+          node.style.overflow = "hidden";
+          if (wasHidden) {
+            node.style.display = restDisplay;
+            node.style.height = "0px";
+            void node.offsetHeight;
+          }
+          const from = wasHidden ? 0 : node.offsetHeight;
+          const to = openHeight();
+          moveTo(from, to, OPEN_MS, restOpen);
+        } else {
+          node.style.overflow = "hidden";
+          moveTo(node.offsetHeight, 0, SHUT_MS, restClosed);
+        }
+      },
+      destroy() {
+        node.removeEventListener("transitionend", onTransitionEnd);
+        if (guard) clearTimeout(guard);
+        settle = undefined;
+      },
+    };
+  }
+
+  // --- the outro ------------------------------------------------------------
+  // Same shape as About.svelte: `out` starts the exit and `imports.open` stays true
+  // until the animation has ended, so `modalOpen()` (which drives `inert`) and the
+  // Escape ownership below keep telling the truth while the window is still on screen.
+  //
+  // Deferring `closeImportManager()` to the end is also what fixes its content: that
+  // function clears `report`/`applied`/`failed` the moment it is called, so closing it
+  // at the START of the exit would have faded out a window that had just been emptied
+  // — reading "Nothing is waiting." in its last 190ms. Same call, one beat later.
+  let out = $state(false);
+
+  function requestClose() {
+    if (imports.applying) return;
+    if (out) {
+      out = false;
+      closeImportManager();
+      return;
+    }
+    out = true;
+  }
+
+  function onOutroEnd(e: AnimationEvent) {
+    // The scrim's animation is the longer of the pair (190ms against the panel's
+    // 150ms), so the surface is removed once the dim has finished dissolving. The
+    // keyframe names live in app.css, so they are not component-scoped and cannot
+    // drift out from under this string.
+    if (e.animationName !== "scrim-out") return;
+    out = false;
+    closeImportManager();
   }
 
   let panel = $state<HTMLElement | null>(null);
@@ -166,7 +317,7 @@
   $effect(() => {
     if (!imports.open) return;
     requestAnimationFrame(() => {
-      panel?.querySelector<HTMLButtonElement>("button.mi-name")?.focus({ preventScroll: true });
+      panel?.querySelector<HTMLButtonElement>("button.mi-disc")?.focus({ preventScroll: true });
     });
   });
 </script>
@@ -177,9 +328,11 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div
     class="mi-backdrop scrim"
+    class:out
     role="presentation"
+    onanimationend={onOutroEnd}
     onclick={(e) => {
-      if (e.target === e.currentTarget && !imports.applying) closeImportManager();
+      if (e.target === e.currentTarget) requestClose();
     }}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
@@ -188,7 +341,7 @@
            h2 is flex:1, so the ✕ lands flush with the content's right edge. -->
       <header class="mi-head">
         <h2>Imported music</h2>
-        <SurfaceClose label="Close" onclick={() => (imports.applying ? null : closeImportManager())} />
+        <SurfaceClose label="Close" onclick={requestClose} />
       </header>
 
       {#if held.length || applyLines.length}
@@ -246,31 +399,34 @@
                 {@const dest = destinationLine(a, ui.musicFolders)}
                 {@const numbers = trackNumbers(a)}
                 <div class="mi-album">
-                  <div class="mi-main">
-                    <div class="mi-row">
-                      <button
-                        class="mi-caret"
-                        aria-expanded={open}
-                        aria-label={`${open ? "Hide" : "Show"} the files of ${a.title}`}
-                        disabled={imports.applying}
-                        onclick={() => toggleImportTracks(a.albumId)}
-                      >
-                        {open ? "▾" : "▸"}
-                      </button>
-                      <button
-                        class="mi-name"
-                        aria-expanded={open}
-                        disabled={imports.applying}
-                        onclick={() => toggleImportTracks(a.albumId)}
-                      >
+                  <!-- ONE disclosure control per card: the summary is the target and the
+                       chevron is an indicator inside it. It used to be TWO buttons (the
+                       caret and the title) carrying the same `aria-expanded` — one state
+                       announced twice, the arrow-walk stopping twice per album, and a
+                       destination line that was dead to a click landing 6px below a live
+                       title. Whole-card is safe here specifically because expanding is
+                       READING: the verbs that commit are in the other grid column and
+                       outside the expander, so there is no mis-click to guard against.
+                       The file list is a SIBLING of the button, never its child — a
+                       button containing the list it discloses swallows every track title
+                       into its accessible name. -->
+                  <button
+                    class="mi-disc"
+                    aria-expanded={open}
+                    disabled={imports.applying}
+                    onclick={() => toggleImportTracks(a.albumId)}
+                  >
+                    <span class="mi-row">
+                      <span class="mi-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+                      <span class="mi-name">
                         <span class="mi-title">{a.title}</span>
                         <span class="mi-meta">
                           {a.year ?? "—"} · {plural(a.tracks.length, "track")}
                         </span>
-                      </button>
-                    </div>
+                      </span>
+                    </span>
 
-                    <div class="mi-dest" title={a.destination.folder}>
+                    <span class="mi-dest" title={a.destination.folder}>
                       <span class="mi-rule">{dest.lead}</span>
                       <!-- The two claims are different kinds of statement (what will
                            happen / where), and 6px of gap did not say that. A middle
@@ -280,23 +436,22 @@
                            spans in their own order. -->
                       <span class="mi-sep" aria-hidden="true">·</span>
                       <span class="mi-path">{dest.path}</span>
-                    </div>
+                    </span>
+                  </button>
 
-                    {#if open}
-                      <ul class="mi-tracks">
-                        {#each a.tracks as t, i (t.id)}
-                          <li class="mi-track">
-                            <span class="mi-num">{numbers[i]}</span>
-                            <span class="mi-tname">{t.title}</span>
-                            <span class="mi-tdur">{fmtDuration(t.durationSec)}</span>
-                          </li>
-                        {/each}
-                      </ul>
-                    {/if}
-                  </div>
+                  <ul class="mi-tracks" use:disc={{ open }}>
+                    {#each a.tracks as t, i (t.id)}
+                      <li class="mi-track">
+                        <span class="mi-num">{numbers[i]}</span>
+                        <span class="mi-tname">{t.title}</span>
+                        <span class="mi-tdur">{fmtDuration(t.durationSec)}</span>
+                      </li>
+                    {/each}
+                  </ul>
 
-                  <!-- Outside the expander, so collapsing a long album cannot move
-                       the buttons out from under a cursor that is on one. -->
+                  <!-- Row 1, column 2 — see .mi-album: the buttons belong to the
+                       summary, not to the card's height, so expanding a long album cannot
+                       move them out from under a cursor that is on one. -->
                   <div class="mi-decide" role="group" aria-label="Decision for {a.title}">
                     <button
                       class="mi-mark mi-save"
@@ -377,7 +532,13 @@
      shapes in one app is one too many. */
   .mi {
     width: min(620px, calc(100vw - 80px));
-    max-height: calc(100vh - 140px);
+    /* ALWAYS this box — height is not content-driven any more.
+       It used to be `max-height`, which made the window hug its pile: two albums gave
+       a short card, thirty gave a tall one, and the report band appearing or a row
+       expanding moved the floor under the buttons the cursor was sitting on. A fixed
+       frame also means the dismissal, the seam and the footer sit at the same
+       coordinates on every open, and the only thing that flexes is the scroller. */
+    height: calc(100vh - 140px);
     display: flex;
     flex-direction: column;
     padding: 16px;
@@ -407,6 +568,11 @@
 
   .mi-body {
     overflow-y: auto;
+    /* The scroll port, now that the frame is fixed. `min-height: 0` is load-bearing:
+       a flex item's automatic minimum is its content size, so without it a long pile
+       pushes the frame open instead of scrolling inside it. */
+    flex: 1 1 auto;
+    min-height: 0;
     padding: 12px 0 0;
     display: flex;
     flex-direction: column;
@@ -447,8 +613,24 @@
   .mi-album {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    /* The line heights the decision column measures its band with: 13.5px of title in
+       18, 11.5px of path in 15 — the list tier's leading, written down rather than
+       inherited so the arithmetic below is arithmetic and not a guess. */
+    --mi-lh-title: 18px;
+    --mi-lh-dest: 15px;
+    --mi-hug: 6px;
+    /* The album is TWO rows now — the summary, then the file list — and the decision
+       column lives in row 1. That is what lets Save/Discard be centred against the
+       ALBUM (title line plus destination line, which is the thing they are decisions
+       about) rather than dangling at the top of a card whose height changes when the
+       list opens. It used to be one row with the list inside the left column, which
+       got the same non-movement guarantee but only by pinning the buttons to the top
+       edge of a two-line block. */
     align-items: start;
-    gap: 10px;
+    column-gap: 10px;
+    /* The ladder's hug, now measured between the rows: the file list belongs to its
+       album exactly the way the destination line does. */
+    row-gap: 6px;
     padding: 8px 10px;
   }
 
@@ -458,12 +640,51 @@
     border-top: 1px solid var(--border);
   }
 
-  .mi-main {
-    min-width: 0;
+  /* The summary button — see the markup note for why the whole thing is the target.
+     The negative margins give the wash and the focus ring breathing room while the TEXT
+     stays on the card's own edge: a stretched grid item's used width is its column minus
+     its margins, so -6px each side widens the box without moving what is in it. */
+  .mi-disc {
+    grid-area: 1 / 1;
+    justify-self: stretch;
     display: flex;
     flex-direction: column;
-    /* The destination and the file list belong to this album: the ladder's hug. */
     gap: 6px;
+    min-width: 0;
+    margin: -2px -6px;
+    padding: 2px 6px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .mi-disc:disabled {
+    cursor: default;
+  }
+
+  /* A wash and an underline, no lift (the No-Lift rule) — and gated for pointer
+     devices, because a tap would otherwise leave this row highlighted. The wash is
+     `--hover`, the same rung every other control answers on; the region is large
+     enough that anything stronger would out-shout the decision buttons beside it. */
+  @media (hover: hover) and (pointer: fine) {
+    .mi-disc:not(:disabled):hover {
+      background: var(--hover);
+    }
+
+    .mi-disc:not(:disabled):hover .mi-title {
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+  }
+
+  .mi-disc:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    /* 8, the controls rung — 4 was off the shapes ladder. */
+    border-radius: 8px;
   }
 
   .mi-row {
@@ -471,22 +692,19 @@
     align-items: baseline;
     gap: 6px;
     min-width: 0;
+    /* Declared, not inherited: the decision column measures its band from this line,
+     * so the line has to have a height the stylesheet knows. */
+    line-height: var(--mi-lh-title);
   }
 
+  /* An indicator now, not a target: `aria-expanded` on the summary carries the state,
+     so the glyph is hidden from assistive tech rather than announced a second time. */
   .mi-caret {
     flex: none;
     width: 14px;
-    border: none;
-    background: transparent;
     color: var(--text-dim);
     font-size: 10px;
     line-height: 1;
-    cursor: pointer;
-    padding: 0;
-  }
-
-  .mi-caret:disabled {
-    cursor: default;
   }
 
   .mi-name {
@@ -494,12 +712,7 @@
     align-items: baseline;
     gap: 8px;
     min-width: 0;
-    border: none;
-    background: transparent;
     color: var(--text);
-    padding: 0;
-    cursor: pointer;
-    text-align: left;
   }
 
   .mi-title {
@@ -518,18 +731,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .mi-name:hover .mi-title {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .mi-name:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 3px;
-    /* 8, the controls rung — 4 was off the shapes ladder. */
-    border-radius: 8px;
-  }
-
   /* What will happen, then where. The rule is the sentence, the path is the
      evidence — and the EVIDENCE is the part that must survive: this row exists to
      answer "where will this end up", and a long album title used to cost the path
@@ -543,6 +744,9 @@
     /* Lines up with the album title, not with the caret. */
     padding-left: 20px;
     font-size: 11.5px;
+    /* Declared for the same reason as the title row's: the decision column's band is
+       measured in these two line heights, so they cannot be left to the engine. */
+    line-height: 15px;
     color: var(--text-dim);
   }
 
@@ -571,20 +775,20 @@
     opacity: 0.85;
   }
 
+  /* The file list. Its motion belongs to `disc()` above: the box's height and opacity
+     are written inline by that action (px → px, `auto` at rest), so nothing animates
+     here in CSS — and the `reveal-in` keyframe that used to live on this rule is gone,
+     because a fade over a box that snaps to its new height is exactly the motion that
+     reads as quick. */
   .mi-tracks {
+    grid-area: 2 / 1;
     list-style: none;
-    margin: 2px 0 0;
+    /* No margin: the card's 6px row gap IS the ladder's hug, and the list belongs to
+       its album at that distance — the same 6px the destination line sits at. */
+    margin: 0;
     padding: 0 0 0 20px;
     display: flex;
     flex-direction: column;
-    animation: reveal-in 200ms var(--ease-out);
-  }
-
-  @keyframes reveal-in {
-    from {
-      opacity: 0;
-      transform: translateY(-3px);
-    }
   }
 
   .mi-track {
@@ -619,7 +823,21 @@
   }
 
   .mi-decide {
+    /* Row 1, column 2. The anchor is the CENTRE OF THE TITLE LINE AND THE FIRST LINE OF
+       THE DESTINATION — not the centre of the summary block. The path wraps instead of
+       truncating (the 0.6.0 fix), so a block-centred column would sit lower on every
+       album whose path needs two lines, and the decision column would arrive ragged.
+       So: a band of exactly title (18) + the summary's own gap (6) + one destination
+       line (15), pinned to the top of the row, with the buttons centred inside it.
+       Expansion is safe for the same reason as before — the list is row 2, below. */
+    grid-area: 1 / 2;
+    align-self: start;
+    /* Title line + the summary's own hug + ONE destination line, measured from the top
+     * of the row. Written as three named values so the band is visibly the same three
+     * distances the layout uses above it. */
+    height: calc(var(--mi-lh-title) + var(--mi-hug) + var(--mi-lh-dest));
     display: flex;
+    align-items: center;
     gap: 6px;
   }
 
@@ -709,6 +927,9 @@
   }
 
   .mi-foot {
+    /* `flex: none` for the same reason the scroller got `min-height: 0`: inside a fixed
+       frame something has to give, and it must be the list, not the buttons. */
+    flex: none;
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--border);

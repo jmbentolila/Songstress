@@ -60,12 +60,28 @@ export async function refreshImportPlan(): Promise<void> {
 }
 
 export async function openImportManager(): Promise<void> {
-  imports.open = true;
+  // Fetch, THEN open. The plan used to arrive a frame or two AFTER the window, which
+  // means the modal mounted showing the PREVIOUS pile and re-filled while it was still
+  // animating in — a surface that changes height during its own entrance is not a
+  // timing problem to tune around, it is a different bug wearing the symptom.
+  //
+  // No loading state and no skeleton, deliberately: `staged_plan` is a
+  // `WHERE staged = 1` query plus three indexed reads and a directory probe per staged
+  // album — single-digit milliseconds, against the app's own yardstick of a 56ms
+  // full-library scan. Waiting for it is invisible; inventing a placeholder for it
+  // would have been a delay we manufactured.
   await refreshImportPlan();
-  // One album waiting: show what is in it straight away. The decision is about
-  // that album, and the file list is the reassurance — making the user click to
-  // read the contents of the only thing on screen is busywork.
+  // Every open starts from ONE rule: the shape of the window is a function of the
+  // pile, not of what the user last clicked. `expanded` used to survive a close, so
+  // reopening showed whatever was open before.
+  //
+  //   one album  → shown open. It is the whole subject of the window; making the user
+  //                click to read the contents of the only thing on screen is busywork,
+  //                and the file list is the reassurance the decision needs.
+  //   more       → all collapsed, and the caret is there to be asked.
+  imports.expanded = {};
   if (imports.plan.length === 1) imports.expanded[imports.plan[0].albumId] = true;
+  imports.open = true;
 }
 
 export function closeImportManager(): void {

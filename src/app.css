@@ -166,21 +166,35 @@ button {
   place-items: center;
   background: rgba(0, 0, 0, 0.35);
   border-radius: var(--radius-window);
-  /* Materialize, don't just appear. The dim and the surface arrive together —
-     140ms for the wash (a brightness jump that snaps reads as a glitch, not as a
-     mode change) and 180ms for the panel, which scales from .97 at its centre, the
-     correct origin for a surface that is not anchored to a trigger. Both are
-     opacity/scale only, so the global `prefers-reduced-motion` kill below collapses
-     them to instant without a JS branch — which is why the ENTER is CSS and the exit
-     is still unmounted in one frame: a symmetric outro needs svelte/transition, and
-     that runs on WAAPI, which the media query cannot reach. */
-  animation: scrim-in 140ms var(--ease-out);
+  /* Materialize, don't just appear: the dim sets first (200ms) and the panel is
+     still landing after it (240ms) — background settled, object moving, which is the
+     depth cue. Durations are the tuned part: 180ms was below the modal tier and below
+     the album panel's own 360ms grow, and on the biggest of these surfaces (the import
+     window, ~620×520) it read as a pop. Opacity/transform only, so the reduced-motion
+     kill below collapses both directions to instant without a JS branch. */
+  animation: scrim-in 200ms var(--ease-out);
 }
 
 /* One rule, every modal: About, Music folders, Tag editor and Imported music are
    all `.glass` panels that are the direct child of their scrim. */
 .scrim > .glass {
-  animation: surface-in 180ms var(--ease-out);
+  animation: surface-in 240ms var(--ease-out);
+}
+
+/* And the way back out, which used not to exist (the unmount was one frame, and the
+   reason given was that a symmetric outro needs `svelte/transition` — WAAPI, which the
+   media query cannot reach). It does not: it needs the surface to stay mounted for the
+   length of the exit, which each modal now does itself (see About's `out`), and a CSS
+   animation, which the kill switch does reach. The lead reverses on purpose — going in
+   the world dims then the object lands, going out the object leaves then the world
+   brightens — and the panel is the shorter of the pair because it is the first thing
+   that stops mattering. `forwards` holds the end state until the unmount lands. */
+.scrim.out {
+  animation: scrim-out 190ms var(--ease-out) forwards;
+}
+
+.scrim.out > .glass {
+  animation: surface-out 150ms var(--ease-out) forwards;
 }
 
 @keyframes scrim-in {
@@ -192,6 +206,22 @@ button {
 @keyframes surface-in {
   from {
     opacity: 0;
-    scale: 0.97;
+    /* 12px of rise plus a .99 lean-in. The rise is a DISTANCE, so every modal gets the
+       same physical move; the old `.97` was a factor, which meant ~5px of edge travel
+       on the About card and ~9px of zoom on the import window off one rule. */
+    transform: translateY(12px) scale(0.99);
+  }
+}
+
+@keyframes scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes surface-out {
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
   }
 }

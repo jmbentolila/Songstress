@@ -661,15 +661,33 @@ not a global gap.
   `aria-hidden`, `class:active`) still reads the live state — the hold is paint-only.
 
 ### A floating surface: arrival, containment, and what must not scroll
-- **It materializes.** `.scrim` fades its dim over 140ms and the panel it carries
-  scales in from `.97` over 180ms (`opacity` + `scale` only, origin centre — a modal
-  is not anchored to a trigger, so it arrives from where it is). Both are CSS
-  animations, which is a requirement, not a convenience: the global
-  `prefers-reduced-motion` kill switch can only reach CSS, so a `svelte/transition`
-  entrance would run at full speed for the users who asked for none. **The exit is
-  still instant** — a symmetric outro needs a JS transition or a two-phase close per
-  surface, and the honest trade was to animate the arrival (where the orientation
-  cost is) and keep the kill switch authoritative.
+- **It materializes, and it leaves the same way.** `.scrim` fades its dim over 200ms
+  and the panel it carries rises **12px** out of `opacity: 0` while leaning in from
+  `scale(.99)` over 240ms (origin centre — a modal is not anchored to a trigger, so it
+  arrives from where it is). The dim leads by 40ms: the background settles, then the
+  object lands. Those are distances and durations, not a factor — this rule used to say
+  "scales in from `.97`", and a factor is a different experience per surface: the same
+  declaration gave the 340×128 About card about 5px of edge travel and the 620×520
+  import window a zoom. **The exit is the mirror on a shorter clock**: panel 150ms, dim
+  190ms, and the lead reversed, because going out the object leaves first and then the
+  world brightens.
+- **The exit is CSS, and that is the whole reason it exists.** An animated outro needs
+  the surface to stay mounted for its length, and the obvious tools — `svelte/transition`
+  (WAAPI) or a `setTimeout` hold — are outside the reach of the global
+  `prefers-reduced-motion` kill switch, which is why this section used to document "the
+  exit is still instant" as a deliberate trade. A CSS `animation` ends at 0.01ms under
+  that switch and still fires its end event, so the hold can end on `animationend` with
+  no timer to be wrong. The mechanism is six lines per modal and **no new shared state**:
+  `close()` starts the exit and the open flag stays true until the animation ends, which
+  makes the flag mean *visible* — so `modalOpen()` (and therefore `inert`) keeps telling
+  the truth while a dialog is still on screen. A second Escape / ✕ / scrim press
+  force-closes, which is the backstop for an event that never arrives.
+- **Opacity is applied inline, not from an attribute rule.** On this engine a value that
+  changes through a `[data-open]`-style selector in the same batch as the `transition`
+  string gets no transition at all for `opacity` (measured with `getAnimations()`:
+  `height` and `transform` appear, `opacity` does not) — the fade dies while the box
+  still moves, silently. Anything that animates opacity as part of a JS-driven move
+  writes it on the element.
 - **A modal makes the rest of the window inert.** `role="dialog" aria-modal="true"`
   is a claim about the a11y tree; without `inert` on the background it is a claim the
   code does not honour, and Tab walks the grid, the sidebar and the playbar behind a
@@ -835,6 +853,45 @@ used once for one job — 30 px between cards means separate artists, 12 px
 under a card's label means that label owns everything below it, a 1 px rule
 between touching rows means sibling. The same gap doing two jobs at once is
 how a list stops reading as a structure.
+
+**The window is a frame, not a shrink-wrap.** `height: calc(100vh - 140px)`, always: the
+pile does not decide how tall the decision is. A content-sized window moved the floor
+under the Apply buttons every time a row expanded or the report band appeared, and made
+every open a different shape. Inside the frame the album list is the scroll port
+(`flex: 1 1 auto` + `min-height: 0` — without that zero the long pile pushes the frame
+open instead of scrolling inside it) and the footer is `flex: none`: when there is not
+enough room, what gives is the list, never the buttons.
+
+**The card's summary is the control.** One disclosure button per album, covering the
+title line, the meta and the destination — not the caret alone. It used to be TWO
+buttons carrying the same `aria-expanded`: one state announced twice, the list's
+arrow-walk stopping twice per album, and a destination line dead to a click that landed
+6px below a live title. The chevron is an indicator inside the button, `aria-hidden`,
+because `aria-expanded` is what carries the state; the file list is the button's
+**sibling** and never its child, or every track title gets swallowed into the control's
+accessible name. Whole-summary is a safe target here specifically because expanding is
+*reading* — the verbs that commit live in the other grid column, outside the expander.
+
+**Save/Discard centre on the album's first two lines, not on the card.** The decision
+column is a band of title line (18px) + the summary's own hug (6px) + ONE destination
+line (15px), pinned to the top of its row. Centring it on the summary *block* would sit
+the buttons lower on every album whose path needs two lines — and the path wraps on
+purpose — so the decision column would arrive ragged. Those two line heights are
+declared rather than inherited, because the band is arithmetic made of them.
+
+**The window's shape is a function of the pile.** One album waiting → its file list
+opens unfolded: it is the whole subject of the window, and the list is the reassurance
+the decision needs. More than one → all collapsed, and the caret is there to be asked.
+Either way the state resets on open, so reopening never shows whatever the user happened
+to leave open last time.
+
+**A file list unfolds; it does not jump.** Its height is measured in px and transitioned
+— 200ms out, 150ms back, `auto` at rest — because this webview has no `interpolate-size`
+(`CSS.supports` is false, measured), so `height: 0 → auto` cannot be animated in CSS at
+all, and a fade over a box that snaps to its new height is precisely the motion that
+reads as quick. Rest-closed is `display: none`, not `height: 0`: a zero-height grid item
+still occupies its row, and every collapsed album would keep a 6px hole under its own
+summary forever.
 
 **Every pending thing is a floor under the button that decides it.** An
 album's Save/Discard pair sits in the row it belongs to — the association is
