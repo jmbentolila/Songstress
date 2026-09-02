@@ -5,6 +5,7 @@
   import { menu, activateMenuItem } from "../lib/stores/menu.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
   import { openImportManager } from "../lib/stores/imports.svelte";
+  import { surfaceOpen } from "../lib/stores/surfaces.svelte";
   import { fold } from "../lib/search";
   import {
     windowClose,
@@ -68,9 +69,26 @@
   // so it no longer shares the Appearance pane's first screen — this row
   // pushes it one level deeper, same drawer language.
   let atSub = $derived(ui.menuSub !== null);
-  let detailMenu = $derived(
-    atDetail ? menu.menus.find((m) => m.id === ui.menuDetail) ?? null : null,
-  );
+
+  // A layer keeps showing ITS OWN content while it animates out. Both ids flip to
+  // null at t=0 of a back, and a layer re-rendered for the null state is either a
+  // blank panel sweeping across (detail) or, worse, the WRONG pane: the sub layer's
+  // `{:else}` branch is the accent picker, so backing out of the EQ preset list
+  // printed colour swatches over the drawer on the way out (found by the owner,
+  // 2026-09-01). The held id is only ever read by a layer that is visible or
+  // leaving, so it never needs clearing — and every gate that decides what the
+  // user can ACT on (inert, aria-hidden, class:active, `atDetail`/`atSub`) still
+  // comes from the real state, not from this.
+  let heldDetail = $state("");
+  let heldSub = $state("");
+  $effect(() => {
+    if (ui.menuDetail) heldDetail = ui.menuDetail;
+    if (ui.menuSub) heldSub = ui.menuSub;
+  });
+  const shownDetail = $derived(ui.menuDetail ?? heldDetail);
+  const shownSub = $derived(ui.menuSub ?? heldSub);
+
+  let detailMenu = $derived(menu.menus.find((m) => m.id === shownDetail) ?? null);
 
   // --- Sidebar-specific tree (impeccable critique 2026-08-30, option C) --
   // The Rust model (menu.rs) feeds the Plasma Global Menu — a menu-BAR
@@ -97,10 +115,9 @@
 
   let detailItems = $derived.by(() => {
     if (
-      !atDetail ||
-      ui.menuDetail === APPEARANCE ||
-      ui.menuDetail === PLAYBACK ||
-      ui.menuDetail === LIBRARY
+      shownDetail === APPEARANCE ||
+      shownDetail === PLAYBACK ||
+      shownDetail === LIBRARY
     )
       return [];
     return (detailMenu?.items ?? []).filter(
@@ -112,7 +129,7 @@
     );
   });
   let detailTitle = $derived(
-    ui.menuDetail === APPEARANCE ? "Appearance" : (detailMenu?.label ?? "Settings"),
+    shownDetail === APPEARANCE ? "Appearance" : (detailMenu?.label ?? "Settings"),
   );
 
   // Focus handoff (audit pass B): pushing a layer used to leave focus on the
@@ -462,13 +479,13 @@
   let searchInput = $state<HTMLInputElement | null>(null);
 
   function onGlobalKey(e: KeyboardEvent) {
-    // ONE Escape owner (this router): the About dialog closes first — two
-    // window listeners raced here (Svelte re-attaches them on update, so
-    // order is not guaranteed) and the dialog + the stack popped together.
-    if (e.key === "Escape" && ui.aboutOpen) {
-      ui.aboutOpen = false;
-      return;
-    }
+    // One press, one verb. While a floating surface is up, THAT surface owns the
+    // keyboard: this router does nothing at all — not Escape, not `s`, not `/`. It
+    // used to answer Escape after the surface had (closing a modal opened from the
+    // Library pane popped the pane off the stack too, and `s` behind the About
+    // scrim pushed the stack in where nothing could see it). See surfaces.svelte.ts
+    // for why the precedence is a predicate rather than stopPropagation.
+    if (surfaceOpen()) return;
     // Escape pops one menu level: sub → detail → root → home.
     if (e.key === "Escape" && ui.menuOpen) {
       if (ui.menuSub) ui.menuSub = null;
@@ -670,7 +687,7 @@
         </button>
         <span class="navtitle">{detailTitle}</span>
       </div>
-      {#if ui.menuDetail === APPEARANCE}
+      {#if shownDetail === APPEARANCE}
         <div class="panebody">
           <section class="group">
             <div class="glabel">Sizes</div>
@@ -755,7 +772,7 @@
         <div class="panefoot">
           <button class="frow" onclick={resetAppearance}>Reset appearance</button>
         </div>
-      {:else if ui.menuDetail === PLAYBACK}
+      {:else if shownDetail === PLAYBACK}
         <!-- Bespoke pane, driven by the stores rather than the flattened menu
              model (Appearance does the same). Three subjects, each with an
              enable checkbox; the fields it owns appear underneath it, indented,
@@ -883,7 +900,7 @@
         <div class="panefoot">
           <button class="frow" onclick={resetPlayback}>Reset playback</button>
         </div>
-      {:else if ui.menuDetail === LIBRARY}
+      {:else if shownDetail === LIBRARY}
         <!-- Bespoke for the same reason the other two are: six undifferentiated
              rows hid which decisions were about getting files in, which about
              re-reading them, and that anything was staged at all. Three groups,
@@ -1021,9 +1038,9 @@
         <button class="backchev" aria-label={`Back to ${detailTitle}`} onclick={back}>
           <svg viewBox="0 0 10 14" aria-hidden="true"><path d="M7 2 L3 7 L7 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </button>
-        <span class="navtitle">{ui.menuSub === "eq-preset" ? "EQ Preset" : "Accent"}</span>
+        <span class="navtitle">{shownSub === "eq-preset" ? "EQ Preset" : "Accent"}</span>
       </div>
-      {#if ui.menuSub === "eq-preset"}
+      {#if shownSub === "eq-preset"}
         <!-- 10 named presets: a list, not a segment. Same row language as the
              generic panes' checked items, so "this is the one that is on" is
              one grammar across the stack. -->

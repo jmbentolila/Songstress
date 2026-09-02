@@ -14,8 +14,8 @@
 
   // Focus returns to the opener (recorded by openAbout, which knows the trigger
   // — by the time this component unmounts, the dialog's own autofocus has
-  // already moved activeElement inside). Runs on either dismissal path: the dot
-  // or the sidebar's Escape router.
+  // already moved activeElement inside). Runs on either dismissal path: the ✕,
+  // Escape, or the scrim.
   $effect(() => {
     const opener = ui.aboutOpener;
     if (!ui.aboutOpen) return;
@@ -28,9 +28,17 @@
   function close() {
     ui.aboutOpen = false;
   }
-  // Escape is handled by the sidebar's global key router (it owns all
-  // Escape/`s`/`/` shortcuts) — a second window listener here raced it.
+
+  // About owns its own Escape, like every other surface: while a surface is up the
+  // sidebar's router stands down (surfaces.svelte.ts). It used to be the router's
+  // job, which is why a modal opened from a pane closed BOTH on one keypress —
+  // same-node `window` listeners cannot be ordered against each other.
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && ui.aboutOpen) close();
+  }
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 {#if ui.aboutOpen}
   <div
@@ -81,17 +89,19 @@
     color: var(--text-dim);
   }
 
-  /* Position only — size, palette, glyph reveal and focus ring are the
-     component's. Top-LEFT: dismissal lives where the window's own close dot
-     lives, in every floating surface. */
+  /* Position only — size, palette, glyph and focus ring are the component's.
+     Top-RIGHT, 8px from the edges: About is a card with no header row, so the
+     box is a corner object here rather than the end of a title line. It stays
+     clear of the centred title because the card's own padding (24px) is wider
+     than the box. */
   /* :global: the class is forwarded into the child component, so it lands on an
      element compiled in another file — About's own scope hash is not there.
      Descendant selector (two classes) because SurfaceClose's own
      `.sc { position: relative }` is an equal-specificity rule in a later
-     stylesheet: one class would lose the tie and leave the dot in flow. */
+     stylesheet: one class would lose the tie and leave the ✕ in flow. */
   :global(.ab .ab-close) {
     position: absolute;
     top: 8px;
-    left: 8px;
+    right: 8px;
   }
 </style>

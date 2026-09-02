@@ -47,6 +47,10 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Settings stack: one dismissal family, platform geometry, spacing ladder | ✅ 2026-08-31 |
 | Manage-imports window (one card per artist, per-album Apply) | ✅ 2026-08-31 |
 | Import staging: cache copy → in-place row flag (migration v2) | ✅ 2026-08-31 |
+| Surface template: boxed ✕ top-right for every modal AND popover | ✅ 2026-09-01 |
+| Escape: one press, one verb (the surface owns it) | ✅ 2026-09-01 |
+| Stack: a layer holds its own content while it animates out | ✅ 2026-09-01 |
+| Window size survives a restart (`window-state`; position can't — Wayland) | ✅ 2026-09-01 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -2317,6 +2321,18 @@ follows now: the ring's only direction is forward, and it is allowed to say
   --user -u songstress-dev -f`. HMR rot → cold restart first.
 - Raise window: WindowsRunner DBus Match + Run(matchId, "activate")
   (qdbus-qt6, `--literal` for Match output; matchId like `0_{uuid}`).
+- **The user's desktop is a 3-part grid: terminal + the app in the LEFT column, a
+  browser in the right.** The dev window is hand-placed, not maximized — measured
+  2026-09-01: `x=0 y=690`, **1200×660**, dpr 2 (min is 960×600, default 1280×800,
+  so it sits *below* the default on purpose). Therefore: **activate only — never
+  resize, move, maximize, or "widen it to see the whole layout"** (a resize is also
+  the known trigger of the band-clip glitch above, and it breaks his grid). Verify
+  the UI **at 1200×660**: 236px sidebar ⇒ ~940px of grid ⇒ **4 columns at the 220px
+  tile**, and 660 − 84 (playbar) = **576px of scroll port**; modals (ManageImports,
+  Music Folders, About, Tag editor) must read at that height. `spectacle -b -n -a`
+  (active window) is the right crop — it keeps the terminal and browser out of the
+  frame; prefer a `devctl eval` DOM probe over a screenshot whenever state, not
+  pixels, is the question (a screenshot steals focus, an eval does not).
 - playerctl NOT installed — verify MPRIS via busctl/gdbus/qdbus-qt6.
 - grim NOT installed; screenshots via `spectacle -b -n -a -o <file>`
   (active window) / `-f` fullscreen; background captures for artifacts.
@@ -2377,3 +2393,72 @@ user pointed at, exactly those files, wherever they are.
 - **Import reports itself.** `ImportReport { staged, already }` renders in the window the import opens ("Already in your library", with the
   album named), and the Apply receipt reports the moved / deleted-as-duplicate / discarded / vanished counts. 93 tests: 4 new, 6 retired
   together with the code they covered (a test for a deleted rule is deleted with it).
+
+## The surface template: dismissal, and one press = one verb (2026-09-01)
+
+Started as "remove the red dot from the imported-music modal, put an ✕ top-right"; it turned
+into the rule that was missing, because the same objection applies to every floating surface.
+
+- **Two dismissal families, one verb each.** The traffic-light dot is the WINDOW's close — the
+  user's own KWin close colour, in the window's own circle — and it now lives only in the sidebar
+  header, where it is true. Modals AND popovers dismiss with `SurfaceClose`, rebuilt as the boxed
+  ✕ at the head's right edge: 28×28, radius 7, the sidebar gear's own glyph (16-unit box, 8-unit
+  cross, 1.4 stroke, round caps, drawn SVG — a text ✕ is the third typographic family Music
+  folders was already caught using), dim → hover wash → `--active` press, inset accent ring, no
+  transition. The settings stack had been written up as "the exception" that kept this shape; the
+  exception was the rule and the dot was the deviation.
+- **Why the dot was wrong, in one line:** it claimed a verb the surface doesn't have. Dismissing
+  the queue does not quit the app, and a circle in the close colour at the close spot says
+  otherwise. Fidelity to Plasma means mirroring what the platform does for a *dialog*, and Plasma
+  dialogs do not carry a second window button.
+- **Flush, not floating:** the box's right edge is the content's right edge (measured 17px = 1px
+  border + 16px padding), and its centre is the title's (119.5 / 119.5). About has no head row, so
+  it takes the corner (8px) instead. `Clear` in the queue header moved off the far edge for the
+  same reason it used to be there: a destructive verb must not neighbour dismissal.
+- **Rolled out to all six surfaces** (Manage imports, Music folders, Tag editor, About, the
+  equalizer popover, the queue popover); `.q-x` stays a BARE ✕ — boxed + head + always-visible vs
+  bare + row + hover-revealed is what tells "put this away" from "remove this row" now that both
+  are crosses.
+- **One press, one verb.** Escape (and the scrim, and the ✕) does exactly one thing: while a modal,
+  popover or the context menu is up, that surface answers and the sidebar's global key router
+  stands down — so closing a modal opened from the Library pane no longer pops the pane off the
+  stack too. Measured: open → Esc → modal gone, Library pane still active; Esc → root; Esc →
+  closed. The router's OTHER keys are gated by the same predicate, which also ends `s` pushing the
+  settings stack in behind the About scrim. The context menu had no Escape owner at all (the key
+  popped a settings level instead of dismissing the menu on screen) and now has one.
+- **Why a predicate and not `stopPropagation`:** all six handlers listen on `window`, and
+  same-node listeners all run regardless — only `stopImmediatePropagation` cuts them short, and
+  Svelte re-attaches them on update so order is not guaranteed. `surfaceOpen()`
+  (`src/lib/stores/surfaces.svelte.ts`) makes the precedence a fact each handler checks. This raced
+  twice before it was named: the earlier fix moved About's handler INTO the router, which made
+  About correct and left everyone else wrong.
+- **A layer holds its own content while it animates out** (his bug report: accent swatches
+  flashing on the way back from the EQ preset submenu). Not a timing bug — an identity bug: the sub
+  layer is `{#if menuSub === "eq-preset"} … {:else} <accent picker> {/if}` and `menuSub` flips to
+  null at t=0 of the back, so the layer re-renders into the wrong branch while still on screen. The
+  mirror case flashed the preset list, and the detail layer had the same flaw as a blank panel
+  sweeping across. `heldDetail`/`heldSub` + `shownDetail`/`shownSub` drive rendering, titles and
+  branch conditions; `atDetail`/`atSub`/`inert`/`aria-hidden`/`class:active` still read the live
+  state, so the hold is paint-only. Measured after the fix: back out of eq-preset → 0 swatches, 10
+  preset rows (was 12 swatches, 0 rows).
+- **Restart geometry: what a Wayland client can and cannot remember.** Added
+  `tauri-plugin-window-state` with `SIZE|MAXIMIZED` — and deliberately NOT `POSITION`, because a
+  Wayland client never learns where the compositor put it: measured on one window, Tauri's
+  `outer_position()` = `(0,0)` while KWin reports `x=560 y=290`, and `inner_size()` = `2560×1600`
+  physical for a 1280×800 CSS window (Tauri scale 2 — so the plugin's units are its own and
+  self-consistent, which is why SIZE round-trips and POSITION does not). Saving position would
+  have stored `(0,0)` and `set_position(0,0)` on next launch — moving the window to the top-left
+  corner, worse than doing nothing. **And it does not help a dev restart:** the plugin writes on
+  `RunEvent::Exit`,
+  which a kill never reaches (verified — after three rebuild-kills `~/.config/com.yossi.songstress/.window-state.json`
+  still did not exist and the window came back 1280×800). So the plugin's real win is the
+  PACKAGED app quitting and relaunching at the size it was; in dev the protocol is manual and is
+  written into AGENTS.md (a KWin rule and a seeded state file were both offered and both
+  declined — the owner places the window himself and the agent waits for the green light).
+  A debounced save on `tauri://resize` would cover the kill path; not built, see lib.rs.
+- **Version files are watched.** Bumping `tauri.conf.json` / `Cargo.toml` makes `tauri dev`
+  rebuild and RESTART the app — which, per the rule above, costs the owner a window re-place. Do
+  the bump before he places the window, or tell him it is coming.
+- Gates: `npm run check` 0 · 73 vitest · 81 `cargo test --lib` · `npm run build` clean. DESIGN.md's
+  dismissal section is rewritten ("Two families, one verb each" + a new "One press, one verb") and
+  is now the authority; the old "one family, two dots" text is gone.

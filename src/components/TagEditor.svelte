@@ -255,8 +255,8 @@
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="te glass" bind:this={panelEl} role="dialog" aria-modal="true" aria-label={heading}>
       <header class="te-head">
-        <SurfaceClose label="Close" onclick={cancel} />
         <h2>{heading}</h2>
+        <SurfaceClose label="Close" onclick={cancel} />
       </header>
 
       {#if loading}

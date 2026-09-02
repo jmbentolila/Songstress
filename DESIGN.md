@@ -551,31 +551,50 @@ the field that reveals under it. If a form's spacing starts reading as arbitrary
 the fix is proximity-by-relationship (owner→owned tighter than sibling→sibling),
 not a global gap.
 
-### Dismissal — the traffic-light family
-- **One family, two dots.** The titlebar's close dot quits the **window**;
-  `SurfaceClose` dismisses a **surface**. Same device on purpose: one circle, sized by `--tb-dot`,
-  the user's own KWin close colour (`--tb-x`, published on `<html>` by
-  `decoVars()` so titlebar and surfaces cannot drift), ✕ glyph revealed on hover
-  *and* on keyboard focus, press = brightness 0.82. No transition: the Plasma
-  dots change instantly and the family is one behaviour.
-- **Red only.** A lone dot never shows a yellow or green it cannot honour —
-  a popover has no minimize and no zoom.
-- **Dismissal sits top-left**, where the app has always put its close dot, in
-  every floating surface: popovers, modals. The header row above the content *is*
-  the surface's chrome.
-- **The settings stack is the exception** and keeps its boxed ✕ top-right: its
-  header row is the same row as the real window dots, and two red dots 200px
-  apart — one closing a drawer, one closing the app — is a worse confusion than
-  the shape difference being removed.
-- **Hit area:** the button is 26px around the dot (a bare dot is under this
-  app's own ~28px minimum, and a popover has no drag region forgiving it). In the
-  titlebar the dot grows its own box by half the configured gap
-  (`::before { inset: calc(var(--tb-gap) / -2) }`), which makes the target
-  exactly the cluster's pitch for *whatever* the decoration asks for. One more
-  pixel and neighbouring targets overlap, and the later button steals the shared
-  strip — which would bury the close dot's east edge inside minimize. Tune the
-  decoration, and the hit area follows by construction: a cluster whose target is
-  always its pitch cannot be resized into a miss.
+### Dismissal — two families, one verb each
+- **The window's close is a dot; a surface's close is a box.** The traffic-light
+  dot (close/min/maximize in the sidebar header) is the only thing in the app that
+  wears the KWin close colour, because it is the only thing that quits the window.
+  Every floating **surface** — modal *and* popover — dismisses with `SurfaceClose`,
+  the boxed ✕ at the head's right edge. The earlier design put the dot on surfaces
+  too ("one family, two dots"); that was fidelity taken one step past the truth:
+  a circle in the user's close colour, in the close spot, on a surface that cannot
+  close the app, claims a verb it does not have.
+- **The box is not new.** It is the sidebar gear's own ✕ — the glyph the gear
+  morphs into when settings open — same 16-unit box, 8-unit cross, 1.4 stroke,
+  round caps, drawn as SVG. So "put this away" is one dialect in the app, and it is
+  the dialect the user already presses twice a day. A text ✕ is banned (a third
+  typographic family in a glass surface); `.q-x`'s glyph is drawn for the same reason.
+- **Spec:** 28×28 (this app's icon-button rung, and its own ~28px minimum hit
+  target met by construction — a floating surface has no drag region forgiving a
+  smaller one), radius 7, `--text-dim` at rest → `--hover` wash + full-strength
+  glyph on hover → `--active` wash on press, inset 2px accent ring on
+  `:focus-visible`. **No transition**: the wash answers on pointer-down, and a
+  dismissal that fades in reads as a delay. The glyph is absolutely centered
+  (`translate: -50% -50%`), never `place-items` on a native `<button>` — that
+  drifts ~1px down on this WebKitGTK.
+- **Dismissal sits top-right, flush with the content edge** (measured: 17px from
+  the panel's outer edge = 1px border + 16px padding, so the box's right edge is
+  the same line the rows' right edges end on). A head therefore reads
+  *what this is → what to do about it*, left to right, and the title's optical
+  centre and the glyph's are the same line (measured: 119.5 / 119.5). About has no
+  head row, so it places the box in the corner instead (`top/right: 8`). The
+  settings stack was always in this family, as an exception; it is now the rule.
+- **A destructive verb never neighbours dismissal.** The queue header used to put
+  `Clear` at the far edge "opposite the close dot"; with dismissal at the far edge,
+  `Clear` keeps the left group (title · count · Clear) and the whole slack of the
+  row separates it from the ✕.
+- **`.q-x` is a bare ✕, and that is now load-bearing.** With dismissal also an ✕,
+  the two verbs are told apart by everything around the glyph: boxed + in the head
+  + always visible = put this surface away; bare + inside the row + revealed on row
+  hover = remove this row. Never give a row's ✕ a box, and never put one in a head.
+- **Hit area (window cluster):** in the titlebar the dot grows its own box by half
+  the configured gap (`::before { inset: calc(var(--tb-gap) / -2) }`), which makes
+  the target exactly the cluster's pitch for *whatever* the decoration asks for.
+  One more pixel and neighbouring targets overlap, and the later button steals the
+  shared strip — which would bury the close dot's east edge inside minimize. Tune
+  the decoration, and the hit area follows by construction: a cluster whose target
+  is always its pitch cannot be resized into a miss.
 - **The geometry is read, not eyeballed.** `kde_window_decoration` publishes
   `--tb-dot`, `--tb-gap`, `--tb-margin`, `--tb-radius` from klassyrc
   (`ButtonSpacingLeft`, `TitleBarLeftMargin`, `WindowCornerRadius`, `IconSize`),
@@ -601,8 +620,29 @@ not a global gap.
   the popover's own `eqBtn`/`qBtn`) so Tab continues where the user was. The
   opener is captured when the surface opens, not when it unmounts — by then the
   dialog's autofocus has already moved `activeElement` inside.
-- **`.q-x` stays an ✕.** "Remove this row" is not dismissal; giving it the close
-  colour would teach the wrong verb.
+
+### One press, one verb
+- **The topmost surface owns the keypress.** Escape (and the scrim, and the ✕) does
+  exactly ONE thing: while a modal, popover or the context menu is up, that surface
+  answers and the sidebar's global key router stands down entirely — so closing a
+  modal opened from the Library pane no longer pops the pane off the stack too, and
+  `s` cannot push the stack in behind the About scrim. A second press then does the
+  next thing: pop one menu level (sub → detail → root → home).
+- **Precedence is a fact, not an order.** Every one of those handlers listens on
+  `window`, and same-node listeners all run regardless of `stopPropagation` (only
+  `stopImmediatePropagation` cuts them short, and Svelte re-attaches them on update
+  so attachment order is not guaranteed). So `surfaceOpen()`
+  (`src/lib/stores/surfaces.svelte.ts`) is what each handler checks. This raced
+  twice before it was named: the first fix moved About's handler *into* the router,
+  which made About correct and everyone else still wrong.
+- **A layer keeps showing its OWN content while it animates out.** The stack's
+  branch conditions read `shownDetail`/`shownSub` — the last non-null id — not the
+  live `menuDetail`/`menuSub`, which flip to null at t=0 of a back. Rendering for
+  the null state is either a blank panel sweeping across (detail) or, worse, the
+  WRONG pane: the sub layer's `{:else}` branch is the accent picker, so backing out
+  of the EQ preset list printed colour swatches over the drawer on its way out.
+  Every gate that decides what the user can *act on* (`atDetail`, `atSub`, `inert`,
+  `aria-hidden`, `class:active`) still reads the live state — the hold is paint-only.
 
 ### Inputs / Fields
 - **Search fields (sidebar 30px, titlebar-less era):** 8px radius, 1px
@@ -778,9 +818,11 @@ where it is, empty or not, because it is yours.
   the accent stroke (an inset ring vanishes against a near-opaque fill).
 - **Do** keep the keyboard accelerators: `/` focuses library search, `s`
   toggles the Settings stack (both inert while typing or with modifiers),
-  Escape pops menu levels and clears-then-blurs the search field.
-- **Do** mirror the system: KWin palette for traffic lights (and for every
-  surface's close dot — same `--tb-*`), button order
+  Escape pops menu levels and clears-then-blurs the search field — and
+  always belongs to the topmost floating surface first (one press, one verb).
+- **Do** mirror the system: KWin palette for the **window's** traffic lights
+  (`--tb-*`, and only for the window's — surfaces dismiss with the boxed ✕),
+  button order
   from the decoration config, kdialog for pickers, Plasma Global Menu as
   the primary menu surface.
 

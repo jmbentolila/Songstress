@@ -1,15 +1,41 @@
-<!-- Close affordance for floating surfaces (popovers, modals) — the member of
-     the traffic-light family that dismisses a surface instead of the window.
+<!-- Dismissal for a floating SURFACE — modal or popover — the boxed ✕, top-right.
 
-     Same device as the titlebar dots on purpose: 13px circle, the user's own
-     KWin close palette (`--tb-x`, published on <html> from the decoration
-     store), glyph revealed on hover only. Red ONLY: a lone dot must never show
-     a yellow/green it cannot honour — a popover has no minimize and no zoom.
+     THE TEMPLATE, in the order it matters:
+       • TITLE LEFT, DISMISSAL RIGHT, one row, one seam under it. The head is the
+         surface's chrome; nothing else sits in it but what the surface owns
+         (the queue's count + Clear, the equalizer's route out).
+       • 28×28 box, radius 7, glyph 16px — this app's icon-button rung, and the
+         ~28px minimum hit target met by construction (a floating surface has no
+         drag region forgiving a smaller one).
+       • Dim at rest → hover wash + full-strength glyph → press = `--active` wash.
+         No transition: the wash answers on pointer-down, and a dismissal that
+         fades in reads as a delay.
+       • Inset accent ring on `:focus-visible` — the app's only focus language,
+         inset because the box sits inside the surface's padding.
+       • `autofocus` only for a surface with nothing else to focus (About). A
+         surface that opens ON work takes focus to the work instead (the import
+         list focuses its first decision).
+       • Escape and the scrim/backdrop do the same verb. This is the visible one,
+         never the only one.
+       • Closing returns focus to whatever opened it — the caller's job, and the
+         reason `onclick` is a prop instead of an `open` binding.
 
-     The button is 26px around the 13px dot: a 13px hit area is under this app's
-     own 28px minimum, and in a popover there is no drag region forgiving it.
-     `.q-x` (remove this row) deliberately stays an ✕ — it is not dismissal, and
-     putting the close colour on it would teach the wrong verb. -->
+     WHY A BOX AND NOT THE RED DOT: the dot is the WINDOW's close — the user's own
+     KWin close colour, the window's own circle — and a surface wearing it claims a
+     verb it cannot honour (dismissing the queue does not quit the app). So the dot
+     lives only where the window's controls live (the sidebar header), and every
+     surface dismisses with this box, which is already the app's "put this away"
+     glyph: the sidebar gear morphs into the same ✕, same stroke, same geometry.
+
+     WHY TOP-RIGHT: dismissal joins the far edge, so a head reads as
+     "what this is" → "what to do about it" left to right, and a destructive action
+     (Clear queue) keeps the whole width between itself and dismissal. The old
+     top-left position existed to mirror the window's dot; mirroring its colour and
+     shape without its verb was the mistake, not the position.
+
+     Position comes from the parent: a header row's flex puts it right for free
+     (modals, popovers); a head-less surface (About) places it absolutely and needs
+     `:global()` — a class forwarded into a child component is unscoped here. -->
 <script lang="ts">
   let {
     onclick,
@@ -18,10 +44,14 @@
     class: klass = "",
   }: {
     onclick: () => void;
+    /** Also the accessible name and the tooltip — one string, so they cannot
+     *  drift apart. "Close" is enough inside a dialog that says what it is;
+     *  "Close equalizer" is right when several surfaces look alike. */
     label?: string;
-    /** Modals must place focus inside the dialog on open. */
+    /** Surfaces must place focus inside themselves on open. */
     autofocus?: boolean;
-    /** Positioning comes from the parent (absolute in About, static in a header). */
+    /** Positioning for a surface with no header row (About). Forwarded onto the
+     *  button, so the rule that uses it must live in `:global()`. */
     class?: string;
   } = $props();
 
@@ -30,7 +60,9 @@
   $effect(() => {
     if (autofocus && btn && !focusedOnce) {
       focusedOnce = true;
-      btn.focus();
+      // preventScroll: a surface whose body is a scroll port would jump the list
+      // to whatever the focus landed on.
+      btn.focus({ preventScroll: true });
     }
   });
 </script>
@@ -43,77 +75,59 @@
   {onclick}
   bind:this={btn}
 >
-  <span class="dot" aria-hidden="true">
-    <svg viewBox="0 0 10 10">
-      <path d="M2.2 2.2 L7.8 7.8 M7.8 2.2 L2.2 7.8" />
-    </svg>
-  </span>
+  <!-- The gear's ✕, verbatim: 16-unit box, 8-unit cross, 1.4 stroke, round caps.
+       Drawn, not a font glyph — a text ✕ is a third typographic family in a glass
+       surface (Music folders learned this the hard way). A row's own ✕ (`.q-x`,
+       "remove this row") stays BARE, inside the row, revealed on row hover: no
+       box, no head, so the two ✕ never read as the same verb. -->
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.4"
+    stroke-linecap="round"
+    aria-hidden="true"
+  >
+    <path d="M4 4 L12 12 M12 4 L4 12" />
+  </svg>
 </button>
 
 <style>
   .sc {
     position: relative;
     flex: none;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     border: none;
+    border-radius: 7px;
     background: transparent;
+    color: var(--text-dim);
     padding: 0;
     cursor: pointer;
   }
 
-  /* Absolutely centered, not place-items: center on the button — that drifts
-     ~1px down on a native <button> in WebKitGTK (the traffic lights learned
-     this the hard way). */
-  .dot {
+  /* Absolutely centered, not place-items on a native <button> — that drifts ~1px
+     down on this WebKitGTK (the traffic lights learned it first). */
+  .sc svg {
     position: absolute;
     top: 50%;
     left: 50%;
     translate: -50% -50%;
-    width: var(--tb-dot, 15px);
-    height: var(--tb-dot, 15px);
-    border-radius: 50%;
-    border: 1px solid rgba(0, 0, 0, 0.18);
-    background: var(--tb-x);
+    width: 16px;
+    height: 16px;
   }
 
-  .dot svg {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    translate: -50% -50%;
-    width: 8px;
-    height: 8px;
-    fill: none;
-    stroke: rgba(255, 255, 255, 0.9);
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    opacity: 0;
+  .sc:hover {
+    background: var(--hover);
+    color: var(--text);
   }
 
-  /* No transition: the titlebar dots change instantly (Klassy behaviour), and
-     the family is one behaviour, not two. */
-  .sc:hover .dot {
-    background: var(--tb-x-hover);
-  }
-
-  /* Glyph on hover AND on keyboard focus — a focused dot that shows nothing is
-     a dot whose verb only mouse users get. */
-  .sc:hover .dot svg,
-  .sc:focus-visible .dot svg {
-    opacity: 1;
-  }
-
-  .sc:active .dot {
-    filter: brightness(0.82);
+  .sc:active {
+    background: var(--active);
   }
 
   .sc:focus-visible {
-    outline: none;
-  }
-
-  .sc:focus-visible .dot {
     outline: 2px solid var(--accent);
-    outline-offset: 2px;
+    outline-offset: -2px;
   }
 </style>

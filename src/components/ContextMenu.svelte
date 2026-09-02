@@ -27,6 +27,16 @@
   }}
 />
 
+<!-- Escape belongs to the menu while it is open (surfaces.svelte.ts counts it as a
+     surface, so the sidebar's router stands down for it). It had no Escape owner at
+     all before: the key popped a settings level instead of dismissing the thing on
+     screen, which is the wrong verb twice over. -->
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape" && contextMenu.open) closeContextMenu();
+  }}
+/>
+
 {#if contextMenu.open}
   <div class="ctx glass" bind:this={el} style:top="{contextMenu.y}px" style:left="{contextMenu.x}px" role="menu">
     {#each contextMenu.items as item (item.label)}

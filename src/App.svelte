@@ -48,9 +48,10 @@
     });
   });
 
-  // The KWin button palette on <html>: the titlebar dots and every surface's
-  // close dot read --tb-* from here, so one source (the user's decoration) drives
-  // the whole family.
+  // The KWin button palette on <html>: the WINDOW's dots read --tb-* from here,
+  // so one source (the user's decoration) drives them. Surfaces do not: a modal
+  // or popover dismisses with the boxed ✕ (SurfaceClose), because the close
+  // colour claims a verb they don't have.
   $effect(() => {
     for (const [k, v] of decoVars()) document.documentElement.style.setProperty(k, v);
   });

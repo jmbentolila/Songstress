@@ -172,9 +172,11 @@
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mi glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="Imported music">
+      <!-- The surface template: title left, dismissal right, one seam under them.
+           h2 is flex:1, so the ✕ lands flush with the content's right edge. -->
       <header class="mi-head">
-        <SurfaceClose label="Close" onclick={() => (imports.applying ? null : closeImportManager())} />
         <h2>Imported music</h2>
+        <SurfaceClose label="Close" onclick={() => (imports.applying ? null : closeImportManager())} />
       </header>
 
       <div class="mi-body">

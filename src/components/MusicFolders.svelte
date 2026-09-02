@@ -47,11 +47,13 @@
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mf-modal glass" role="dialog" aria-modal="true" aria-label="Music folders">
       <header class="mf-head">
-        <!-- Was a font-glyph ✕ at the right: a third typographic family in a
-             glass surface, and the one modal whose dismissal disagreed with
-             every other one. -->
-        <SurfaceClose label="Close" onclick={() => (ui.musicFoldersOpen = false)} />
         <h2>Music folders</h2>
+        <!-- Dismissal is the boxed ✕ at the far edge, like every other surface.
+             (It used to be a font-glyph ✕ here — the objection was the glyph's
+             family, not its side: a text ✕ is a third typographic voice in a
+             glass surface, and this header now draws the same cross the sidebar
+             gear morphs into.) -->
+        <SurfaceClose label="Close" onclick={() => (ui.musicFoldersOpen = false)} />
       </header>
 
       <div class="mf-body">

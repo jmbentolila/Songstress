@@ -32,6 +32,27 @@ journalctl --user -u songstress-dev -f      # logs
 
 Closing the app window kills `tauri dev` by design — restart the unit.
 
+**Restart protocol (owner-set, 2026-09-01).** A restart brings the window back
+CENTERED, which is not where he keeps it — his tile is the **bottom-left quarter**
+(last measured: `x=0 y=690`, 1200×660 logical, in a 3-part grid: terminal + app in
+the left column, browser in the right). Nothing can put it back programmatically:
+a Wayland client cannot see its own position (measured — Tauri's `outer_position()`
+returns `(0,0)` while KWin reports `x=560 y=290`), and KWin exposes no DBus
+move/resize on Plasma 6.7. So after ANY restart: **stop, tell him the window is
+misplaced, and wait for his green light that he has moved it back** before driving
+or measuring anything in it. Do NOT add a KWin window rule, seed
+`.window-state.json`, or call `set_position` to work around this — he declined all
+three; the manual move IS the protocol.
+
+What the app remembers across a **clean quit** is its SIZE (`tauri-plugin-window-state`,
+`SIZE|MAXIMIZED`) — a `systemctl restart` or a `tauri dev` rebuild KILLS the process, the
+plugin writes only on `RunEvent::Exit`, so nothing is saved on that path and the window
+comes back at the built-in default size (measured). Position is never the app's to
+remember on Wayland. So: after a restart he restores both by hand; after a normal close
+the packaged app returns at the size he left it. Frontend work needs no restart at all:
+`tauri dev` hot-reloads Svelte components, stores and CSS. Restart only for Rust changes
+(cargo rebuilds anyway) or `contain:`/containing-block changes.
+
 ## Layout
 
 ```
@@ -222,13 +243,25 @@ skills' defaults:
 2. `npm test` → all green
 3. `cargo test --lib` (in src-tauri) → all green
 4. `npm run build` → succeeds
-5. Visual pass if UI touched (raise window, screenshot, actually look).
+5. Visual pass if UI touched — **only when the owner asks for it, or when the change
+   is not something he can check faster himself.** He drives the app and tests the UI
+   (rule set 2026-09-01): do NOT walk the surfaces one screenshot at a time — activate,
+   capture, crop, read. That is slower than him pressing the keys and it spends the
+   session's budget. Do the mechanical gates (1-4), one cheap DOM probe if a measurement
+   is the thing at issue (geometry, computed style — no screenshot), then hand it over
+   with what to look at. When he DOES ask for a visual pass, the rules below are
+   non-negotiable — they are why a screenshot can lie.
    RAISE IT FOR REAL: WebKit stops repainting the Songstress window while it is
    unfocused, so `spectacle` hands back a frame from BEFORE your last action and
    you will debug a UI bug that does not exist. Activate first
    (`qdbus-qt6 org.kde.KWin /WindowsRunner org.kde.krunner1.Run "$ID" activate`),
    then screenshot — and when a screenshot contradicts a DOM probe, trust the
    probe and re-shoot.
+   ACTIVATE ONLY — never resize, move or maximize the window to make a layout
+   "fit the screenshot". It lives in the user's 3-part grid (terminal + app in the
+   left column, browser in the right) at **1200×660**, and a size change is both a
+   broken desktop and the known trigger of the WebKitGTK band-clip glitch. Verify
+   the UI at his size (see PLAN.md → Environment quick facts).
 6. Update PLAN.md (status table + implementation log)
 
 ## Versioning at commit time

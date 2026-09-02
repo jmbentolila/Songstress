@@ -354,15 +354,16 @@
            is the popover's unique value: shaping the curve while something
            plays, from the button that is already under the cursor. -->
       <header>
-        <SurfaceClose label="Close equalizer" onclick={closeEqPop} />
         <button class="route" onclick={openPlaybackSettings}>
           <span>Playback settings</span>
           <svg viewBox="0 0 10 14" aria-hidden="true">
             <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
+        <SurfaceClose label="Close equalizer" onclick={closeEqPop} />
       </header>
-      <!-- Three bands, top to bottom: chrome (dot + route), the curve — the one
+      <!-- Three bands, top to bottom: chrome (the route out + dismissal), the
+           curve — the one
            thing this surface does that the pane doesn't — and ownership (is it
            on, which preset). The row sits at the BASE, inverting the Playback
            pane's gate-above ordering: a form is read top-down, an instrument
@@ -422,7 +423,6 @@
   {#if ui.queueOpen}
     <div class="q-pop glass" bind:this={qEl} role="dialog" aria-label="Queue">
       <header>
-        <SurfaceClose label="Close queue" onclick={closeQueuePop} />
         <span class="q-title">Queue</span>
         {#if playback.queue.length}
           <span class="q-count">{playback.queue.length}</span>
@@ -435,6 +435,9 @@
             Clear
           </button>
         {/if}
+        <!-- Last in DOM, first in the eye's order for this row: title → count →
+             the one destructive verb, then the far edge where dismissal lives. -->
+        <SurfaceClose class="q-close" label="Close queue" onclick={closeQueuePop} />
       </header>
       {#if queueRows.length === 0 && upNextRows.length === 0}
         <p class="q-empty">Nothing queued. Right-click a track → “Play next” or “Add to queue”.</p>
@@ -915,7 +918,12 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding-right: 8px;
+  }
+
+  /* The far edge belongs to dismissal. `:global` because the class is forwarded
+     into SurfaceClose, so it lands on an element compiled in another file. */
+  :global(.q-pop .q-close) {
+    margin-left: auto;
   }
 
   .q-title {
@@ -934,9 +942,10 @@
   }
 
   .q-clear {
-    /* Far edge, opposite the close dot: destructive action as far from
-      * dismissal as this header gets. */
-    margin-left: auto;
+    /* Hugs the title group on the left. It used to take `margin-left: auto` to
+       sit at the far edge "opposite the close dot" — with dismissal moved to the
+       far edge, a destructive verb must not neighbour it, so Clear keeps the left
+       group and the whole slack of the row separates it from the ✕. */
     border: none;
     background: transparent;
     color: var(--text-dim);
