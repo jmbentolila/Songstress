@@ -14,6 +14,7 @@
   import { startViewportGuard } from "./lib/viewportGuard";
   import { initScanner, scanner } from "./lib/stores/scanner.svelte";
   import { importMusic } from "./lib/stores/imports.svelte";
+  import { modalOpen } from "./lib/stores/surfaces.svelte";
   import { library } from "./lib/stores/library.svelte";
   import { playback, initEq } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -103,7 +104,13 @@
 </script>
 
 <div class="app">
-  <div class="stage">
+  <!-- A modal claims the window, so the window's other contents are inert: without
+       this, `aria-modal` is a claim the code does not honour and Tab walks the grid,
+       the sidebar and the playbar behind the scrim (the same failure the settings
+       stack was fixed for). Popovers and the context menu are deliberately NOT
+       covered — see modalOpen(). Dragging the window is already blocked by the scrim
+       itself, so nothing is taken away that worked. -->
+  <div class="stage" inert={modalOpen()}>
     <!-- No titlebar: the grid's top padding band is the window drag strip
          (the sidebar header is the other drag region). It overlaps the
          20px content padding, so nothing clickable hides under it at

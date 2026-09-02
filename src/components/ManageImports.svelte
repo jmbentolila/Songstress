@@ -30,9 +30,15 @@
   } from "../lib/importPlan";
   import SurfaceClose from "./SurfaceClose.svelte";
   import ProgressRing from "./ProgressRing.svelte";
+  import { trapTab } from "../lib/focusTrap";
 
   const groups = $derived(groupByArtist(imports.plan));
   const held = $derived(imports.report?.already ?? []);
+  // The report band sits OUTSIDE the scroller, so it has to stay short: three names,
+  // then the count. The full list rides in the `title`.
+  const heldShown = $derived(held.slice(0, 3));
+  const heldMore = $derived(held.length - heldShown.length);
+  const heldAll = $derived(held.map((a) => `${a.artist} — ${a.title}`).join(", "));
   const was = (n: number) => (n === 1 ? "was" : "were");
   // What Apply did, in the order the verbs matter in. The duplicate line is the
   // one that earns its space: it reports the only deletion of a file the user
@@ -108,6 +114,12 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (!imports.open) return;
+    if (e.key === "Tab") {
+      // `aria-modal` promises the rest of the window is gone; the ring keeps focus
+      // inside the panel that made the promise (App.svelte inertes the background).
+      trapTab(e, panel);
+      return;
+    }
     if (e.key === "Escape" && !imports.applying) {
       closeImportManager();
       return;
@@ -178,6 +190,44 @@
         <h2>Imported music</h2>
         <SurfaceClose label="Close" onclick={() => (imports.applying ? null : closeImportManager())} />
       </header>
+
+      {#if held.length || applyLines.length}
+        <!-- The two statements this window exists to make, and the one place it must
+             NOT be: below the fold. They used to render after the album cards, inside
+             the scroller — measured at 389px shown against 864px of content, so an
+             8-album pile opened with the report off-screen and the Apply receipt
+             unreachable without a scroll. A band under the seam is outside the scroll
+             region, so it is read or it is not there. Sentence case, no tracking: the
+             app is speaking, which is not what an artist label looks like. -->
+        <div class="mi-report">
+          {#if applyLines.length}
+            <div class="mi-said" role="status">
+              <span class="mi-said-label">Just applied</span>
+              {#each applyLines as line (line)}
+                <p class="mi-said-line">{line}</p>
+              {/each}
+            </div>
+          {/if}
+          {#if held.length}
+            <div class="mi-said" role="group" aria-label="Already in your library">
+              <span class="mi-said-label">Already in your library</span>
+              {#each heldShown as a (`${a.artist}|${a.title}`)}
+                <p class="mi-said-line">
+                  {a.artist} — {a.title} · {plural(a.tracks, "track")}
+                </p>
+              {/each}
+              {#if heldMore > 0}
+                <p class="mi-said-line" title={heldAll}>
+                  and {heldMore} more
+                </p>
+              {/if}
+              <p class="mi-said-note">
+                Nothing was added and nothing was moved: you already own these.
+              </p>
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       <div class="mi-body">
         {#if groups.length === 0}
@@ -270,32 +320,6 @@
             </div>
           {/each}
         {/if}
-
-        {#if held.length}
-          <!-- Half of an import that needs explaining: pointing at files the
-               library already indexes is not a failure, and a progress ring that
-               ends with nothing on screen is how a failure looks. -->
-          <div class="mi-held" role="group" aria-label="Already in your library">
-            <div class="mi-glabel">Already in your library</div>
-            {#each held as a (`${a.artist}|${a.title}`)}
-              <div class="mi-heldrow">
-                <span class="mi-heldname">{a.artist} — {a.title}</span>
-                <span class="mi-meta">{plural(a.tracks, "track")}</span>
-              </div>
-            {/each}
-            <p class="mi-note">
-              Nothing was added and nothing was moved: you already own these.
-            </p>
-          </div>
-        {/if}
-
-        {#if applyLines.length}
-          <ul class="mi-applied" role="status">
-            {#each applyLines as line}
-              <li>{line}</li>
-            {/each}
-          </ul>
-        {/if}
       </div>
 
       <footer class="mi-foot">
@@ -383,7 +407,7 @@
 
   .mi-body {
     overflow-y: auto;
-    padding: 10px 0 0;
+    padding: 12px 0 0;
     display: flex;
     flex-direction: column;
     /* Artists are neighbours. With one card each, that is the only distance this
@@ -502,14 +526,19 @@
   .mi-name:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 3px;
-    border-radius: 4px;
+    /* 8, the controls rung — 4 was off the shapes ladder. */
+    border-radius: 8px;
   }
 
   /* What will happen, then where. The rule is the sentence, the path is the
-     evidence: they are different colors because they are different claims. */
+     evidence — and the EVIDENCE is the part that must survive: this row exists to
+     answer "where will this end up", and a long album title used to cost the path
+     everything but one character ("· M…"), with the full text only in a hover
+     tooltip. So the gloss yields first and the path wraps instead of truncating. */
   .mi-dest {
     display: flex;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: 0 6px;
     min-width: 0;
     /* Lines up with the album title, not with the caret. */
     padding-left: 20px;
@@ -518,7 +547,11 @@
   }
 
   .mi-rule {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-style: italic;
   }
 
@@ -529,12 +562,12 @@
   }
 
   .mi-path {
+    flex: 1 1 auto;
     min-width: 0;
-    font-family:
-      "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* Inter, not a mono face: DESIGN.md's type system is one voice with no pairing,
+       and "technical" is not a reason to borrow a second family. A path that must
+       break, breaks — `anywhere` only fires when one token exceeds the line. */
+    overflow-wrap: anywhere;
     opacity: 0.85;
   }
 
@@ -626,55 +659,53 @@
     font-weight: 600;
   }
 
-  /* The destructive mark keeps the app's one destructive tint (the Music
-     folders modal already spends it on "Remove"). */
+  /* The destructive mark takes the system's one caution hue (the same token the
+     missing-file glyphs wear) — not the undocumented salmon red this window and the
+     Music folders modal were each improvising. Hue is never the only cue: border,
+     fill and weight change with it. */
   .mi-drop[aria-pressed="true"] {
-    background: #ff8f8f22;
-    border-color: #ff8f8f88;
-    color: #ff8f8f;
+    background: var(--caution-wash);
+    border-color: var(--caution-line);
+    color: var(--caution);
     font-weight: 600;
   }
 
   /* The receipt: quieter than the pile, because it reports a decision that was
      already obvious to the app and to nobody else. */
-  .mi-held {
+  .mi-report {
+    flex: none;
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    gap: 12px;
+    padding: 10px 0 0;
   }
 
-  .mi-heldrow {
+  .mi-said {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  /* Deliberately NOT `.mi-glabel`: uppercase + tracking is what an artist name
+     looks like here, and a heading in that voice under the last artist card reads
+     as one more artist called "Already in your library". */
+  .mi-said-label {
     font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
   }
 
-  .mi-heldname {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .mi-said-line {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-dim);
   }
 
-  .mi-note {
+  .mi-said-note {
     margin: 2px 0 0;
     font-size: 11.5px;
     color: var(--text-dim);
-  }
-
-  .mi-applied {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    font-size: 12px;
-    color: var(--text-dim);
+    opacity: 0.85;
   }
 
   .mi-foot {
@@ -707,7 +738,7 @@
   }
 
   .mi-failed {
-    color: #ff8f8f;
+    color: var(--caution);
   }
 
   .mi-actions {

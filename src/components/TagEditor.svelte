@@ -3,6 +3,7 @@
   import { library } from "../lib/stores/library.svelte";
   import { ui } from "../lib/stores/ui.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
+  import { trapTab } from "../lib/focusTrap";
   import { rescan } from "../lib/stores/scanner.svelte";
 
   /** File-level tag surface mirrored from the Rust TrackTags (serde names). */
@@ -245,7 +246,12 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key === "Escape" && ui.tagEditor.open) cancel();
+    if (!ui.tagEditor.open) return;
+    if (e.key === "Tab") {
+      trapTab(e, panelEl);
+      return;
+    }
+    if (e.key === "Escape") cancel();
   }}
 />
 
@@ -428,7 +434,10 @@
     flex: 1;
     min-width: 0;
     font-size: 12px;
-    color: #ff8f8f;
+    /* The system's one caution hue — the same token a missing-file glyph and a
+       discard mark wear. A second, undocumented red was what this family used to
+       look like; one hue, named, is what it now looks like. */
+    color: var(--caution);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

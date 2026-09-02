@@ -1,11 +1,14 @@
 <script lang="ts">
   import { ui } from "../lib/stores/ui.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
+  import { trapTab } from "../lib/focusTrap";
   import {
     addMusicFolderRoot,
     removeMusicFolderRoot,
     scanner,
   } from "../lib/stores/scanner.svelte";
+
+  let panel = $state<HTMLElement | null>(null);
 
   /** Which row is currently asking "remove this?" — destructive confirms live
    *  INSIDE the glass; native confirm() would render a GTK dialog, which
@@ -33,7 +36,12 @@
 
 <svelte:window
   onkeydown={(e) => {
-    if (e.key === "Escape" && ui.musicFoldersOpen) ui.musicFoldersOpen = false;
+    if (!ui.musicFoldersOpen) return;
+    if (e.key === "Tab") {
+      trapTab(e, panel);
+      return;
+    }
+    if (e.key === "Escape") ui.musicFoldersOpen = false;
   }}
 />
 
@@ -45,7 +53,7 @@
     onclick={(e) => e.target === e.currentTarget && (ui.musicFoldersOpen = false)}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-    <section class="mf-modal glass" role="dialog" aria-modal="true" aria-label="Music folders">
+    <section class="mf-modal glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="Music folders">
       <header class="mf-head">
         <h2>Music folders</h2>
         <!-- Dismissal is the boxed ✕ at the far edge, like every other surface.
@@ -185,7 +193,9 @@
     width: 22px;
     height: 22px;
     border: none;
-    border-radius: 5px;
+    /* 7px, the icon-button rung (5 was off the ladder; Toggle's 5px stays — a 16px
+       checkbox is a different object and DESIGN.md says so). */
+    border-radius: 7px;
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
@@ -195,13 +205,13 @@
 
   .mf-remove:hover {
     background: var(--hover);
-    color: #ff8f8f;
+    color: var(--caution);
   }
 
   .mf-ask-row {
     gap: 10px;
     background: var(--panel-bg-strong);
-    border: 1px solid #ff8f8f55;
+    border: 1px solid var(--caution-line);
   }
 
   .mf-ask {
@@ -225,12 +235,12 @@
   }
 
   .mf-yes {
-    border-color: #ff8f8f88;
-    color: #ff8f8f;
+    border-color: var(--caution-line);
+    color: var(--caution);
   }
 
   .mf-yes:hover:not(:disabled) {
-    background: #ff8f8f22;
+    background: var(--caution-wash);
   }
 
   .mf-no:hover {

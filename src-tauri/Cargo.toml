@@ -1,6 +1,6 @@
 [package]
 name = "songstress"
-version = "0.5.1"
+version = "0.6.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -41,13 +41,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-# Geometry persistence (2026-09-01): the packaged app quit normally and relaunched at
-# the 1280×800 default; now it comes back the size it was. Rust-side only — no JS
-# package, no capability entry: the plugin restores in its setup hook, keeps its cache
-# current on Moved/Resized, and WRITES on RunEvent::Exit (a clean quit — a killed
-# process saves nothing; see the long comment in lib.rs for what that means for dev
-# restarts, and why POSITION is off on Wayland).
-tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }

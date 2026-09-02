@@ -353,23 +353,27 @@
            the same objection AGENTS.md records for GTK file choosers. What stays
            is the popover's unique value: shaping the curve while something
            plays, from the button that is already under the cursor. -->
+      <!-- The head is identity + state + dismissal, like every other surface:
+           what this is (the gate that says whether it is live), which preset it is
+           showing, and the ✕ that puts it away. The route OUT used to sit here —
+           the only head in the app that began with navigation instead of naming
+           what you were looking at — and it now sits at the base, where leaving is.
+           When the equalizer is off the curve sleeps and the gate stays full
+           contrast: dimming the thing that turns it back on would hide the way out. -->
       <header>
-        <button class="route" onclick={openPlaybackSettings}>
-          <span>Playback settings</span>
-          <svg viewBox="0 0 10 14" aria-hidden="true">
-            <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
+        <Toggle
+          small
+          checked={playback.eq.enabled}
+          label="Equalizer"
+          onchange={setEqEnabled}
+        />
+        <span class="preset">{playback.eq.preset ?? "Custom"}</span>
         <SurfaceClose label="Close equalizer" onclick={closeEqPop} />
       </header>
-      <!-- Three bands, top to bottom: chrome (the route out + dismissal), the
-           curve — the one
-           thing this surface does that the pane doesn't — and ownership (is it
-           on, which preset). The row sits at the BASE, inverting the Playback
-           pane's gate-above ordering: a form is read top-down, an instrument
-           surface keeps its master at the base. Deliberate, see DESIGN.md.
-           When off, the curve sleeps and the checkbox row stays full contrast —
-           dimming the gate would hide the only way out. -->
+      <!-- Three bands: the head, then the curve — the one thing this surface does
+           that the pane does not — then the way out. The curve is the middle band
+           because it is the work: everything else is either what it is or where to
+           go next. -->
       <div class="bands" class:asleep={!playback.eq.enabled}>
         <label class="band preamp">
           <span class="db">{fmtDb(playback.eq.preampDb)}</span>
@@ -410,13 +414,12 @@
         {/each}
       </div>
       <footer class="own">
-        <Toggle
-          small
-          checked={playback.eq.enabled}
-          label="Equalizer"
-          onchange={setEqEnabled}
-        />
-        <span class="preset">{playback.eq.preset ?? "Custom"}</span>
+        <button class="route" onclick={openPlaybackSettings}>
+          <span>Playback settings</span>
+          <svg viewBox="0 0 10 14" aria-hidden="true">
+            <path d="M3 2 L7 7 L3 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
       </footer>
     </div>
   {/if}
@@ -759,14 +762,13 @@
     user-select: none;
   }
 
+  /* No `justify-content`: the preset's own `margin-left: auto` is what pushes the
+     state + dismissal to the right edge, so the slack is spent by the item that
+     owns the grouping rather than distributed between three. */
   .eq-pop header {
     display: flex;
     align-items: center;
     gap: 12px;
-  }
-
-  .eq-pop header {
-    justify-content: space-between;
   }
 
   /* Route out of the popover: same action tier as the panes' footer rows (0.82
@@ -784,7 +786,7 @@
     font-size: 12.5px;
     cursor: pointer;
     padding: 4px 6px;
-    margin: -4px -6px -4px 0;
+    margin: 0;
   }
 
   .eq-pop .route svg {
@@ -824,14 +826,17 @@
   /* Ownership, at the base: what is on, and which curve you are editing.
      Inert by design — the route lives in the header now, so this row must not
      look clickable. */
+  /* The base row is the way out: one action under one seam, same tier as the
+     panes' footer rows. It used to be the ownership row (gate + preset), inert
+     by design because the route lived in the header; the two swapped, so the
+     seam now separates the work from the exit instead of the work from its
+     state. */
   .eq-pop .own {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin: -2px -2px -4px;
-    padding-top: 10px;
+    margin: -2px -6px -4px;
+    padding-top: 6px;
     border-top: 1px solid var(--border);
-    cursor: default;
   }
 
   /* Read-only, Micro tier: it names what you are editing (and says "Custom"

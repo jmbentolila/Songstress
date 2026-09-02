@@ -176,8 +176,17 @@ wallpaper rather than opaque fills.
   variable, never a literal.
 
 ### Tertiary
-- **Amber Caution** (`#f2a33c`): reserved exclusively for missing-file
-  alert glyphs in tracklists. The only non-accent hue in the app.
+- **Amber Caution** (`#f2a33c` dark / `#b26a12` light — the light value is the
+  same hue taken down to clear 4.5:1 on the porcelain glass): **the system's one
+  caution hue**, spent on exactly three things — a missing-file alert glyph in a
+  tracklist, a destructive *mark* ("Discard this album", "Remove this folder"), and
+  error text. It ships as a set so a mark never half-adopts the hue:
+  `--caution` (text), `--caution-line` (0.55 border), `--caution-wash` (0.14 fill).
+  The only non-accent hue in the app. It was documented as exclusive to alert glyphs
+  while two components improvised an undocumented salmon (`#ff8f8f`) for destructive
+  state; the drift is closed by naming the tier, not by adding a second one.
+- **Hue is never the only carrier.** Every caution state also changes border, fill
+  and weight, so the meaning survives a colour-blind eye and a grayscale capture.
 
 ### Neutral
 - **Slate Night** (`rgba(22,22,28,·)`): the dark-theme glass field. Two
@@ -212,8 +221,11 @@ accent, never a second brand hue.
 
 **Display Font:** Inter (with Segoe UI / system-ui fallbacks)
 **Body Font:** same family — one voice, no pairing
-**Label/Mono Font:** none; numeric readouts use `font-variant-numeric:
-tabular-nums` instead of a mono face
+**Label/Mono Font:** none — and that includes filesystem paths. `Music
+Files/Ghost/Impera` is set in Inter at 11.5px with `overflow-wrap: anywhere`;
+a mono face was tried and rejected, because a second family in a one-voice
+system reads as "technical" rather than as "where this is going", and the
+break-anywhere rule only fires on a token too long for the line.
 
 **Character:** A single humanist sans at a compact 11–22px range;
 hierarchy is built from weight (400/600/700) and dim-ness (full vs 0.64
@@ -389,9 +401,13 @@ Two families, split by role — every glyph in the chrome belongs to one:
   hold 11 sliders needs a magic max-height). Un-checking remembers the stage, so
   re-checking restores what you had.
   Ordering is genre, not law: a pane is a form read top-down, so its gate sits
-  above what it gates. The equalizer popover is an instrument surface, so the
-  curve comes first and its master sits at the base, above the seam. Do not
-  "fix" one toward the other.
+  above what it gates. The equalizer popover now agrees with it — the head carries
+  the gate and the preset name (identity + state, next to dismissal), the curve is
+  the body, and the route out to the Playback pane sits at the base under the seam,
+  because leaving belongs with the exit and not with what a surface IS. It used to
+  be written up as the deliberate inverse ("an instrument surface keeps its master
+  at the base"); that bought nothing a head does not already buy, and it made the
+  popover the only surface whose first row was navigation.
 - **Pane footers:** every detail layer ends in one dim row — an action where a
   real reset exists (`Reset appearance`, `Reset playback`) or a status line
   where it doesn't (`248 albums · 4434 tracks · scanned 14:02`, tabular, and
@@ -644,6 +660,36 @@ not a global gap.
   Every gate that decides what the user can *act on* (`atDetail`, `atSub`, `inert`,
   `aria-hidden`, `class:active`) still reads the live state — the hold is paint-only.
 
+### A floating surface: arrival, containment, and what must not scroll
+- **It materializes.** `.scrim` fades its dim over 140ms and the panel it carries
+  scales in from `.97` over 180ms (`opacity` + `scale` only, origin centre — a modal
+  is not anchored to a trigger, so it arrives from where it is). Both are CSS
+  animations, which is a requirement, not a convenience: the global
+  `prefers-reduced-motion` kill switch can only reach CSS, so a `svelte/transition`
+  entrance would run at full speed for the users who asked for none. **The exit is
+  still instant** — a symmetric outro needs a JS transition or a two-phase close per
+  surface, and the honest trade was to animate the arrival (where the orientation
+  cost is) and keep the kill switch authoritative.
+- **A modal makes the rest of the window inert.** `role="dialog" aria-modal="true"`
+  is a claim about the a11y tree; without `inert` on the background it is a claim the
+  code does not honour, and Tab walks the grid, the sidebar and the playbar behind a
+  scrim that says otherwise. `App.svelte` sets `inert` on `.stage` from `modalOpen()`
+  and each dialog rings its own Tab (`lib/focusTrap.ts`, edge-only, so DOM order
+  inside the panel is untouched). **Popovers and the context menu are excluded on
+  purpose**: their trigger is part of the interaction (`aria-expanded`, focus
+  returning to `eqBtn`/`qBtn`), and inerting the playbar would blur the button
+  mid-transaction. Dragging the window is not lost — the scrim already intercepts it.
+- **What the surface exists to say is never below the fold.** A status or receipt
+  that renders after a scrolling list is unread, and "unread" is the same failure as
+  "unsaid". The imported-music window's two statements ("already in your library",
+  "just applied") now sit in a band under the head's seam, outside the scroller. The
+  band is `flex: none` and bounded (3 names, then a count) precisely because it does
+  not scroll: it trades list height for certainty, so it has to stay short.
+- **The newest fact gets the most authority.** Before this, the Apply receipt was a
+  bare sentence while the older "already" list had a bordered card. In a band, order
+  and label do the work: receipt first, each block named by what it is
+  (`Just applied`, `Already in your library`).
+
 ### Inputs / Fields
 - **Search fields (sidebar 30px, titlebar-less era):** 8px radius, 1px
   Glass Line stroke, hover-wash fill, 14px leading icon, placeholder in
@@ -763,6 +809,24 @@ commit is *where will this end up*. The window opens on import because the
 alternative is a progress ring that ends and a library that looks exactly
 the size it was, which is how "nothing happened" looks even when the app
 correctly did nothing.
+
+**A report that can be missed is a report that wasn't made.** The window opens to
+say it, and the saying happens in a band under the head's seam — outside the
+scroller. It used to render after the album cards, inside the list: measured on a
+loaded pile, 389px of an 864px body was visible, which meant an eight-album import
+opened with its own explanation off-screen, and the Apply receipt — the one message
+about files that may have been deleted — was the furthest thing from view. Same
+reason the band is bounded to three names plus a count: it does not scroll, so it
+spends list height it has to earn back by staying short.
+
+**The destination is the row's answer, so the destination survives.** Each row
+resolves and states where the files will go — the rule in words (`merges into
+Impera`), the path as evidence — and that ordering is now enforced in the layout:
+the gloss ellipsizes first and the path wraps instead of truncating, because the
+question this window exists to answer is *where*, and a long album title used to
+cost the path everything but one character (`· M…`) with the full text available
+only in a hover tooltip. A row that grows 14px is cheaper than a fact that
+disappears.
 
 **A pile is a set of albums, and albums group by artist.** One card per
 artist, one row per album, rows touching and divided by a rule: the card

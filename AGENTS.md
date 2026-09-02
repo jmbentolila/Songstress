@@ -44,14 +44,21 @@ or measuring anything in it. Do NOT add a KWin window rule, seed
 `.window-state.json`, or call `set_position` to work around this — he declined all
 three; the manual move IS the protocol.
 
-What the app remembers across a **clean quit** is its SIZE (`tauri-plugin-window-state`,
-`SIZE|MAXIMIZED`) — a `systemctl restart` or a `tauri dev` rebuild KILLS the process, the
-plugin writes only on `RunEvent::Exit`, so nothing is saved on that path and the window
-comes back at the built-in default size (measured). Position is never the app's to
-remember on Wayland. So: after a restart he restores both by hand; after a normal close
-the packaged app returns at the size he left it. Frontend work needs no restart at all:
-`tauri dev` hot-reloads Svelte components, stores and CSS. Restart only for Rust changes
-(cargo rebuilds anyway) or `contain:`/containing-block changes.
+Nothing persists the geometry, on purpose (2026-09-01): `tauri-plugin-window-state` was added,
+measured and **reverted**. A Wayland client cannot see where the compositor put it — Tauri's
+`outer_position()` returns `(0,0)` while KWin reports the real `x/y` — so a client-side
+"remember position" is not just unavailable, saving `(0,0)` and restoring it would shove the
+window into the corner. Size *could* be remembered, but the plugin writes only on a clean exit
+(a `systemctl restart` / `tauri dev` rebuild kills the process, nothing is saved), and his
+tiling clips **and resizes** on drop — one drag fixes both axes. So: no dependency, no KWin
+rule, no seeded state file (all three offered, all three declined). Do not re-add one without a
+case where the size is not already free.
+
+Frontend work needs no restart at all: `tauri dev` hot-reloads Svelte components, stores and
+CSS. Restart only for Rust changes (cargo rebuilds anyway) or `contain:`/containing-block
+changes — and remember the **version files are watched too**: bumping `tauri.conf.json` /
+`Cargo.toml` restarts the app and costs him a drag. Bump before he places the window, or warn
+him.
 
 ## Layout
 

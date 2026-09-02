@@ -33,6 +33,14 @@ html[data-theme="dark"] {
   --hover: rgba(255, 255, 255, 0.07);
   --active: rgba(167, 139, 250, 0.18);
   --accent: #a78bfa;
+  /* Caution — the system's ONE non-accent hue, and the only one a mark may wear.
+     DESIGN.md reserved it for missing-file alert glyphs; it is now also the tint of
+     a DESTRUCTIVE MARK ("discard this album", "remove this folder"), which is what
+     two components were improvising with an undocumented salmon red. Text, line and
+     wash come as a set so a mark never half-adopts the hue. */
+  --caution: #f2a33c;
+  --caution-line: rgba(242, 163, 60, 0.55);
+  --caution-wash: rgba(242, 163, 60, 0.14);
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -48,6 +56,9 @@ html[data-theme="light"] {
   --hover: rgba(30, 30, 40, 0.06);
   --active: rgba(124, 88, 240, 0.14);
   --accent: #7c58f0;
+  --caution: #b26a12;
+  --caution-line: rgba(178, 106, 18, 0.55);
+  --caution-wash: rgba(178, 106, 18, 0.12);
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
 }
 
@@ -155,4 +166,32 @@ button {
   place-items: center;
   background: rgba(0, 0, 0, 0.35);
   border-radius: var(--radius-window);
+  /* Materialize, don't just appear. The dim and the surface arrive together —
+     140ms for the wash (a brightness jump that snaps reads as a glitch, not as a
+     mode change) and 180ms for the panel, which scales from .97 at its centre, the
+     correct origin for a surface that is not anchored to a trigger. Both are
+     opacity/scale only, so the global `prefers-reduced-motion` kill below collapses
+     them to instant without a JS branch — which is why the ENTER is CSS and the exit
+     is still unmounted in one frame: a symmetric outro needs svelte/transition, and
+     that runs on WAAPI, which the media query cannot reach. */
+  animation: scrim-in 140ms var(--ease-out);
+}
+
+/* One rule, every modal: About, Music folders, Tag editor and Imported music are
+   all `.glass` panels that are the direct child of their scrim. */
+.scrim > .glass {
+  animation: surface-in 180ms var(--ease-out);
+}
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
 }

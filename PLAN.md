@@ -47,10 +47,11 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Settings stack: one dismissal family, platform geometry, spacing ladder | ✅ 2026-08-31 |
 | Manage-imports window (one card per artist, per-album Apply) | ✅ 2026-08-31 |
 | Import staging: cache copy → in-place row flag (migration v2) | ✅ 2026-08-31 |
+| Imported-music modal: critique 30/40 → all 6 issues fixed (3 P1 + 3 P2) | ✅ 2026-09-02 |
 | Surface template: boxed ✕ top-right for every modal AND popover | ✅ 2026-09-01 |
 | Escape: one press, one verb (the surface owns it) | ✅ 2026-09-01 |
 | Stack: a layer holds its own content while it animates out | ✅ 2026-09-01 |
-| Window size survives a restart (`window-state`; position can't — Wayland) | ✅ 2026-09-01 |
+| Window geometry across restarts: `window-state` tried, **reverted** (Wayland can't, and the tiling does it) | ❌ 2026-09-01 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -2441,24 +2442,109 @@ into the rule that was missing, because the same objection applies to every floa
   branch conditions; `atDetail`/`atSub`/`inert`/`aria-hidden`/`class:active` still read the live
   state, so the hold is paint-only. Measured after the fix: back out of eq-preset → 0 swatches, 10
   preset rows (was 12 swatches, 0 rows).
-- **Restart geometry: what a Wayland client can and cannot remember.** Added
-  `tauri-plugin-window-state` with `SIZE|MAXIMIZED` — and deliberately NOT `POSITION`, because a
-  Wayland client never learns where the compositor put it: measured on one window, Tauri's
-  `outer_position()` = `(0,0)` while KWin reports `x=560 y=290`, and `inner_size()` = `2560×1600`
-  physical for a 1280×800 CSS window (Tauri scale 2 — so the plugin's units are its own and
-  self-consistent, which is why SIZE round-trips and POSITION does not). Saving position would
-  have stored `(0,0)` and `set_position(0,0)` on next launch — moving the window to the top-left
-  corner, worse than doing nothing. **And it does not help a dev restart:** the plugin writes on
-  `RunEvent::Exit`,
-  which a kill never reaches (verified — after three rebuild-kills `~/.config/com.yossi.songstress/.window-state.json`
-  still did not exist and the window came back 1280×800). So the plugin's real win is the
-  PACKAGED app quitting and relaunching at the size it was; in dev the protocol is manual and is
-  written into AGENTS.md (a KWin rule and a seeded state file were both offered and both
-  declined — the owner places the window himself and the agent waits for the green light).
-  A debounced save on `tauri://resize` would cover the kill path; not built, see lib.rs.
+- **Restart geometry: what a Wayland client can and cannot remember — and why nothing was
+  added.** `tauri-plugin-window-state` was tried with `SIZE|MAXIMIZED` and deliberately NOT
+  `POSITION`, because a Wayland client never learns where the compositor put it: measured on one
+  window, Tauri's `outer_position()` = `(0,0)` while KWin reports `x=560 y=290`, and
+  `inner_size()` = `2560×1600` physical for a 1280×800 CSS window (Tauri scale 2 — the plugin's
+  units are its own and self-consistent, which is why SIZE round-trips and POSITION does not).
+  Saving position would have stored `(0,0)` and `set_position(0,0)` on next launch, moving the
+  window to the top-left corner: worse than nothing. And SIZE does not survive the case that
+  matters either — the plugin writes on `RunEvent::Exit`, which a kill never reaches (verified:
+  after three rebuild-kills the state file still did not exist and the window came back
+  1280×800). **Reverted the same day:** the owner's tiling clips and resizes on drop, so ONE
+  drag fixes both axes, and a debounced save on `tauri://resize` to cover the kill path was
+  declined as a background thread + disk writes for nothing. A KWin window rule and a seeded
+  state file were offered and declined too. The protocol is manual and lives in AGENTS.md — do
+  not re-add the dependency without a case where the size is not already free.
 - **Version files are watched.** Bumping `tauri.conf.json` / `Cargo.toml` makes `tauri dev`
   rebuild and RESTART the app — which, per the rule above, costs the owner a window re-place. Do
   the bump before he places the window, or tell him it is coming.
 - Gates: `npm run check` 0 · 73 vitest · 81 `cargo test --lib` · `npm run build` clean. DESIGN.md's
   dismissal section is rewritten ("Two families, one verb each" + a new "One press, one verb") and
   is now the authority; the old "one family, two dots" text is gone.
+
+### The equalizer popover's head, rebuilt (2026-09-01, same template pass)
+
+The head now reads **identity + state + dismissal** — `✓ Equalizer` at the content's left edge,
+the preset name (read-only, Micro) hugging the ✕ at the right — the curve stays the body, and
+`Playback settings ›` moved to the BASE, under the seam.
+
+- Why: the route out used to be the head's first item, which made this the only surface in the
+  app whose first row was *navigation* rather than a name. And the old justification for the
+  inverse ordering ("an instrument surface keeps its master at the base") bought nothing the head
+  grammar does not already buy — leaving belongs with the exit, and what-a-surface-is belongs at
+  the top. DESIGN.md's "Ordering is genre, not law" passage is rewritten to say so; the popover
+  and the Playback pane now agree instead of deliberately disagreeing.
+- The seam's job changed with it: it used to separate the work from its *state*, now it separates
+  the work from the *exit*. `.own` lost `cursor: default` (it is actionable again) and the route's
+  negative margins were re-aimed: `margin: 0` on the button, `-6px` on the footer row so the wash
+  bleeds to the padding edge while the label stays aligned with the head's left edge.
+- No `justify-content` on the head: the preset's own `margin-left: auto` spends the slack, so the
+  grouping is owned by the item that forms it rather than distributed between three.
+- Measured at 1200×660 (DOM probe, not a screenshot): toggle x=772 (content edge), preset ends
+  1129, ✕ 1141–1169 with 17px to the popover's outer edge (1px border + 16px padding — flush, as
+  every surface now is), 12px preset→✕; route 766,533 against a seam at 526 and a head bottom of
+  355. Popover 431×255.
+
+
+## Imported-music modal: critique → fix pass (2026-09-02, all six findings)
+
+Critiqued loaded, not empty: a mock pile through the app's own import store — 5 artist
+cards / 8 albums / 53 tracks, incl. a 50-char album title, diacritics, a merge, a
+byte-identical duplicate, an already-indexed file, marked states, a real Apply and its
+receipt. Baseline **30/40**, 3 P1 + 3 P2. All six fixed; snapshot
+`.impeccable/critique/2026-09-02T00-40-17Z__src-components-manageimports-svelte.md`.
+
+- **[P1] The report band.** "Already in your library" and the Apply receipt rendered
+  AFTER the album cards, inside the scroller — measured 389px shown of 864px content,
+  475px hidden, so the two statements the window exists to make were off-screen on
+  open and the receipt (the one about deleted files) was the furthest from view. Both
+  moved into a `flex: none` band under the head's seam, outside the scroller, receipt
+  first, each block labelled (`Just applied` / `Already in your library`) so the newest
+  fact has the most authority — previously the receipt was a bare sentence while the
+  older list had a bordered card. Band is bounded (3 names, then `and N more`, full
+  list in `title`) precisely because it does not scroll. The bordered inset box is gone:
+  it was a third container dialect in a window of filled cards and borderless rows, and
+  its label reused `.mi-glabel`, so the first read was "an artist called *Already in
+  your library*". Now sentence case, no tracking — the app speaking, not a group heading.
+  Measured after: band 60px, `aboveBody: true`, only 34px hidden on a 4-album pile.
+- **[P1] The destination survives.** The gloss (`merges into …`) ellipsizes FIRST and
+  the path wraps instead of truncating (`flex-wrap: wrap`, `.mi-rule { flex: 0 1 auto }`,
+  `.mi-path { flex: 1 1 auto; overflow-wrap: anywhere }`). Before, a long album title
+  collapsed the path to `· M…` with the full text only in a hover `title` — mouse-only,
+  for the row whose whole job is answering *where will this end up*. Measured after:
+  every path `scrollWidth == clientWidth` (the 399px one included), the row grows to
+  3 lines instead of lying.
+- **[P1] Containment.** `App.svelte` sets `inert` on `.stage` from a new `modalOpen()`
+  (modals only — popovers and the context menu keep their trigger live, or the
+  focus-handoff to `eqBtn`/`qBtn` breaks); `src/lib/focusTrap.ts` gives every dialog an
+  edge-only Tab ring, wired into all four. `aria-modal="true"` had been a claim nothing
+  honoured: Tab walked the grid, sidebar and playbar behind the scrim — the same failure
+  the settings stack was fixed for. Verified: `stage.inert === true` with the modal up,
+  and Tab from the last control wraps to the ✕.
+- **[P2] Drift collapsed into the system, not documented around it.** Added the
+  `--caution` / `--caution-line` / `--caution-wash` set (amber, light-theme value
+  `#b26a12` for contrast) and moved the discard mark, Music folders' Remove +
+  confirmation row, and the Tag editor's error text onto it — the undocumented
+  `#ff8f8f` family is gone (6 literals). `.mi-path` drops the mono stack (DESIGN.md:
+  one voice, no pairing). Focus radius 4 → 8; `.mf-remove` 5 → 7. Detector on the six
+  touched files: **5 findings → 0**.
+- **[P2] A surface materializes.** `.scrim` fades the dim over 140ms and
+  `.scrim > .glass` scales in from `.97` over 180ms — one pair of rules, four modals,
+  and CSS on purpose: the global `prefers-reduced-motion` kill switch cannot reach a
+  `svelte/transition` (WAAPI), so a JS entrance would run at full speed for the users
+  who asked for none. The exit is still instant; symmetric outro would need a
+  two-phase close per surface, and that trade is recorded in DESIGN.md rather than
+  silently made.
+- **Mock discipline:** staged through `importMusic()` (the real flow, so the receipt
+  rendered), never Save — discard only, so no file moved and nothing of the owner's was
+  touched; his legacy Infestissumam was explicitly un-marked before Apply. Verified
+  after cleanup: `4464 rows / 12 staged / 251 albums`, 12 cache rows intact, `/tmp/mock`
+  deleted.
+- **Corrections to the critique itself:** it claimed "no keyboard route into the
+  manager" — wrong, `s` opens the stack, arrows walk the pane, Enter opens the door.
+  Three minors were left unfixed on purpose: `scrollbar-gutter` does nothing for an
+  overlay scrollbar (the fix would cost the cards' flush-right alignment), the `▸/▾`
+  caret is still a font glyph, and `saveImports(…, trackId)` is still a per-track API
+  with no UI.

@@ -1792,35 +1792,6 @@ async fn save_album_tags(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // Geometry survives a QUIT. SIZE|MAXIMIZED, deliberately NOT POSITION.
-        //
-        // What it does and does not cover, measured 2026-09-01: the plugin writes its
-        // file on `RunEvent::Exit`, so a normal close (the packaged app, or dev when
-        // HE closes the window) saves the size and the next launch comes back at it.
-        // A `systemctl restart` / `tauri dev` rebuild does NOT — that path kills the
-        // process, no Exit runs, nothing is written (verified: after three
-        // rebuild-kills the state file still did not exist and the window returned to
-        // the 1280×800 default). So in dev he still places the window by hand; what he
-        // should not have to redo is the SIZE, and the first clean quit buys that
-        // back. A debounced save on `tauri://resize` would cover the kill path too —
-        // not done yet: a background thread and a disk write for a convenience.
-        //
-        // POSITION is off because a Wayland client never learns where the compositor
-        // put it: measured on one window, Tauri's `outer_position()` returns (0,0)
-        // while KWin reports x=560 y=290. Saving (0,0) and calling
-        // `set_position(0,0)` on the next launch would move the window to the
-        // top-left corner — worse than nothing. Where the window goes is a COMPOSER
-        // fact and lives in his hands (a KWin window rule and a seeded state file were
-        // both offered, both declined). DECORATIONS/VISIBLE are owned by
-        // tauri.conf.json.
-        .plugin(
-            tauri_plugin_window_state::Builder::new()
-                .with_state_flags(
-                    tauri_plugin_window_state::StateFlags::SIZE
-                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
-                )
-                .build(),
-        )
         .register_uri_scheme_protocol("thumb", |ctx, request| {
             // thumb://<album_id>/<size>.webp — served from the app cache dir
             // with a size fallback chain (512 → 256 → 96).

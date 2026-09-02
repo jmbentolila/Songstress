@@ -2,8 +2,10 @@
 
      THE TEMPLATE, in the order it matters:
        • TITLE LEFT, DISMISSAL RIGHT, one row, one seam under it. The head is the
-         surface's chrome; nothing else sits in it but what the surface owns
-         (the queue's count + Clear, the equalizer's route out).
+         surface's identity and its state — nothing else. A route OUT to another
+         surface is not identity: the equalizer popover used to open with
+         "Playback settings ›" on its left, which made it the only head in the app
+         that started with navigation instead of naming what you were looking at.
        • 28×28 box, radius 7, glyph 16px — this app's icon-button rung, and the
          ~28px minimum hit target met by construction (a floating surface has no
          drag region forgiving a smaller one).

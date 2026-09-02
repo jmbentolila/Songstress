@@ -2,6 +2,9 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { ui } from "../lib/stores/ui.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
+  import { trapTab } from "../lib/focusTrap";
+
+  let panel = $state<HTMLElement | null>(null);
 
   // The version comes from Tauri itself (tauri.conf.json) — the RPM and
   // the About card can never disagree.
@@ -34,7 +37,12 @@
   // job, which is why a modal opened from a pane closed BOTH on one keypress —
   // same-node `window` listeners cannot be ordered against each other.
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && ui.aboutOpen) close();
+    if (!ui.aboutOpen) return;
+    if (e.key === "Tab") {
+      trapTab(e, panel);
+      return;
+    }
+    if (e.key === "Escape") close();
   }
 </script>
 
@@ -47,7 +55,7 @@
     onclick={(e) => e.target === e.currentTarget && close()}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-    <section class="ab glass" role="dialog" aria-modal="true" aria-label="About Songstress">
+    <section class="ab glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="About Songstress">
       <SurfaceClose autofocus class="ab-close" label="Close" onclick={close} />
       <h2>Songstress</h2>
       <p class="ver">Version {version}</p>
