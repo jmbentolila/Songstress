@@ -28,11 +28,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "rpm"
+    ],
     "homepage": "",
     "category": "Music",
     "license": "MIT",
-    "shortDescription": "Songstress \u2014 album-grid music player for KDE",
+    "shortDescription": "Songstress — album-grid music player for KDE",
     "longDescription": "Songstress is an album-grid-centric local music player for\nFedora KDE (Wayland). It scans your music folders, builds a library in\nSQLite, and plays everything through MPV (gapless, ReplayGain, 10-band\nequalizer, shuffle/repeat, play-next queue) with full MPRIS + Plasma\nGlobal Menu integration.\n",
     "icon": [
       "icons/32x32.png",

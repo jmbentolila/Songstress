@@ -32,7 +32,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Step 7a — "play next" queue | ✅ 2026-08-25 |
 | Step 7d — live library watching | ✅ 2026-08-25 |
 | Step 7c — multi-library roots | ✅ 2026-08-26 |
-| Step 7b — packaging (RPM) | ✅ 2026-08-26 |
+| Step 7b — packaging (RPM) | ✅ 2026-08-26 · rpm-only targets + 0.6.0 built 2026-09-01 |
 | Step 8 — titlebar elimination (chrome into sidebar) | ✅ 2026-08-27 |
 | Step 8c — playbar critique fixes | ✅ 2026-08-29 (re-critique 35/40) |
 | Expansion choreography + 20px-line reframe | ✅ 2026-08-29 |
@@ -170,6 +170,13 @@ blur → dnf remove clean.
   nothing). The error has no did-you-mean when confidence < 0.8.
 - **rpmbuild NOT required** — the tauri bundler assembles the RPM itself
   (cpio+gzip); only `rpm` is needed to inspect.
+
+**`bundle.targets` is `["rpm"]`, not `"all"` (2026-09-01, owner confirmed).** With
+`"all"` the build writes a good RPM and THEN dies on the AppImage step — `linuxdeploy`
+cannot fetch its tools here — so every release build ended in a failure that meant
+nothing. The config is strict JSON (no comment can carry the reason), so the reason
+lives here: RPM is the packaging format, AppImage was rejected (not native to
+Fedora/KDE, no package-manager integration), Flatpak stays deferred.
 - Built: `src-tauri/target/release/bundle/rpm/Songstress-0.1.0-1.x86_64.rpm`
   (~11 MB). rpm -qip/-ql/-qp --requires verified: Name songstress 0.1.0-1,
   MIT, /usr/bin/songstress, /usr/share/applications/Songstress.desktop
