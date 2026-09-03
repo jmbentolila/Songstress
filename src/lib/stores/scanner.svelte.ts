@@ -59,6 +59,10 @@ function begin(kind: Kind) {
   scanner.phase = "";
   scanner.done = 0;
   scanner.total = 0;
+  // Every attempt starts from no news — including no OLD news. A failed run's
+  // reason belongs to the run that produced it: if the retry succeeds, the
+  // failure branch must not still be on screen behind the new skeleton.
+  library.scanError = "";
 }
 
 let started = false;

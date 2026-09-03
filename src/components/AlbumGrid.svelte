@@ -5,14 +5,40 @@
   import { currentTrack } from "../lib/stores/playback.svelte";
   import { extractArtColors } from "../lib/artColors";
   import { buildRows, columnCount } from "../lib/buildRows";
+  import { skeletonRows, libraryLoading } from "../lib/loadingState";
+  import { scanner } from "../lib/stores/scanner.svelte";
   import { albumTitleMatches, albumTrackMatches, fold } from "../lib/search";
   import type { Album } from "../lib/types";
   import ExpandedPanel from "./ExpandedPanel.svelte";
   import EmptyState from "./EmptyState.svelte";
+  import GridSkeleton from "./GridSkeleton.svelte";
 
   const GAP = 20;
 
   let gridWidth = $state(0);
+  let stageHeight = $state(0);
+
+  /** Nothing to show + something in flight → the placeholder owns the stage.
+   * The facts are spelled out (rather than read from the stores inside a helper)
+   * so this and the sidebar's identical list cannot drift silently: the type
+   * forces both to answer for every fact. */
+  const loading = $derived(
+    library.live &&
+      libraryLoading({
+        ready: library.ready,
+        bootSlow: library.bootSlow,
+        albums: library.albums.length,
+        running: scanner.running,
+        scanning: library.scanning,
+        devLoading: library.devLoading,
+      }),
+  );
+
+  // Minus the stage's own 20px padding top and bottom: the rows must fill the
+  // visible grid, not the visible grid plus a scroll of nothing.
+  const skRows = $derived(
+    skeletonRows(gridWidth, Math.max(0, stageHeight - 2 * GAP), ui.tileSize, GAP),
+  );
 
   let cols = $derived(columnCount(gridWidth, ui.tileSize, GAP));
 
@@ -448,9 +474,11 @@
   }
 </script>
 
-<main class="content">
-  <div class="grid" bind:clientWidth={gridWidth}>
-    {#if library.live && (!library.ready || library.albums.length === 0)}
+<main class="content" bind:clientHeight={stageHeight} aria-busy={loading}>
+  <div class="grid" class:enter={library.entering} bind:clientWidth={gridWidth}>
+    {#if loading}
+      <GridSkeleton {cols} rows={skRows} />
+    {:else if library.live && library.ready && library.albums.length === 0}
       <EmptyState />
     {:else if searchActive && sections.length === 0}
       <button class="no-match" onclick={() => (ui.search = "")} title="Clear search">
@@ -461,7 +489,7 @@
         {#if section.label}
           <h2 class="section-label">{section.label}</h2>
         {/if}
-        {#each section.rows as row (
+        {#each section.rows as row, r (
           row.kind === "albums"
             ? `r-${row.items[0].id}`
             : row.kind === "ghost"
@@ -470,10 +498,11 @@
         )}
           {#if row.kind === "albums"}
             <div class="grid-row" style:--cols={cols}>
-              {#each row.items as album (album.id)}
+              {#each row.items as album, c (album.id)}
                 {@const playingAlbum = currentTrack()?.albumId === album.id}
                 <button
                   class="tile"
+                  style:--i={r + c}
                   class:expanded={expandedIn(section.key, album.id)}
                   data-album-id={album.id}
                   data-section={section.key}
@@ -650,6 +679,58 @@
     text-align: left;
     cursor: pointer;
   }
+
+  /* The grid's half of the arrival entrance (material + keyframes: `.enter` in
+   app.css). Two departures from the list, both because this is a GRID:
+
+   * The unit is the TILE. The row is a layout box here, not a thing the eye
+     tracks — at a 295px tile barely one and a half rows are on screen, so
+     staggering rows could not unfold anything; it would only delay a wall.
+   * `--i` is `row + column`, so the delays fall along the DIAGONAL: the top-left
+     cover leads and the wave runs down-and-across, which reads as a surface
+     opening rather than as N things arriving. A `row * cols + column` index
+     marches strictly left-to-right and looks like a typewriter.
+
+   The dials live on the animated element itself (inheriting them off a parent
+   would make a child's transform a style recalc for every child), and they are
+   quicker than the list's: a tile is far bigger than a row, so the same spread
+   would take three times as long to cross the same visual distance. The cut is
+   per ROW — from the ninth row down there are thousands of pixels of nothing
+   above the fold, and 75 more covers do not need compositing for a third of a
+   second. */
+  /* The dials go on the TILE (the animated element), not on `.grid.enter`: a
+     transform resolved from a variable inherited off a parent is a style recalc for
+     every child. Static values, so this is hygiene rather than a fix — but the
+     global rule says the same thing, and agreeing with it costs nothing. */
+  .grid.enter .tile {
+    --enter-dur: 320ms;
+    --enter-step: 90ms;
+    --enter-cap: 540ms;
+    --enter-rise: 14px;
+    animation: enter-row var(--enter-dur) var(--ease-out) both;
+    animation-delay: min(calc(var(--i, 0) * var(--enter-step)), var(--enter-cap));
+  }
+
+  /* The rows themselves do not animate — the tile does. Without this the global
+     `.enter > *` rule would move each row AND each tile inside it, so a cover would
+     travel twice the distance and the diagonal would fight the cascade. */
+  .grid.enter > .grid-row {
+    animation: none;
+  }
+
+  .grid.enter > :nth-child(n + 9) .tile {
+    animation: none;
+  }
+
+  /* Reduce: the global kill switch owns the duration, this owns the travel and the
+     ladder. Specificity has to reach `.grid.enter .tile` for the delay to lose. */
+  @media (prefers-reduced-motion: reduce) {
+    .grid.enter .tile {
+      animation-delay: 0s;
+      animation-play-state: paused;
+    }
+  }
+
 
   .cover {
     display: block;

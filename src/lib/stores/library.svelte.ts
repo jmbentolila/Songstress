@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { Album, Artist, Track } from "../types";
 import { albums as fakeAlbums, artistOf as fakeArtistOf, artists as fakeArtists, tracksOf as fakeTracksOf } from "../fakeLibrary";
 import { sortKey } from "../sort";
+import { BOOT_GRACE_MS, ENTER_MS } from "../loadingState";
 import { isTauri } from "../window";
 import { pushSetting, ui } from "./ui.svelte";
 
@@ -34,6 +35,19 @@ class LibraryStore {
   /** False while a live library hasn't loaded yet (first launch = empty). */
   ready = $state(!LIVE_LIBRARY);
   scanning = $state(false);
+  /** True only once the boot dump has proven itself slow enough to be worth a
+   * placeholder for. See `BOOT_GRACE_MS`. */
+  bootSlow = $state(false);
+  /** DEV-only: drive the loading state without a scan in flight (`__skel` in
+   * main.ts). Read by `libraryLoading` — and it short-circuits the "never over
+   * content" rule on purpose: forcing it ON a populated library is how you see
+   * what the placeholder looks like at the real column count and theme. */
+  devLoading = $state(false);
+  /** Why the LAST scan attempt failed, "" when it didn't. The empty state's
+   * failure branch is the only thing a scan error has ever had to say in this
+   * app — `scan_library`'s Err reached the webview console and nowhere else, and
+   * the console has no window (AGENTS.md: "scan errors are near-invisible"). */
+  scanError = $state("");
   artists = $state<Artist[]>(LIVE_LIBRARY ? [] : fakeArtists);
   albums = $state<Album[]>(LIVE_LIBRARY ? [] : byYear(fakeAlbums));
   /** Denominator for the Library pane's status footer. */
@@ -43,29 +57,64 @@ class LibraryStore {
   constructor() {
     if (LIVE_LIBRARY) {
       void this.load();
-      void listen("scan-finished", () => {
+      // The grace timer, not a delay: `get_library` is a single indexed dump and
+      // on a full library it lands in tens of ms, so a placeholder that mounts
+      // and unmounts inside two frames would be a wait we manufactured. If the
+      // dump is still out after this, the wait is real and the skeleton earns
+      // its place. (A scan in flight skips the grace entirely — see loadingState.)
+      setTimeout(() => {
+        if (!this.ready) this.bootSlow = true;
+      }, BOOT_GRACE_MS);
+      void listen("scan-finished", (e) => {
+        // This event is the ONLY thing that clears `scanning`, so the backend
+        // emits it on every path now (lib.rs::scan_inner) — including the failure
+        // and panic paths that used to return before the emit. When that was true
+        // a failed FIRST scan left `scanning` set forever: an eternal shimmer over
+        // an empty grid, with the reason in a console nobody can open.
         this.scanning = false;
+        const err = (e.payload as { error?: string | null }).error ?? "";
+        this.scanError = err;
+        if (err) {
+          // Nothing was written — the run stops before grouping and the upserts —
+          // so there is no new dump to read, and the footer must not stamp
+          // "scanned 14:02" for a scan that did not happen.
+          console.error("[scan] " + err);
+          return;
+        }
         // "scanned 14:02" in the Library footer — persisted, so the answer
         // survives a restart instead of being session-fresh every launch.
         ui.lastScan = Date.now();
         pushSetting("lastScan", ui.lastScan);
-        void this.load();
+        void this.load(true);
       });
-      void listen("scan-progress", (e) => {
+      void listen("scan-progress", () => {
+        // The only signal that a scan the FRONTEND never asked for is running —
+        // a watcher-triggered first scan sets this and nothing else.
         this.scanning = true;
-        const p = e.payload as { done: number; total: number };
-        this.scanDone = p.done;
-        this.scanTotal = p.total;
       });
     }
   }
 
-  scanDone = $state(0);
-  scanTotal = $state(0);
+  /** Armed for one entrance: the frames right after a placeholder gave way to
+   * content. The grid and the artist list both read it (`class:enter`) so they
+   * arrive on the same beat — one dump, one cascade — and it is set here rather
+   * than from a component `$effect` because an effect runs after the DOM update:
+   * the class would land a frame late, each row would paint at rest and then jump
+   * to the start of its animation, and the whole thing would blink. */
+  entering = $state(false);
+  #enterTimer: ReturnType<typeof setTimeout> | undefined;
 
-  async load() {
+  async load(fromScan = false) {
     try {
       const dump = await invoke<LibraryDump>("get_library");
+      // The entrance belongs to the WAIT, not to the data: it fires when a
+      // placeholder is what is being replaced. A warm launch whose dump lands in
+      // 40ms showed no placeholder, so it must not animate — that is motion on a
+      // every-launch, keyboard-frequency action, which the animate gate rejects.
+      const filledFromPlaceholder =
+        this.albums.length === 0 &&
+        dump.albums.length > 0 &&
+        (fromScan || this.scanning || this.bootSlow);
       this.artists = dump.artists;
       this.albums = byYear(dump.albums);
       this.trackCount = dump.tracks.length;
@@ -76,9 +125,19 @@ class LibraryStore {
         else this.#byAlbum.set(t.albumId, [t]);
       }
       this.ready = true;
+      if (filledFromPlaceholder) this.#enterNow();
     } catch {
       // Backend hiccup — keep whatever we have; next scan-finished retries.
     }
+  }
+
+  #enterNow() {
+    this.entering = true;
+    clearTimeout(this.#enterTimer);
+    // And it must come back OFF. Left on, every later filter change would push its
+    // freshly-mounted rows through the entrance — an artist switch or a search
+    // keystroke is precisely the frequency tier that disqualifies motion.
+    this.#enterTimer = setTimeout(() => (this.entering = false), ENTER_MS);
   }
 
   tracksOf(albumId: string): Track[] {

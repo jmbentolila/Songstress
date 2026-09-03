@@ -52,6 +52,10 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Escape: one press, one verb (the surface owns it) | ✅ 2026-09-01 |
 | Stack: a layer holds its own content while it animates out | ✅ 2026-09-01 |
 | Window geometry across restarts: `window-state` tried, **reverted** (Wayland can't, and the tiling does it) | ❌ 2026-09-01 |
+| First-scan repro harness (park + sandbox data dir) + EmptyState bar fix | ✅ 2026-09-02 |
+| Loading skeletons: grid + artist list, no scan bar in the stage | ✅ 2026-09-02 · **0.8.0** |
+| Failed scans always emit their reason + the empty state renders it | ✅ 2026-09-02 · **0.8.0** |
+| Arrival entrance: list cascades, grid unfolds on its diagonal | ✅ 2026-09-02 · **0.8.0** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -249,11 +253,20 @@ the upstream report.
 
 ### Up next (user-confirmed 2026-08-30, after the motion-audit fixes)
 
-- **Skeleton loaders for the grid + artist list during the first scan** —
-  the first-scan state is being reworked; the EmptyState progress bar
-  (now scaleX-driven) stays. Nothing in the motion-audit changes should
-  conflict (the audit's one additive suggestion — TagEditor modal
-  entrance — is parked with the modal work below on purpose).
+- **Skeleton loaders for the grid + artist list** — ✅ shipped 2026-09-02, and the
+  EmptyState progress bar did NOT stay: the stage is now textless while loading
+  (see the implementation log). Two loose ends left on purpose, both needing the
+  owner's live library rather than the sandbox:
+  1. ~~`BOOT_GRACE_MS` is a guess~~ — **measured 2026-09-02** on the live library:
+     `get_library` over 251 albums / 4464 tracks is **46–50ms**, so the 150ms grace
+     stays (≈3x, never flashes on a warm launch). The note's grace was measured too:
+     a watcher rescan of the same library ran 83ms and `.scan-note` never appeared
+     across 357 sampled frames. STILL UNVERIFIED: the note *appearing* on a genuinely
+     long scan (Library → Full Rescan, ~25s, proven safe — the track upsert does not
+     touch the `staged` column) — it needs the owner's eyes, not another agent run.
+  2. `.sk-cover` carries no cover-mass shadow. The real tile does. Call: whether a
+     placeholder should already weigh 18px of shadow, or whether weight arrives
+     with the artwork. One line either way.
 - **Modal work (later, user-owned)**: TagEditor's entrance. The audit noted
   it mounts with zero entrance motion (TagEditor.svelte:251 `{#if open}`) —
   a ~180ms scale(0.97)+fade from center is the planned direction
@@ -2555,3 +2568,234 @@ receipt. Baseline **30/40**, 3 P1 + 3 P2. All six fixed; snapshot
   overlay scrollbar (the fix would cost the cards' flush-right alignment), the `▸/▾`
   caret is still a font glyph, and `saveImports(…, trackId)` is still a per-track API
   with no UI.
+
+## First-scan repro harness, and the progress bar that never moved (2026-09-02)
+
+Wanted: the dev instance *held* on the first-launch screen — scan in flight, grid
+still empty — so that state can be looked at rather than caught mid-blink. Built
+as two independent, reversible pieces; nothing of his library was touched.
+
+- **The park (Rust, `lib.rs::scan_park` + one guard in the `scan_inner` progress
+  closure).** `SONGSTRESS_SCAN_STALL_MS=<ms>` sleeps the *blocking scan task* the
+  first time the file loop crosses `SONGSTRESS_SCAN_STALL_AT` percent (default 40,
+  0-100) and then carries on. The position is the whole point: the park is inside
+  `run_scan_files`' per-file loop, **before** grouping and before any upsert, so
+  while it holds the DB has nothing and the grid is *provably* empty — the same
+  screen a first launch shows, not a UI that was told to lie. Unset ⇒ `scan_park()`
+  returns `None`, one branch, zero cost. `SCAN_RUNNING` stays set the while, so a
+  second scan answers "scan already running" and the watcher just keeps its dirty
+  flag: an honest stuck state, including its side effects. At 3 600 000 ms it also
+  self-heals an hour later.
+- **The fresh library (no schema wipe, no backup-and-pray).** systemd drop-in
+  `~/.config/systemd/user/songstress-dev.service.d/first-scan.conf` sets
+  `XDG_DATA_HOME=/tmp/songstress-first-run`, and Tauri's `app_data_dir()` follows
+  XDG — so the whole app (DB *and* WebKit's localstorage/CacheStorage) relocates.
+  Its `songstress.db` is `sqlite3 ".backup"` of the real one with
+  `tracks/albums/artists` emptied and `lastScan` cleared: **his prefs, roots,
+  accent and tile size intact, zero albums** — a configured install that has never
+  scanned, which is exactly the moment before the grid populates. Real DB verified
+  afterwards: 4464 rows, untouched mtime. Revert = delete the drop-in,
+  `daemon-reload`, restart.
+- **[P1 bug found by holding the state] The first-scan progress bar never moved.**
+  `EmptyState.svelte` had `style:transform="scaleX(${pct / 100})"` — in a *plain*
+  (non-backticked) attribute Svelte does not treat `${…}` as an interpolation: it
+  emits the literal `$` and the `{expr}`, so the runtime declaration was
+  `scaleX($0.4)` — invalid CSS, dropped without a word, `style=""` on the node, and
+  `.fill` sitting at the stylesheet's `scaleX(0)` for the entire scan. The only
+  feedback the screen actually gave was the `Scanning — 1806/4517` text line. Fix:
+  backtick the template literal. Measured parked at 40 %: `style.transform =
+  scaleX(0.4)`, fill 128px of a 320px bar. Lesson generalizes — see AGENTS.md.
+  *(The bar itself is gone as of the entry below — the lesson is what stayed.)*
+- **Gates:** svelte-check 0/0 · vitest 73/73 · cargo --lib 81/81 · build ok.
+
+## Loading skeletons: the grid and the artist list (2026-09-02)
+
+Decision that shaped it: **no progress bar on the first scan at all.** The stage
+shows the shape of what is coming until files land, or — if the scan ends on an
+empty library — the welcome state, which is a decision and not a wait. The park
+harness from the entry above held that screen open for the whole build.
+
+- **One predicate, two surfaces.** `src/lib/loadingState.ts::libraryLoading` is
+  the single definition of "nothing to show, and something in flight"; the grid
+  and the sidebar each build the same `LoadingFacts` object, and the type makes
+  both of them answer for every fact rather than let one surface quietly stop
+  checking one. Facts, not stores: the module stays pure and vitest-covered.
+  Rules: never over content (`albums > 0` ⇒ false, so a re-scan keeps the real
+  grid and the sidebar's "Updating library…" note); a scan in flight is
+  immediate; boot gets a grace (`BOOT_GRACE_MS = 150`).
+  `library.scanning` is load-bearing next to `scanner.running` — a
+  **watcher**-triggered first scan never passes through the frontend's `begin()`,
+  so `running` is false and only the progress listener knows the scan is up.
+  Without it the grid would flash "Pick the folder that holds your music" mid-scan.
+- **`library.scanning` was also the last reader of two dead fields:**
+  `library.scanDone`/`scanTotal` had no consumer anywhere (EmptyState read
+  `scanner`, the rings read `scanner`) — deleted with the bar, not before.
+  `scanner.done/total/phase` stay: the Library-pane rings and ManageImports use
+  them, so the numbers live on as chrome, not as a stage.
+- **Geometry is the point.** `GridSkeleton.svelte` re-derives the real tile:
+  `columnCount(gridWidth, ui.tileSize, 20)`, `repeat(var(--cols), minmax(0,1fr))`,
+  `gap: 12px var(--gap)`, square cover at `--radius-cover`, 13px cover→caption,
+  8px bottom padding. `skeletonRows` = `ceil(stage / (rowH + gap))` capped at 4 —
+  `TILE_STACK = 52` is the *real* tile's non-cover height (the skeleton's own CSS
+  lands 3px short, which is not a reflow). Measured parked at 1200×660 / `tileSize
+  220`: cols 3, cover `295×295` at `(256,20)`, 2 rows, `.content 747/576` (the
+  second row runs under the playbar shelf, which is what the first real row does).
+  The sidebar counts with `floor` minus the real "All Artists" row: `nav 470/470`,
+  **zero scrollbar** — the one surface with a visible `::-webkit-scrollbar`.
+- **Deleted:** EmptyState's whole `{#if library.scanning || scanner.running}`
+  branch — `Building your library…`, the `Starting scan…` fallback, the 320×6
+  bar and its (just-fixed) `scaleX` binding, plus `.bar`/`.fill`. It is
+  welcome-only now, which also retires the centered-column/collision problem:
+  the skeleton is in flow inside `.grid`, so the absolute `.empty` never has to
+  share the stage with it.
+- **New to the codebase: an `infinite` animation.** The kill switch is
+  `* { animation-duration: 0.01ms !important }`, which on an infinite loop is not
+  "reduced" but ~100k cycles/sec. `.sk::after { animation-name: none }` inside the
+  media query wins the `!important` tie on specificity **and** touches a different
+  longhand than the global rule owns, so the sweep stops instead of racing. The
+  static material still reads as waiting; `aria-busy` says so out loud.
+- **Search is disabled while loading** (owner's call): a query typed into two
+  placeholder surfaces can only match nothing, and a field that takes the typing
+  and answers with silence is the worse lie. The magnifier dims with it via
+  `.search:has(input:disabled) > svg` (`:has` because the icon precedes the
+  input), and the `title` swaps from the `/` tip to "Search once your library is
+  built".
+- **Dev hook, because the park can't be re-entered:** `window.__skel(true|false)`
+  (`main.ts`, `import.meta.env.DEV`-gated → `library.devLoading`). After a page
+  reload — which any store-module edit causes — the backend still holds
+  `SCAN_RUNNING`, so clicking Rescan dies with "scan already running" and the
+  loading state becomes unreviewable without a Rust rebuild (and a window drag).
+  This is what the skeleton was verified with.
+- **Known consequences of "no bar", stated once:** a hung scan is now a shimmer
+  that never ends (the harness proves it — an hour of it); the fill is one instant
+  at `scan-finished`, because grouping and every upsert happen after the file
+  loop, so a progressive resolve would need per-group commits and a rethink of the
+  removal sweep. Both accepted, neither designed around.
+- **Gates:** svelte-check 0/0 · vitest 84/84 (11 new) · cargo --lib 81/81 · build ok.
+
+## A failed scan now says so, and always ends its own shimmer (2026-09-02)
+
+The skeleton made an old hole load-bearing. `scan_inner` had **one** terminal
+emit and it sat *below* the error propagation (`lib.rs:523` —
+`let counts = result…??;`), so a run that died on a missing root, a DB error or a
+panicked blocking task reset `SCAN_RUNNING`, returned `Err` to the caller, and
+emitted nothing. The webview's `library.scanning` is cleared by `scan-finished`
+and by nothing else → **a failed first scan shimmered forever.** (Before the
+skeleton that same bug read as "Building your library… / Starting scan…" stuck —
+same failure, less convincing. It is exactly the shape of the `music root null`
+bug AGENTS.md records.)
+
+- **Fix at the cause, not the symptom.** No watchdog, no timeout: the emit moved
+  above the `?` and `ScanSummary` grew `error: Option<String>`, so the terminal
+  event now fires on **every** path — success, hard failure, panic (`JoinError`
+  folds into the same match with the others). Returning `Err` is kept: callers
+  that chain a scan (`add_music_folder`, `save_imports`) must still abort, and
+  `rescan()`'s `catch` still logs. Additive field; `scan-finished` has exactly one
+  frontend reader, which ignored the payload entirely until now.
+- **The UI half:** `library.scanError` ($state) ← the event's `error`; cleared by
+  `begin()` so a retry can't leave the old reason on screen behind the new
+  skeleton; a failed run does NOT stamp `lastScan` ("scanned 14:02" for a scan
+  that didn't happen) and does not re-read a dump that cannot have changed.
+  `EmptyState` gained its failure branch: *"Your library wasn't updated"* + the
+  reassurance line (nothing was moved, changed or deleted) + the scanner's own
+  sentence in `--caution` — the tint the tag editor's failed SAVE already uses, so
+  a failed scan doesn't invent a second error colour — and the ghost button
+  relabels *Rescan → Try again*.
+- **Verified end to end on the sandbox**, not argued: `invoke('scan_library',
+  {root:'/tmp/definitely-not-here'})` from the bridge → journal `[scan] FAILED:
+  music root /tmp/definitely-not-here does not exist` → screen reads "Your library
+  wasn't updated" with that exact string at `rgb(242,163,60)` and
+  `aria-busy="false"` → *Try again* clears it → real first scan → skeleton (6
+  covers / 10 rows) → parked at `1807/4517`. A failure, a retry and the stuck
+  state, in one chain.
+- **Also here: the sidebar's scan note had the same blind spot.** It gated on
+  `scanner.running` — "the frontend asked" — so a watcher-triggered rescan was
+  invisible there too; it now reads `running || scanning` like `libraryLoading`.
+  Paired with `NOTE_GRACE_MS = 400`, because the union is only safe if a ~56ms
+  background pass cannot mount a line for a single frame (a flicker, not news).
+  Both grace constants live in `loadingState.ts` now — one rule about waits, one
+  place to tune them.
+- **Gates:** svelte-check 0/0 · vitest 84/84 · cargo --lib 81/81 · build ok.
+
+## The arrival entrance: rows fade up when a placeholder gives way (2026-09-02)
+
+`animate` skill, run in order. **Gate:** the transition happens on a first scan and
+on a boot slow enough to have shown a placeholder — rare, first-run tier, so the
+delight budget applies. The same motion on a warm launch or an artist switch would
+have failed the gate outright (100+/day, keyboard-adjacent), which is why the
+trigger is the interesting part of this change, not the keyframe. **Purpose:**
+preventing a jarring change — 251 covers otherwise teleport in over an empty grid.
+
+- **Armed by the store, in the same write batch as the data** (`library.load()` →
+  `entering` for `ENTER_MS = 360`). Deliberately NOT a component `$effect`: an
+  effect runs *after* the DOM update, so the class would land a frame late and every
+  row would paint at rest, jump back to the start of its animation, and blink. The
+  condition is `albums was 0 → dump has albums → (fromScan || scanning || bootSlow)`
+  — "a placeholder was replaced", not "content arrived". `scan-finished` passes
+  `load(true)` because it clears `scanning` before calling.
+- **Ingredients:** CSS `@keyframes` (chosen over WAAPI/`svelte/transition` — it runs
+  off the main thread while covers decode and `album_colors` IPC fires, and the
+  global reduced-motion kill switch can reach it; PLAN.md's modal note is the same
+  lesson), `opacity` + `transform: translateY(8px)` only, `--ease-out` — the
+  codebase's verified curve, not the skill's generic `cubic-bezier(0.23,1,0.32,1)`,
+  because extending existing tokens beats forking them — 200ms, 30ms per-row ladder
+  capped at 150ms. Per ROW, not per tile: the row owns the position, the tile owns a
+  cover, and this WebKit paints layer churn as blank covers (No-Lift Rule).
+- **Two things that would have shipped wrong if I hadn't measured them.** The cut
+  `:nth-child(n + 8) { animation: none }` (for the 335 surfaces a 84-row grid +
+  251-row list would otherwise composite) landed *inside* the sidebar's visible
+  rows, and everything past a cut appears at t=0 — i.e. below the cascade, arriving
+  early. The boundary is now `n + 24`, below the fold of the tallest list. And the
+  sidebar's first child is `All Artists`, a control that never left: `animation`
+  changing on a persistent node re-runs it, so the entrance would have blinked a
+  button the user might be reaching for. Excluded by a scoped rule.
+- **Reduced motion:** the kill switch collapses the duration anyway, so what had to
+  be disarmed by hand was the LADDER — a sequence of zero-duration arrivals is worse
+  than no motion. `.enter > :nth-child(n) { animation-delay: 0s }`; the
+  pseudo-class is load-bearing, `.enter > *` loses the specificity tie to the ladder.
+- **Revised after the owner watched it: too fast.** The trace was the diagnosis, not
+  just the taste note — row 1 reached **90% opacity at 74ms** of a nominal 200ms,
+  because `--ease-out` spends 90% of the distance in the first ~37% of the duration.
+  So the duration was mostly invisible settling and the only real lever was the
+  SPREAD. Now 250ms / 10px rise / 50ms ladder capped at 300ms (~440ms for the front
+  six rows, ~550ms total), with `ENTER_MS` raised to 580 — it must exceed duration +
+  cap, or a row still holding at `opacity: 0` inside its delay snaps visible when the
+  class drops. Measured after: `103ms 93,73,12,0,0,0 → 205ms 100,99,93,73,12,0 →
+  439ms all 100`. DESIGN.md carries the new numbers (it is the authority, not the log).
+  Repro note: the probe read `100,100,…` flat once — because `app.css` had gone
+  empty-serving AGAIN after a non-atomic rewrite, so there was no CSS to animate. The
+  tell is `--gap` reading `""`; `touch src/app.css` fixes it. Always check the token
+  before believing a CSS measurement.
+- **Measured, in this WebKit:** injected ladder probe — t0 all armed rows at
+  `opacity 0 / matrix(1,0,0,1,0,8)`, t+90ms child0 `0.95 / 0.44px`, child1 (30ms
+  behind) `0.84 / 1.30px`, child5 (at the 150ms cap) still at rest, children 24+
+  `none`; t+510ms all `1 / 0`. On the live nodes after the restore: grid rows
+  animate, `.scroll`'s first child reads `none` ✓, its second `enter-row` at
+  `0.55 / 3.57px` mid-flight. Warm boot on the real library: 251 tiles,
+  `animationName: none`, no `enter` class ✓ — the gate holds.
+- **Dev-cycle cost, recorded because it bit:** mid-task the dev server was serving
+  `src/app.css` as a module with `__vite__css = ""`, i.e. the page had NO global CSS
+  (every token empty, `.glass` blur `none`) while all component styles looked fine.
+  `touch src/app.css` healed it in ~1s. That is the AGENTS.md cold-start-CSS class
+  of failure, in its global-sheet form, and a synthetic-CSS probe found it in one
+  call where a screenshot would have sent me chasing a layout bug that did not exist.
+- **Third pass: slower, and the grid unfolds rather than marches.** "A bit slower"
+  moved the ladder to 70ms/420ms cap over a 320ms fade (ENTER_MS → 900, since it must
+  exceed duration + cap or a delayed row snaps in). The unfold request exposed that
+  the ROW was the wrong unit for a grid: at a 295px tile barely 1.5 rows are on
+  screen, so a row ladder there is a wall arriving late. The grid now animates TILES
+  with `--i = row + column` — a DIAGONAL, because `row * cols + column` marches
+  left-to-right and reads as a typewriter — with its own dials on `.tile` (declared on
+  the animated element: a `--enter-*` on `.grid.enter` would be overridden for every
+  child by the shared `.enter > *` declaration, which is exactly the trap the sidebar
+  comment now records), rows opting out so a cover doesn't travel twice, and a cut at
+  the 9th row so 75 off-screen covers don't composite. Reduce pauses it via
+  `animation-play-state`, not `animation-name` — the latter is not the longhand the
+  global `!important` kill switch owns, so the two mechanisms don't fight.
+  Traced on the live grid: `135ms → 93,55,0,55,0,0`, `247ms → 100,96,69,96,69,0`,
+  all settled by 545ms; the equal pairs ARE the diagonal (tiles (0,1) and (1,0) share
+  `--i` 1). Sidebar: delays 0.07/0.14/0.21/0.28s from inline `--i`, All Artists `none`.
+- **Gates:** svelte-check 0/0 · vitest 84/84 · cargo --lib 81/81 · build ok.
+- **Landed:** all of 2026-09-02's loading work — harness, skeletons, scan-error
+  emit, entrance — is one commit, **Version 0.8.0**. No RPM rebuilt (owner's call);
+  the next `npm run tauri build` / RPM target will carry 0.8.0.

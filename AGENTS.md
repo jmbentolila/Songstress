@@ -60,6 +60,14 @@ changes — and remember the **version files are watched too**: bumping `tauri.c
 `Cargo.toml` restarts the app and costs him a drag. Bump before he places the window, or warn
 him.
 
+**Reviewing a loading state without a scan.** `node tools/devctl.mjs eval "__skel(true)"`
+holds the grid + artist-list skeletons in place (`main.ts`, DEV-only, sets
+`library.devLoading`; `__skel(false)` releases them). Do NOT try to re-enter the state by
+clicking Rescan after a reload: a *parked* scan (`SONGSTRESS_SCAN_STALL_MS`, PLAN.md) still
+holds the backend's `SCAN_RUNNING`, so the retry fails instantly with "scan already running"
+and only the console knows. Re-parking needs a unit restart — i.e. his window drag again — so
+park once, then iterate with `__skel`.
+
 ## Layout
 
 ```
@@ -99,6 +107,13 @@ public/covers/            album art for the fake library (real folder.jpg files)
   — raw `<script>` means uncached. Fix: `server.warmup.clientFiles` (added to
   vite.config.js); `touch`ing the file is the manual version. `location.reload()`
   does NOTHING here — the id stays uncached, so don't waste a restart cycle on it.
+  **The global sheet rots the same way, silently:** `src/app.css` can keep serving a
+  module whose `__vite__css` is the EMPTY string (2026-09-02, after a long edit
+  series). Nothing 404s and the components still look styled, but every theme token
+  reads empty — the tell is `getComputedStyle(document.documentElement)
+  .getPropertyValue('--gap')` coming back `""`, or a `.sk`/`.glass` probe returning
+  nothing. `touch src/app.css` re-emits it in one second; a screenshot would take a
+  restart cycle and show you a page that merely looks a bit flat.
 - **`overflow: hidden` is still a scroll port.** Programmatic `.focus()` on an
   element inside a layer that is `translateX(100%)` SCROLLS the clipper
   (`.stack.scrollLeft` → ~202) and nothing ever scrolls it back: every layer
@@ -129,11 +144,17 @@ public/covers/            album art for the fake library (real folder.jpg files)
   scan root a RELATIVE path `null`, so every scan failed instantly and silently
   ("music root null does not exist"): no progress events, no error, menu clicks
   "did nothing". Scan command errors only reach the webview console.
-- **Scan errors are near-invisible.** `scan_library` failures surface nowhere in
-  the journal — check `[scan]` eprintln lines for success, and remember
-  incremental scans SKIP unchanged files entirely (they never re-enter
-  grouping). After changing grouping/tag-consensus logic, use Library →
-  Full Rescan (rebuild) or nudge `tracks.mtime_ns` in the DB.
+- **Scan errors are near-invisible — but not any more, on one condition.**
+  `scan_inner` now emits `scan-finished` on EVERY path, carrying `error: Some(..)`
+  (2026-09-02), and the empty state renders that string in the caution hue. Before
+  it, the emit sat below a `?`, so a failed run announced itself only in the
+  webview console — and because `scan-finished` is the SOLE thing that clears
+  `library.scanning`, a failed FIRST scan shimmered its skeleton forever. Any new
+  early-return in that function must still emit. The journal side is now greppable:
+  `[scan] FAILED: <reason>` (and `[scan] files …` for success). Remember
+  incremental scans SKIP unchanged files entirely (they never re-enter grouping).
+  After changing grouping/tag-consensus logic, use Library → Full Rescan (rebuild)
+  or nudge `tracks.mtime_ns` in the DB.
 - **The inotify watcher must ignore read traffic.** notify's inotify backend
   watches IN_OPEN too, so the scan's own walkdir reads arrive as
   Access(Open)/Access(Close(Read)) events — counting them made the watcher
@@ -208,6 +229,13 @@ public/covers/            album art for the fake library (real folder.jpg files)
 
 ## Svelte 5 gotchas learned the hard way
 
+- **A `${}` in a plain attribute is not an interpolation.** Svelte reads the `$` as
+  text and only the braces as the tag, so `style:transform="scaleX(${pct/100})"`
+  emits the declaration `scaleX($0.4)` — invalid CSS, dropped with no error, and
+  `el.style` ends up empty so the stylesheet's `scaleX(0)` wins. Interpolated
+  attribute values need a template literal: ``style:transform={`scaleX(${pct/100})`}``.
+  The tell (this is how EmptyState's first-scan bar sat still for whole scans):
+  the counter *text* next to it is right, `style` is `""`, console says nothing.
 - **A class forwarded into a child component is unscoped.** `<SurfaceClose
   class="ab-close" />` puts the class on an element compiled in another file, so
   the parent's scoped rule `.ab-close { … }` is reported as *unused* and does

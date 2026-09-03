@@ -31,6 +31,12 @@ html[data-theme="dark"] {
   --panel-bg-strong: rgba(26, 26, 33, 0.94);
   --border: rgba(255, 255, 255, 0.1);
   --hover: rgba(255, 255, 255, 0.07);
+  /* Skeleton material — the placeholder's own pair, not --hover/--border
+     reused: those two are a hover wash and a 1px hairline, and their values are
+     tuned for those jobs. A placeholder needs to sit quiet-but-present on the
+     0.7/0.8 glass in BOTH themes, which is a fourth thing. */
+  --sk-base: rgba(255, 255, 255, 0.06);
+  --sk-hi: rgba(255, 255, 255, 0.13);
   --active: rgba(167, 139, 250, 0.18);
   --accent: #a78bfa;
   /* Caution — the system's ONE non-accent hue, and the only one a mark may wear.
@@ -54,6 +60,8 @@ html[data-theme="light"] {
   --panel-bg-strong: rgba(252, 252, 254, 0.95);
   --border: rgba(30, 30, 40, 0.12);
   --hover: rgba(30, 30, 40, 0.06);
+  --sk-base: rgba(30, 30, 40, 0.05);
+  --sk-hi: rgba(30, 30, 40, 0.11);
   --active: rgba(124, 88, 240, 0.14);
   --accent: #7c58f0;
   --caution: #b26a12;
@@ -114,6 +122,120 @@ button {
   position: relative;
 }
 
+/* ── Skeleton material ───────────────────────────────────────────────────────
+   ONE loading language: the album grid's tiles and the sidebar's artist rows
+   are the same material, defined once here as a global (like .glass) rather
+   than per component, so the two surfaces cannot drift — and rather than as a
+   shared component, because a class forwarded into a child is unscoped.
+
+   The sweep is a translateX on a pseudo-element, so it is compositor-only:
+   `background-position` would repaint every frame, at 60Hz, under a blur.
+   `--i` is the shape's index; the NEGATIVE delay puts the light mid-shelf on
+   frame 1 instead of starting every placeholder in lockstep (which reads as
+   one big flash rather than as a surface waiting). */
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: var(--sk-base);
+  border-radius: 8px;
+}
+
+.sk::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 12%, var(--sk-hi) 45%, transparent 78%);
+  transform: translateX(-100%);
+  animation: sk-sweep 1400ms linear infinite;
+  animation-delay: calc(var(--i, 0) * -180ms);
+}
+
+@keyframes sk-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* The global kill switch above sets `animation-duration: 0.01ms !important` on
+   `*` — on an `infinite` animation that is not "reduced", it is a hundred
+   thousand cycles a second. This rule wins the !important tie on specificity
+   (.sk::after over *), and `animation-name: none` is a different property than
+   the one the global rule owns, so the sweep stops instead of racing.
+   The static material still reads as loading: nothing on screen has shape but
+   no content, and `aria-busy` says so. */
+@media (prefers-reduced-motion: reduce) {
+  .sk::after {
+    animation-name: none;
+  }
+}
+
+/* ── The arrival entrance ───────────────────────────────────────────────────
+   When a placeholder is replaced by real content — a first scan landing, or a boot
+   dump slow enough to have shown one — the shapes fade up into position instead of
+   teleporting. `enter` is set by `library.load()` in the SAME synchronous write
+   batch as the data, never from an `$effect`: an effect runs after the DOM update,
+   so the class would land a frame late and each element would paint at rest, jump
+   back to the start of its animation, and blink.
+
+   THE LADDER IS THE ANIMATION. `--ease-out` spends 90% of an item's distance in the
+   first ~37% of its duration (measured: 90% opacity at 74ms of a 200ms cut), so
+   stretching the duration alone buys invisible settling — the spread between items
+   is what makes an arrival read as a cascade rather than a pop. Two revisions, both
+   from the owner watching a replay: 200ms/30ms/150ms was too fast to read, and
+   250ms/50ms/300ms was still too fast. Now 320ms over a 70ms ladder capped at
+   420ms — about 750ms end to end, past the "UI under 300ms" rule on purpose: that
+   ceiling protects actions repeated all day, and this one happens on a first run.
+
+   The dials are custom properties on the ANIMATING element (never inherited off
+   `:root`, which would make a child's transform a recalc for every child), because
+   the two surfaces stagger different UNITS. The artist list animates its rows: a
+   row is one line of text, and it is the thing with a position. The album grid
+   animates individual TILES along its diagonal (see AlbumGrid.svelte) — at a 295px
+   tile only one and a half rows fit on screen, so a row-level ladder there cannot
+   unfold anything. Children carry `--i` inline: list index for a row, row + column
+   for a tile, which is what turns a march into a wave.
+
+   `animation-play-state: paused` rather than `animation: none` under reduce, because
+   `animation-name` is a different longhand than the one the global kill switch below
+   owns with `!important` — the switch reaches the duration and this reaches the
+   motion, and neither fights the other. */
+.enter > * {
+  --enter-dur: 320ms;
+  --enter-step: 70ms;
+  --enter-cap: 420ms;
+  --enter-rise: 12px;
+  animation: enter-row var(--enter-dur) var(--ease-out) both;
+  animation-delay: min(calc(var(--i, 0) * var(--enter-step)), var(--enter-cap));
+}
+
+/* Only what can be seen enters; the rest just arrives. A populated library is 84
+   grid rows and 251 sidebar rows, so without a cut the entrance would composite
+   hundreds of surfaces for content nobody can reach while it plays. The cut has to
+   sit BELOW the fold or it reads as a glitch — everything past it appears at t=0,
+   i.e. before the cascade above it has finished — so it is placed past the tallest
+   list this app can show (~15 sidebar rows in an 800px window). */
+.enter > :nth-child(n + 24) {
+  animation: none;
+}
+
+@keyframes enter-row {
+  from {
+    opacity: 0;
+    transform: translateY(var(--enter-rise));
+  }
+}
+
+/* Reduce: keep the fade (that is the part that explains the arrival), drop the
+   travel AND the ladder — a sequence of zero-duration arrivals is worse than no
+   motion. Both selectors are spelled out because `.enter > *` alone loses the
+   specificity tie to the per-child delays. */
+@media (prefers-reduced-motion: reduce) {
+  .enter > *,
+  .enter > :nth-child(n) {
+    animation-delay: 0s;
+    animation-play-state: paused;
+  }
+}
 ::-webkit-scrollbar {
   width: 11px;
 }

@@ -442,6 +442,73 @@ Two families, split by role — every glyph in the chrome belongs to one:
   way to everything it no longer owns. The popover keeps the one thing worth
   having next to the transport: the curve, editable while something plays.
 
+### Loading is a shape, not a message
+While the library is being built the surfaces that will hold it hold **their own
+shape with the content taken out**: the album grid shows real tile geometry (same
+column count, same 20px grid gap, square cover at `--radius-cover`, same
+13px cover→caption gap and caption line heights), and the artist list shows real
+rows (`--sidebar-row-size` height, `.row`'s 10px inset and 8px radius) with a
+name pill and a count pill. No headline, no bar, no numbers — the placeholder IS
+the status. When the library lands it **fills** the shapes rather than reflowing
+them, and the swap is instant, per the switch contract; only the skeleton's own
+160ms fade-in is motion, and it is CSS (a `svelte/transition` would run at full
+speed for users who asked for none).
+
+- **One material, defined once.** `.sk` is global in `app.css` beside `.glass` —
+  base `--sk-base`, sweep peak `--sk-hi`, its own token pair per theme, because
+  `--hover` (a wash) and `--border` (a hairline) are tuned for other jobs. A
+  shared *component* would leak: a class forwarded into a child is unscoped.
+- **The sweep is a `translateX` on a pseudo-element**, `1400ms linear infinite`,
+  with `animation-delay: calc(var(--i) * -180ms)` — negative, so the light is
+  already mid-shelf on frame 1 instead of every placeholder starting in lockstep
+  (which reads as one big flash, not as a surface waiting). No lift, no scale:
+  the No-Lift Rule applies doubly to something that must never look interactive.
+- **Never over content.** A re-scan of a populated library keeps its grid and the
+  sidebar's dim "Updating library…" note; a skeleton that covers 251 real albums
+  is a lie about the library, not about the wait.
+- **Never a manufactured wait.** The boot dump is tens of milliseconds, so the
+  placeholder waits `BOOT_GRACE_MS` before it may appear at all (the same rule the
+  import manager documents for its `staged_plan` fetch). And it never *scrolls*
+  past its own surface: the sidebar counts rows with `floor`, the grid with
+  `ceil` capped at 4, because a placeholder you can scroll into is an infinite
+  empty page.
+- **Pill widths vary** — a uniform bar reads as a table, not as names — but from a
+  fixed pattern array, never `Math.random()`: the node re-renders on every
+  progress event, roughly every 6ms during a scan, and fresh random widths would
+  shimmer on their own.
+- `aria-busy` on the two regions, `aria-hidden` on the placeholders: the wait is
+  announced once, not twenty-six times.
+
+- **The arrival entrance belongs to the wait, not to the data.** When a placeholder
+  gives way to content the shapes fade up into position — **320ms** `--ease-out`,
+  **12px** of rise, **70ms** per item capped at **420ms** (~750ms end to end, past
+  the 300ms UI ceiling on purpose: this fires on a first run, not a hundred times a
+  day). **The spread is the animation, not the duration** — `--ease-out` spends 90%
+  of the distance in the first ~37% of the time, so lengthening the duration alone is
+  invisible settling (measured: 90% opacity at 74ms of a 200ms cut, which is why the
+  first two versions both read as "too fast").
+  **The staggered unit is per surface, because what has a position differs.** The
+  artist list animates its ROWS (`--i` = index); the album grid animates TILES along
+  their **DIAGONAL** (`--i = row + column`) — at a 295px tile barely one and a half
+  rows fit on screen, so a row-level ladder there is a wall arriving late, and a wall
+  is the opposite of unfolding. Strict reading order (`row * cols + col`) marches
+  left-to-right and reads as a typewriter; the diagonal reads as a surface opening.
+  Dials are custom properties declared on the **animating element itself** (inheriting
+  them from the container costs a style recalc per child, and a declaration on the
+  container is anyway overridden for children by the shared rule), and `--i` is inline
+  per child.
+  It is armed by `library.load()` when the dump it just wrote replaces an EMPTY library
+  after a scan (or after a boot slow enough to have shown the skeleton), and by nothing
+  else: a warm launch whose dump lands in 46ms must not animate, and an artist switch
+  or a search keystroke re-mounts rows, so a permanent class would turn typing into
+  confetti — the frequency tier where motion is disqualified. It is CSS so the
+  `prefers-reduced-motion` kill switch can reach it (a `svelte/transition` would run at
+  full speed for the users who asked for none); the reduced variant pauses the motion
+  and zeroes the ladder, keeping the fade, because a sequence of zero-duration
+  arrivals is worse than no motion. Past `:nth-child(24)` — and past the grid's 9th
+  row — there is no animation at all: only what can be seen enters, since everything
+  past a cut appears at t=0, which reads as the bottom of the list arriving first.
+
 ### Settings panes are bespoke
 All three sidebar panes (Appearance, Playback, Library) are store-driven
 components, not renderings of the Rust menu model. The generic row list is the

@@ -415,9 +415,36 @@ struct ScanSummary {
     missing: usize,
     skipped: usize,
     errors: Vec<String>,
+    /// Why the whole run FAILED (root gone, DB refused, blocking task panicked).
+    /// Distinct from `errors`, which is the per-file list of a run that still
+    /// succeeded. Additive field, and the reason it exists is the emit below:
+    /// `scan-finished` is the only thing that clears the frontend's `scanning`,
+    /// so a run that returned before emitting it left an empty library shimmering
+    /// its skeleton forever, with the cause in a console that has no window.
+    error: Option<String>,
 }
 
 // --- Scanner (Phase 2 M2) + import staging (Step 2a) ------------------------
+
+/// DEV-ONLY knob for looking at the first-run screen: `SONGSTRESS_SCAN_STALL_MS`
+/// parks an in-flight scan partway through its file loop, so the "Building your
+/// library…" state over an empty grid can be examined instead of blinking past in
+/// two seconds. The park lives INSIDE the loop — before grouping and before any
+/// upsert — so nothing is committed while it holds: the grid really is still
+/// empty, the same screen a first launch shows. `SONGSTRESS_SCAN_STALL_AT`
+/// (0-100, default 40) chooses where in the loop it parks. Unset ⇒ inert.
+fn scan_park() -> Option<(usize, std::time::Duration)> {
+    let ms: u64 = std::env::var("SONGSTRESS_SCAN_STALL_MS").ok()?.parse().ok()?;
+    if ms == 0 {
+        return None;
+    }
+    let at: usize = std::env::var("SONGSTRESS_SCAN_STALL_AT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(40)
+        .min(100);
+    Some((at, std::time::Duration::from_millis(ms)))
+}
 
 /// Shared scan pipeline: multi-root scan + artwork post-pass + events.
 /// Callers must NOT hold SCAN_RUNNING (this takes and releases it).
@@ -460,7 +487,19 @@ async fn scan_inner(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
         let t_files = std::time::Instant::now();
+        let park = scan_park();
+        let parked = std::sync::atomic::AtomicBool::new(false);
         let counts = library::scan::run_scan_files(&mut conn, &roots, only.as_ref(), |done, total| {
+            if let Some((at, dur)) = park {
+                if total > 0 && done * 100 >= total * at && !parked.load(Ordering::Relaxed) {
+                    parked.store(true, Ordering::Relaxed);
+                    eprintln!(
+                        "[scan] SONGSTRESS_SCAN_STALL_MS: parked at {done}/{total} for {}ms",
+                        dur.as_millis()
+                    );
+                    std::thread::sleep(dur);
+                }
+            }
             let _ = emitter.emit("scan-progress", serde_json::json!({ "done": done, "total": total }));
         }, full)?;
         if let Some(paths) = &flag_pending {
@@ -488,20 +527,46 @@ async fn scan_inner(
 
     SCAN_RUNNING.store(false, Ordering::SeqCst);
 
-    let counts = result.map_err(|e| e.to_string())??;
-    let summary = ScanSummary {
-        added: counts.added,
-        updated: counts.updated,
-        removed: counts.removed,
-        missing: counts.missing,
-        skipped: counts.skipped,
-        errors: counts.errors.clone(),
+    // `Err(_)` here = the blocking task itself died (JoinError — a panic in the
+    // scan closure); `Ok(Err(_))` = the scan returned its own failure string.
+    // Both are reported, and BOTH emit: the emit used to sit below the `?` that
+    // propagates the failure, so that path told the webview nothing
+    // (`scan_library`'s Err reaches only the console) and left `library.scanning`
+    // set forever — an eternal skeleton over an empty grid. That is precisely the
+    // shape of the old `music root null` bug (AGENTS.md), and the placeholder is
+    // only honest while this always fires.
+    let counts_or_err: Result<library::scan::ScanCounts, String> =
+        result.map_err(|e| format!("scan task failed: {e}")).and_then(|c| c);
+
+    let summary = match &counts_or_err {
+        Ok(counts) => ScanSummary {
+            added: counts.added,
+            updated: counts.updated,
+            removed: counts.removed,
+            missing: counts.missing,
+            skipped: counts.skipped,
+            errors: counts.errors.clone(),
+            error: None,
+        },
+        Err(e) => {
+            eprintln!("[scan] FAILED: {e}");
+            ScanSummary {
+                added: 0,
+                updated: 0,
+                removed: 0,
+                missing: 0,
+                skipped: 0,
+                errors: Vec::new(),
+                error: Some(e.clone()),
+            }
+        }
     };
     let _ = app.emit(
         "scan-finished",
         serde_json::to_value(&summary).unwrap_or_default(),
     );
-    Ok(summary)
+
+    counts_or_err.map(|_| summary)
 }
 
 /// Step 7c: all library roots. `musicDirs` (JSON array) is AUTHORITATIVE

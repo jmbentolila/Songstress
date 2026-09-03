@@ -7,6 +7,7 @@
   import { openImportManager } from "../lib/stores/imports.svelte";
   import { surfaceOpen } from "../lib/stores/surfaces.svelte";
   import { fold } from "../lib/search";
+  import { libraryLoading, sidebarRows, NAME_W, NOTE_GRACE_MS } from "../lib/loadingState";
   import {
     windowClose,
     windowMinimize,
@@ -310,6 +311,47 @@
   // never disabled without saying which row is the reason.
   const ringOn = (kind: string) => ringKind === kind;
 
+  /** The artist list's placeholder — the SAME rule the album grid applies, so the
+   * two surfaces cannot disagree about whether a scan is happening. The facts are
+   * spelled out at each call site on purpose: the type makes both of them answer
+   * for every fact rather than let one surface quietly stop checking one. */
+  const loading = $derived(
+    library.live &&
+      libraryLoading({
+        ready: library.ready,
+        bootSlow: library.bootSlow,
+        albums: library.albums.length,
+        running: scanner.running,
+        scanning: library.scanning,
+        devLoading: library.devLoading,
+      }),
+  );
+  let navHeight = $state(0);
+  const skRows = $derived(sidebarRows(navHeight, ui.sidebarRowSize));
+  // The grid's pill-width pattern, shared so the two placeholders read as one
+  // material (see loadingState: fixed array, never Math.random).
+  const skName = (i: number) =>
+    `${Math.round(NAME_W[i % NAME_W.length] * 100)}%`;
+
+  /** "Updating library…" — the scan note for a library that already HAS content,
+   * where there is no placeholder to show and a word is all that's left.
+   *
+   * It used to read `scanner.running` alone, which means "the frontend asked"; a
+   * watcher-triggered rescan (Rust calls `run_library_scan` directly, no IPC) was
+   * invisible here too — the same blind spot `libraryLoading` closes. The grace is
+   * what makes that union safe: an incremental pass over unchanged files is ~56ms
+   * end to end, so a line that mounts for one frame would be a flicker, not news. */
+  let scanNote = $state(false);
+  $effect(() => {
+    const busy = library.albums.length > 0 && (scanner.running || library.scanning);
+    if (!busy) {
+      scanNote = false;
+      return;
+    }
+    const t = setTimeout(() => (scanNote = true), NOTE_GRACE_MS);
+    return () => clearTimeout(t);
+  });
+
   // Theme modes, in the order the segmented control shows them. "system" is
   // the shipped default and was unreachable once touched: the old button
   // cycled dark|light, which resolves system to a fixed value.
@@ -578,7 +620,10 @@
           placeholder="Search library..."
           spellcheck="false"
           aria-label="Search library"
-          title="Tip: press / anywhere to focus search — Escape clears"
+          title={loading
+            ? "Search once your library is built"
+            : "Tip: press / anywhere to focus search — Escape clears"}
+          disabled={loading}
           bind:this={searchInput}
           bind:value={ui.search}
           onkeydown={(e) => {
@@ -597,11 +642,16 @@
         {/if}
       </div>
 
-      {#if library.albums.length > 0 && scanner.running}
+      {#if scanNote}
         <p class="scan-note" aria-live="polite">Updating library…</p>
       {/if}
 
-      <nav class="scroll">
+      <nav
+        class="scroll"
+        class:enter={library.entering}
+        bind:clientHeight={navHeight}
+        aria-busy={loading}
+      >
         <!-- Always visible: it's a control (clear selection + total count),
              not a search result — filtering it out made a zero-match query
              a dead end (critique P1). -->
@@ -612,11 +662,19 @@
           onclick={() => select("all")}
         >
           <span class="name">All Artists</span>
-          <span class="count">{library.albums.length}</span>
+          <!-- The row is a control, so it stays real. Its COUNT is data the scan
+               has not produced yet: "0" there is a number, and a number is a
+               claim. The pill says "unknown" in the same voice as the list. -->
+          {#if loading}
+            <span class="sk sk-count" style:--i={0}></span>
+          {:else}
+            <span class="count">{library.albums.length}</span>
+          {/if}
         </button>
-        {#each filtered as artist (artist.id)}
+        {#each filtered as artist, i (artist.id)}
           <button
             class="row"
+            style:--i={i + 1}
             class:active={ui.activeArtistId === artist.id}
             style:height="var(--sidebar-row-size)"
             onclick={() => select(artist.id)}
@@ -625,7 +683,17 @@
             <span class="count">{albumCounts.get(artist.id) ?? 0}</span>
           </button>
         {/each}
-        {#if filtered.length === 0 && ui.search.trim() !== ""}
+        {#if loading}
+          <div class="sk-rows" aria-hidden="true">
+            {#each Array(skRows) as _, i (i)}
+              <div class="sk-row" style:height="var(--sidebar-row-size)">
+                <span class="sk sk-name" style:--i={i + 1} style:width={skName(i)}></span>
+                <span class="sk sk-count" style:--i={i + 2}></span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if !loading && filtered.length === 0 && ui.search.trim() !== ""}
           <!-- Action, not caption: a zero-match state that offers no remedy
                is a dead end (critique P3). -->
           <button class="empty" onclick={() => (ui.search = "")}>
@@ -1447,6 +1515,19 @@
     color: var(--text-dim);
   }
 
+  /* Out while the library is being built: the grid and this list are both
+     placeholders, so a query typed now can only match nothing — and a field that
+     takes the typing and answers with silence is the worse lie. The glyph dims
+     with it (`:has`, since the icon precedes the input). */
+  .search input:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .search:has(input:disabled) > svg {
+    opacity: 0.55;
+  }
+
   .search-clear {
     position: absolute;
     right: 5px;
@@ -1561,6 +1642,48 @@
     flex: none;
   }
 
+  /* The artist list's placeholder. `.sk-row` copies `.row`'s box exactly — same
+     height token, same 10px inset, same 8px radius — because the real rows land
+     INTO this rhythm; a skeleton 2px taller per row moves the whole list at the
+     moment the library arrives. */
+  .sk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: 8px;
+  }
+
+  .sk-name {
+    height: 13px;
+    min-width: 0;
+    border-radius: 999px;
+  }
+
+  /* 22px — the width of a two-digit album count, so the column reads as "a
+     number belongs here" instead of as another bar. */
+  .sk-count {
+    width: 22px;
+    height: 11px;
+    border-radius: 999px;
+    flex: none;
+  }
+
+  /* This list keeps app.css's defaults unchanged — a row of text is the thing with
+     a position, so the shared ladder is exactly right here. What it does carry is
+     the index: each artist row sets `--i` inline ("All Artists" is child 0 and
+     excluded below, so the first ARRIVING row is 1). Note that dials must be
+     declared on the ANIMATING element: a `--enter-step` on `.scroll.enter` would be
+     overridden for each row by the child's own declaration in the global rule. */
+  /* The entrance utility is global (`.enter` in app.css), but this list's first
+     child is a CONTROL that has been on screen the whole time — running it through
+     the entrance would blink "All Artists" out and back while the user may be
+     reaching for it. The arriving content starts at the second child. */
+  .scroll.enter > .row:first-child {
+    animation: none;
+  }
+
   /* Trailing glyphs sit in the count column: ✓ state (checked items) and
      › drill (root rows). No left check column — labels align with the
      pane title and the artist names. */
@@ -1627,8 +1750,8 @@
     outline-offset: -2px;
   }
 
-  /* Transient scanning state for a populated library (EmptyState owns the
-     empty-library progress UI). */
+  /* Transient scanning state for a populated library — an empty one has nothing
+     to announce but itself, so it shows the skeleton instead (loadingState). */
   .scan-note {
     flex: none;
     margin: -8px 12px 4px;
