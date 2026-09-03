@@ -144,6 +144,16 @@
 
   const bad = $derived(badFieldKeys(edit));
 
+  /* Phase D copy: one sentence per failure set, grammatical for both
+     sizes ("Year must be a number" / "Track #, Year must be numbers"). */
+  let badMsg = $derived(
+    bad.size
+      ? [...bad]
+          .map((k) => NUM_LABELS[k] ?? k)
+          .join(", ") + (bad.size === 1 ? " must be a number" : " must be numbers")
+      : "",
+  );
+
   /** The blast radius, stated BEFORE the press: which fields disagree with
    *  the edit, summed against the census. A union across several fields
    *  cannot be exact without per-file rows, so it says "up to" — and the
@@ -290,7 +300,7 @@
         {#if error}
           <span class="te-error">{error}</span>
         {:else if bad.size}
-          <span class="te-error">{[...bad].map((k) => NUM_LABELS[k] ?? k).join(", ")} must be a number</span>
+          <span class="te-error">{badMsg}</span>
         {:else if blast && dirty}
           <span class="te-blast">
             writes {blast.upTo ? "up to " : ""}{blast.n} of {fileCount} files{blast.cover ? " · cover" : ""}
@@ -304,10 +314,11 @@
             album{#if discs > 1} · across {discs} discs{/if}
           </span>
         {/if}
-        <button class="te-btn" onclick={close}>Cancel</button>
+        <button class="te-btn" onclick={close} title="Close without writing (Esc)">Cancel</button>
         <button
           class="te-btn primary"
           disabled={!dirty || saving || loading || bad.size > 0}
+          title={saving ? "Writing…" : dirty ? "Write the changed files (Enter)" : "Nothing to write"}
           onclick={save}
         >
           {saving ? "Saving…" : "Save"}

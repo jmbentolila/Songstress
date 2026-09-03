@@ -97,6 +97,16 @@
   );
   const bad = $derived(badFieldKeys(edit));
 
+  /* Phase D copy: one sentence per failure set, grammatical for both
+     sizes ("Year must be a number" / "Track #, Year must be numbers"). */
+  let badMsg = $derived(
+    bad.size
+      ? [...bad]
+          .map((k) => NUM_LABELS[k] ?? k)
+          .join(", ") + (bad.size === 1 ? " must be a number" : " must be numbers")
+      : "",
+  );
+
   // --- the stepper: the listless way to walk an album ----------------------
   let siblings = $derived(meta ? library.tracksOf(meta.albumId) : []);
   let idx = $derived(siblings.findIndex((t) => t.id === trackId));
@@ -232,7 +242,7 @@
         <button
           class="te-step-btn"
           disabled={idx <= 0 || dirty}
-          title={dirty ? "Save or cancel first" : "Previous track"}
+          title={dirty ? "Save or cancel first" : "Previous track (←)"}
           aria-label="Previous track"
           onclick={() => step(-1)}
         >◂</button>
@@ -240,7 +250,7 @@
         <button
           class="te-step-btn"
           disabled={idx < 0 || idx >= siblings.length - 1 || dirty}
-          title={dirty ? "Save or cancel first" : "Next track"}
+          title={dirty ? "Save or cancel first" : "Next track (→)"}
           aria-label="Next track"
           onclick={() => step(1)}
         >▸</button>
@@ -272,19 +282,18 @@
         {#if error}
           <span class="te-dir-text te-dir-msg">{error}</span>
         {:else if bad.size}
-          <span class="te-dir-text te-dir-msg"
-            >{[...bad].map((k) => NUM_LABELS[k] ?? k).join(", ")} must be a number</span
-          >
+          <span class="te-dir-text te-dir-msg">{badMsg}</span>
         {:else if written && !dirty}
           <span class="te-dir-text te-dir-ok">Written ✓</span>
         {:else}
           <span class="te-dir-text">{meta?.folder}</span>
         {/if}
       </span>
-      <button class="te-btn" onclick={close}>Cancel</button>
+      <button class="te-btn" onclick={close} title="Close without writing (Esc)">Cancel</button>
       <button
         class="te-btn primary"
         disabled={!dirty || saving || loading || bad.size > 0}
+        title={saving ? "Writing…" : dirty ? "Write this file (Enter)" : "Nothing to write"}
         onclick={save}
       >
         {saving ? "Saving…" : "Save"}

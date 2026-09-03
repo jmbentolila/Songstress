@@ -59,7 +59,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Playbar volume slider: glass styling, native chrome gone | ✅ 2026-09-03 · **0.9.0** |
 | Global Menu rebuild: the broadcast mirrors the panes | ✅ 2026-09-03 · **0.9.0** |
 | Context-menu pass: one album-menu builder, `reveal_container`, artist pending dot | ✅ 2026-09-03 · **0.9.0** |
-| Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D/E ⬜ |
+| Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D ✅ **0.9.2*** · E ⬜ |
 | Audit pass: aria-live announcer (WCAG 4.1.3) + radii on-scale + --on-cover | ✅ 2026-09-03 · **0.9.1** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
@@ -3076,7 +3076,18 @@ image replaces what it displaced, no history tiles.
 lightbox went through three owner-feedback rounds; see the Phase B sections
 below for what actually landed. **Phase C executed 2026-09-03** (the track
 modal + the component split — see the Phase C section at the end of this log).
-Phase D (entrances/copy carry-over) and Phase E (pending-track picker) remain.
+Phase D (entrances/copy carry-over) executed 2026-09-03 (0.9.2): the modal
+family contract verified compliant (scrim-in/surface-in, `.out` outro with
+the animationend backstop, `.waiting` re-triggering the entrance when the
+fields arrive — no per-editor reinvention); vanish guards confirmed on both
+doors (album: the closing effect; track: everything is derived from the
+live store, so a regroup heals the window instead of breaking it); copy
+pass: numeric errors now grammatical for one or many ("Year must be a
+number" / "Year, Track # must be numbers" — one `badMsg` derived per
+editor), and the 0.9.1 accelerators got their affordances in tooltips —
+Save says "Write this file (Enter)" / "Write the changed files (Enter)" /
+"Nothing to write", Cancel "Close without writing (Esc)", the stepper
+"Next track (→)". Phase E (pending-track picker) remains.
 
 ## Tag Editor Redesign — Phase B: the album modal executes the spec (2026-09-03)
 
