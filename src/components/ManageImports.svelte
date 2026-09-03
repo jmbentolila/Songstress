@@ -9,6 +9,7 @@
    * (resolved in Rust, by the same cascade the save itself will follow), the
    * decision is marked per album, and one Apply commits every mark.
    */
+  import { tick } from "svelte";
   import { ui } from "../lib/stores/ui.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
   import {
@@ -288,6 +289,31 @@
   }
 
   let panel = $state<HTMLElement | null>(null);
+
+  // A door that opened this window AT an album (the panel's Imported badge,
+  // an album menu): expand happens in the store; here the row is scrolled
+  // into view and wears a short accent ring so the eye finds it in a tall
+  // pile. The flag is consumed on read, so a later reopen never re-teleports
+  // for a click the user already honoured. The ring itself is STATE
+  // (`attn`), not a classList string — Svelte can only style what it can
+  // see in the markup, and reactive state is the better mechanism anyway.
+  let attn = $state<string | null>(null);
+  $effect(() => {
+    if (!imports.open || !imports.focus) return;
+    const id = imports.focus;
+    imports.focus = null;
+    void tick().then(() => {
+      const row = panel?.querySelector<HTMLElement>(
+        `[data-album-id="${CSS.escape(id)}"]`,
+      );
+      if (!row) return;
+      row.scrollIntoView({ block: "nearest" });
+      attn = id;
+      setTimeout(() => {
+        if (attn === id) attn = null;
+      }, 1600);
+    });
+  });
   // Closing hands focus back to the door it came from, unless the door itself is
   // gone (an emptied pile removes the row) — a keyboard user should not be dropped
   // at the top of the document for having finished a task.
@@ -398,7 +424,7 @@
                 {@const decision = imports.decisions[a.albumId]}
                 {@const dest = destinationLine(a, ui.musicFolders)}
                 {@const numbers = trackNumbers(a)}
-                <div class="mi-album">
+                <div class="mi-album" class:mi-attn={attn === a.albumId} data-album-id={a.albumId}>
                   <!-- ONE disclosure control per card: the summary is the target and the
                        chevron is an indicator inside it. It used to be TWO buttons (the
                        caret and the title) carrying the same `aria-expanded` — one state
@@ -610,8 +636,26 @@
     padding: 10px 10px 6px;
   }
 
+  /* The arrival ring: a row the window was opened AT announces itself once.
+     box-shadow (not outline) because the row owns its own rounding and the
+     ring must sit outside it without re-clipping the expander. */
+  .mi-attn {
+    border-radius: 8px;
+    animation: mi-attn 1.6s var(--ease-out);
+  }
+  @keyframes mi-attn {
+    0%,
+    55% {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    100% {
+      box-shadow: 0 0 0 2px transparent;
+    }
+  }
+
   .mi-album {
     display: grid;
+
     grid-template-columns: minmax(0, 1fr) auto;
     /* The line heights the decision column measures its band with: 13.5px of title in
        18, 11.5px of path in 15 — the list tier's leading, written down rather than

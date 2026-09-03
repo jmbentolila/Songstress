@@ -339,6 +339,7 @@
       step="1"
       value={playback.volume}
       oninput={(e) => setVolume(+e.currentTarget.value)}
+      style:background={`linear-gradient(to right, var(--accent) ${playback.volume}%, var(--hover) ${playback.volume}%)`}
       aria-label="Volume"
     />
     </div>
@@ -723,9 +724,33 @@
     flex: none;
   }
 
+  /* Glass slider (same treatment as the settings-pane sliders): the native
+   * accent-color range insets the thumb's travel but not its track, so even
+   * at 100% a sliver of unfilled bar stayed visible right of the thumb.
+   * With appearance:none the fill gradient IS the whole box — at 100 the
+   * accent reaches the edge. */
   .volume input {
     width: 110px;
-    accent-color: var(--accent);
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--hover);
+    cursor: pointer;
+  }
+
+  .volume input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .volume input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
   }
 
   /* --- Equalizer popover (Step 6) ------------------------------------------ */

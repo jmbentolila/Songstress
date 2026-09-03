@@ -15,6 +15,16 @@ pub struct MenuItem {
     pub enabled: bool,
     /// Some(bool) = checkable; None = plain item.
     pub checked: Option<bool>,
+    /// Checkable renders as a radio dot rather than a checkmark (the theme
+    /// trio mirrors the Appearance pane's segmented control — three mutually
+    /// exclusive states, not three independent toggles).
+    #[serde(default)]
+    pub radio: bool,
+    /// Section break. The sidebar panes group their rows (Import/Scan/Storage,
+    /// Sizes/Theme); the Global Menu says the same structure with separators.
+    /// Separators are never enabled, never carry a label that renders.
+    #[serde(default)]
+    pub separator: bool,
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -34,8 +44,18 @@ pub struct MenuState {
     pub playing: Option<bool>,
     pub has_track: bool,
     pub scanning: bool,
-    pub any_staged: bool,
-    pub theme_dark: bool,
+    /// Staged ALBUMS (the sidebar counts them the same way); the manage-imports
+    /// row gates on >0 and shows the count. Replaces `anyStaged` 2026-09-03 so
+    /// the menu row can say what the sidebar door says.
+    #[serde(default)]
+    pub staged_count: i32,
+    /// The MODE ("light" | "dark" | "system"), not the resolved theme — a
+    /// bool flattened the 3-state segmented control into a toggle and made
+    /// `system` unreachable from the menu (parked 2026-08-31, this pass).
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default)]
+    pub playbar_gradient: bool,
     /// Shuffle stage: off/album/artist/all (Step 5a).
     #[serde(default)]
     pub shuffle: String,
@@ -54,14 +74,19 @@ fn default_eq_preset() -> String {
     "Flat".into()
 }
 
+fn default_theme() -> String {
+    "system".into()
+}
+
 impl Default for MenuState {
     fn default() -> Self {
         Self {
             playing: None,
             has_track: false,
             scanning: false,
-            any_staged: false,
-            theme_dark: true,
+            staged_count: 0,
+            theme: default_theme(),
+            playbar_gradient: false,
             shuffle: "off".into(),
             repeat: "off".into(),
             eq_enabled: false,
@@ -87,12 +112,33 @@ pub fn build() -> Vec<Menu> {
         label: label.to_string(),
         enabled,
         checked,
+        radio: false,
+        separator: false,
+    };
+    let radio = |id: &str, label: &str, checked: bool| MenuItem {
+        id: id.to_string(),
+        label: label.to_string(),
+        enabled: true,
+        checked: Some(checked),
+        radio: true,
+        separator: false,
+    };
+    let sep = || MenuItem {
+        id: String::new(),
+        label: String::new(),
+        enabled: false,
+        checked: None,
+        radio: false,
+        separator: true,
     };
     vec![
         Menu {
             id: "playback".into(),
             label: "Playback".into(),
             items: vec![
+                // Transport: the Global Menu's unique value here — the
+                // sidebar pane dropped these rows because the PlayBar owns
+                // them in-window; out-of-window this menu IS the transport.
                 item(
                     "playback.play-pause",
                     if s.playing == Some(true) { "Pause" } else { "Play" },
@@ -104,8 +150,23 @@ pub fn build() -> Vec<Menu> {
                 item("playback.next", "Next", s.has_track, None),
                 item("playback.album-prev", "Previous album", s.has_track, None),
                 item("playback.album-next", "Next album", s.has_track, None),
+                sep(),
                 // Cycling stage items (click advances to the next stage);
-                // checkmark = stage active. Frontend owns the cycling.
+                // checkmark = stage active. Frontend owns the cycling. Order
+                // mirrors the sidebar pane (Repeat, Shuffle, Equalizer).
+                item(
+                    "playback.repeat",
+                    &format!(
+                        "Repeat: {}",
+                        match s.repeat.as_str() {
+                            "album" => "Album",
+                            "track" => "Track",
+                            _ => "Off",
+                        }
+                    ),
+                    true,
+                    Some(s.repeat != "off"),
+                ),
                 item(
                     "playback.shuffle",
                     &format!(
@@ -120,21 +181,11 @@ pub fn build() -> Vec<Menu> {
                     true,
                     Some(s.shuffle != "off"),
                 ),
-                item(
-                    "playback.repeat",
-                    &format!(
-                        "Repeat: {}",
-                        match s.repeat.as_str() {
-                            "album" => "Album",
-                            "track" => "Track",
-                            _ => "Off",
-                        }
-                    ),
-                    true,
-                    Some(s.repeat != "off"),
-                ),
-                // Equalizer (Step 6): enable toggle, cycling preset picker,
-                // and an item that opens the playbar popover (frontend).
+                sep(),
+                // Equalizer: enable toggle, cycling preset picker, and an
+                // item that opens the playbar popover (frontend) — the
+                // preamp/band sliders have no menu form and live only in
+                // the popover/pane (user decision 2026-09-03).
                 item(
                     "playback.eq",
                     &format!("Equalizer: {}", if s.eq_enabled { "On" } else { "Off" }),
@@ -148,12 +199,25 @@ pub fn build() -> Vec<Menu> {
                     None,
                 ),
                 item("playback.eq-customize", "Customize Equalizer…", true, None),
+                sep(),
+                // Footer actions mirror the sidebar panes' footers.
+                item("playback.reset", "Reset playback", true, None),
             ],
         },
         Menu {
             id: "library".into(),
             label: "Library".into(),
             items: vec![
+                // Sections mirror the sidebar's Library pane: Import | Scan | Storage.
+                item("library.add-files", "Import music files…", !s.scanning, None),
+                item("library.add-folder", "Import music folder…", !s.scanning, None),
+                item(
+                    "library.manage-imports",
+                    "Manage imported music…",
+                    !s.scanning && s.staged_count > 0,
+                    None,
+                ),
+                sep(),
                 item(
                     "library.rescan",
                     if s.scanning { "Scanning…" } else { "Scan for changes" },
@@ -161,26 +225,33 @@ pub fn build() -> Vec<Menu> {
                     None,
                 ),
                 item("library.rescan-full", "Re-read all files", !s.scanning, None),
-                item("library.add-files", "Import music files…", !s.scanning, None),
-                item("library.add-folder", "Import music folder…", !s.scanning, None),
-                item(
-                    "library.save-imports",
-                    "Save imported music",
-                    !s.scanning && s.any_staged,
-                    None,
-                ),
+                sep(),
                 item("library.choose-folder", "Music folders…", true, None),
             ],
         },
         Menu {
-            id: "view".into(),
-            label: "View".into(),
-            items: vec![item(
-                "view.theme",
-                "Dark theme",
-                true,
-                Some(s.theme_dark),
-            )],
+            // Renamed from "View": the sidebar calls this pane Appearance
+            // and the two surfaces say the same words now. The size sliders
+            // stay in-window only; "More appearance settings…" walks the
+            // user to them (user decision 2026-09-03).
+            id: "appearance".into(),
+            label: "Appearance".into(),
+            items: vec![
+                radio("appearance.theme-system", "Theme: System", s.theme == "system"),
+                radio("appearance.theme-light", "Theme: Light", s.theme == "light"),
+                radio("appearance.theme-dark", "Theme: Dark", s.theme == "dark"),
+                sep(),
+                item(
+                    "appearance.playbar-gradient",
+                    "Playbar artwork gradient",
+                    true,
+                    Some(s.playbar_gradient),
+                ),
+                item("appearance.accent", "Accent color…", true, None),
+                sep(),
+                item("appearance.more", "More appearance settings…", true, None),
+                item("appearance.reset", "Reset appearance", true, None),
+            ],
         },
         Menu {
             id: "help".into(),
@@ -225,89 +296,172 @@ pub async fn activate(id: &str, engine: &crate::mpv::Mpv) -> bool {
 mod tests {
     use super::*;
 
+    fn find<'a>(menus: &'a [Menu], menu_id: &str, item_id: &str) -> &'a MenuItem {
+        menus
+            .iter()
+            .find(|m| m.id == menu_id)
+            .unwrap_or_else(|| panic!("no menu {menu_id}"))
+            .items
+            .iter()
+            .find(|i| i.id == item_id)
+            .unwrap_or_else(|| panic!("no item {item_id}"))
+    }
+
+    fn n_seps(menus: &[Menu], menu_id: &str) -> usize {
+        menus
+            .iter()
+            .find(|m| m.id == menu_id)
+            .unwrap()
+            .items
+            .iter()
+            .filter(|i| i.separator)
+            .count()
+    }
+
     #[test]
     fn play_pause_label_follows_state() {
         set_state(MenuState::default());
         let menus = build();
-        let playback = menus.iter().find(|m| m.id == "playback").unwrap();
-        assert_eq!(playback.items[0].label, "Play");
-        assert!(!playback.items[0].enabled);
+        let play = find(&menus, "playback", "playback.play-pause");
+        assert_eq!(play.label, "Play");
+        assert!(!play.enabled);
 
         set_state(MenuState {
             playing: Some(true),
             has_track: true,
             ..MenuState::default()
         });
-        let playback = build().into_iter().find(|m| m.id == "playback").unwrap();
-        assert_eq!(playback.items[0].label, "Pause");
-        assert!(playback.items[0].enabled);
-        assert!(playback.items[1].enabled); // Stop
+        let menus = build();
+        assert_eq!(find(&menus, "playback", "playback.play-pause").label, "Pause");
+        assert!(find(&menus, "playback", "playback.play-pause").enabled);
+        assert!(find(&menus, "playback", "playback.stop").enabled);
     }
 
     #[test]
     fn library_items_gate_on_scan_and_staging() {
         set_state(MenuState {
             scanning: true,
-            any_staged: true,
+            staged_count: 2,
             ..MenuState::default()
         });
-        let library = build().into_iter().find(|m| m.id == "library").unwrap();
-        assert_eq!(library.items[0].label, "Scanning…");
-        assert!(!library.items[0].enabled);
-        assert!(!library.items[1].enabled, "full rescan disabled while scanning");
-        assert!(!library.items[4].enabled); // save-imports disabled while scanning
+        let menus = build();
+        assert_eq!(find(&menus, "library", "library.rescan").label, "Scanning…");
+        assert!(!find(&menus, "library", "library.rescan").enabled);
+        assert!(!find(&menus, "library", "library.rescan-full").enabled);
+        assert!(!find(&menus, "library", "library.add-files").enabled);
+        // Manage-imports follows the sidebar door: gated on the pile AND
+        // dead while a scan runs (the sidebar disables it on scanner.running).
+        assert!(!find(&menus, "library", "library.manage-imports").enabled);
 
         set_state(MenuState {
             scanning: false,
-            any_staged: true,
+            staged_count: 3,
             ..MenuState::default()
         });
-        let library = build().into_iter().find(|m| m.id == "library").unwrap();
-        assert!(library.items[4].enabled);
+        let menus = build();
+        let manage = find(&menus, "library", "library.manage-imports");
+        assert!(manage.enabled);
+        assert_eq!(manage.label, "Manage imported music…", "no count in the label (owner, 2026-09-03)");
 
         set_state(MenuState::default());
-        let library = build().into_iter().find(|m| m.id == "library").unwrap();
-        assert!(!library.items[4].enabled); // nothing staged
+        let menus = build();
+        let manage = find(&menus, "library", "library.manage-imports");
+        assert!(!manage.enabled, "nothing staged → dead row");
+        assert_eq!(manage.label, "Manage imported music…");
     }
 
     #[test]
-    fn theme_item_is_checkable() {
+    fn theme_is_three_radios_following_the_mode_not_the_resolution() {
+        // Default is `system` (the app's default mode) — the old bool could
+        // not express this state at all.
+        let menus = build();
+        assert_eq!(
+            find(&menus, "appearance", "appearance.theme-system").checked,
+            Some(true)
+        );
+        assert_eq!(
+            find(&menus, "appearance", "appearance.theme-dark").checked,
+            Some(false)
+        );
+        assert!(find(&menus, "appearance", "appearance.theme-system").radio);
+        // Exactly one checked in every mode.
+        for mode in ["light", "dark", "system"] {
+            set_state(MenuState {
+                theme: mode.into(),
+                ..MenuState::default()
+            });
+            let menus = build();
+            let appearance = menus.iter().find(|m| m.id == "appearance").unwrap();
+            let on = appearance
+                .items
+                .iter()
+                .filter(|i| i.radio && i.checked == Some(true))
+                .count();
+            assert_eq!(on, 1, "radio group reports exactly one mode: {mode}");
+        }
+    }
+
+    #[test]
+    fn sections_mirror_the_sidebar_panes() {
+        // Playback: transport | modes | equalizer | reset → 3 breaks.
+        // Library: import | scan | storage → 2 breaks.
+        // Appearance: theme | playbar+accent | more+reset → 2 breaks.
+        set_state(MenuState::default());
+        let menus = build();
+        assert_eq!(n_seps(&menus, "playback"), 3);
+        assert_eq!(n_seps(&menus, "library"), 2);
+        assert_eq!(n_seps(&menus, "appearance"), 2);
+        assert_eq!(n_seps(&menus, "help"), 0);
+        // Separators are never activatable, whatever a consumer sends them.
+        let menus = build();
+        let s = menus
+            .iter()
+            .find(|m| m.id == "library")
+            .unwrap()
+            .items
+            .iter()
+            .find(|i| i.separator)
+            .unwrap();
+        assert!(!s.enabled);
+        assert_eq!(s.checked, None);
+    }
+
+    #[test]
+    fn playbar_gradient_toggle_follows_state() {
         set_state(MenuState {
-            theme_dark: false,
+            playbar_gradient: true,
             ..MenuState::default()
         });
-        let view = build().into_iter().find(|m| m.id == "view").unwrap();
-        assert_eq!(view.items[0].checked, Some(false));
+        let menus = build();
+        assert_eq!(
+            find(&menus, "appearance", "appearance.playbar-gradient").checked,
+            Some(true)
+        );
     }
 
     #[test]
     fn eq_items_follow_state() {
         set_state(MenuState::default());
-        let playback = build().into_iter().find(|m| m.id == "playback").unwrap();
-        // Last three items = the EQ group.
-        let n = playback.items.len();
-        assert!(n >= 3);
-        let eq = &playback.items[n - 3];
-        let preset = &playback.items[n - 2];
-        let customize = &playback.items[n - 1];
-        assert_eq!(eq.label, "Equalizer: Off");
-        assert_eq!(eq.checked, Some(false));
-        assert_eq!(preset.label, "EQ Preset: Flat");
-        assert!(!preset.enabled, "preset picker gated on enabled");
-        assert_eq!(customize.label, "Customize Equalizer…");
-        assert!(customize.enabled, "customize always reachable");
+        let menus = build();
+        assert_eq!(find(&menus, "playback", "playback.eq").label, "Equalizer: Off");
+        assert_eq!(find(&menus, "playback", "playback.eq").checked, Some(false));
+        assert_eq!(find(&menus, "playback", "playback.eq-preset").label, "EQ Preset: Flat");
+        assert!(!find(&menus, "playback", "playback.eq-preset").enabled, "preset picker gated on enabled");
+        assert_eq!(
+            find(&menus, "playback", "playback.eq-customize").label,
+            "Customize Equalizer…"
+        );
+        assert!(find(&menus, "playback", "playback.eq-customize").enabled, "customize always reachable");
 
         set_state(MenuState {
             eq_enabled: true,
             eq_preset: "Rock".into(),
             ..MenuState::default()
         });
-        let playback = build().into_iter().find(|m| m.id == "playback").unwrap();
-        let eq = &playback.items[playback.items.len() - 3];
-        let preset = &playback.items[playback.items.len() - 2];
-        assert_eq!(eq.label, "Equalizer: On");
-        assert_eq!(eq.checked, Some(true));
-        assert_eq!(preset.label, "EQ Preset: Rock");
-        assert!(preset.enabled);
+        let menus = build();
+        assert_eq!(find(&menus, "playback", "playback.eq").label, "Equalizer: On");
+        assert_eq!(find(&menus, "playback", "playback.eq").checked, Some(true));
+        assert_eq!(find(&menus, "playback", "playback.eq-preset").label, "EQ Preset: Rock");
+        assert!(find(&menus, "playback", "playback.eq-preset").enabled);
     }
 }

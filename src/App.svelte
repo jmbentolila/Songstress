@@ -26,7 +26,9 @@
   void initMenu();
 
   // Keep the Rust-owned menu model's dynamic bits (playing/scanning/staged/
-  // theme) in sync so the Global Menu re-render.
+  // theme/gradient) in sync so the Global Menu re-render. The MODE (ui.theme),
+  // not resolvedTheme() — the menu radios report which mode you picked,
+  // including "system" (2026-09-03 Global Menu pass).
   $effect(() => {
     void playback.current;
     void playback.isPlaying;
@@ -34,7 +36,8 @@
     void playback.eq.preset;
     void scanner.running;
     void library.albums.length;
-    void resolvedTheme();
+    void ui.theme;
+    void ui.playbarGradient;
     pushMenuState();
   });
 

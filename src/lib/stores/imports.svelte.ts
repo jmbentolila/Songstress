@@ -23,6 +23,10 @@ export const imports = $state({
   /** albumId → the decision the user has marked. Unset means undecided. */
   decisions: {} as Record<string, Decision>,
   expanded: {} as Record<string, boolean>,
+  /** The album a door opened this window AT (badge, album menu): the modal
+   * expands that row, scrolls it into view, and flashes it once. Consumed
+   * by the modal, never survives a close. */
+  focus: null as string | null,
   applying: false,
   /** Ops finished / ops marked, for the footer's arc. */
   done: 0,
@@ -59,7 +63,7 @@ export async function refreshImportPlan(): Promise<void> {
   }
 }
 
-export async function openImportManager(): Promise<void> {
+export async function openImportManager(focusAlbumId?: string): Promise<void> {
   // Fetch, THEN open. The plan used to arrive a frame or two AFTER the window, which
   // means the modal mounted showing the PREVIOUS pile and re-filled while it was still
   // animating in — a surface that changes height during its own entrance is not a
@@ -81,11 +85,22 @@ export async function openImportManager(): Promise<void> {
   //   more       → all collapsed, and the caret is there to be asked.
   imports.expanded = {};
   if (imports.plan.length === 1) imports.expanded[imports.plan[0].albumId] = true;
+  // A door that names an album (the panel's Imported badge, an album menu)
+  // is asking about THAT album: its row opens even inside a tall pile, and
+  // the modal flashes it once (ManageImports consumes `focus`). Focus is
+  // additive — the shape of the window is still a function of the pile.
+  if (focusAlbumId && imports.plan.some((a) => a.albumId === focusAlbumId)) {
+    imports.expanded[focusAlbumId] = true;
+    imports.focus = focusAlbumId;
+  } else {
+    imports.focus = null;
+  }
   imports.open = true;
 }
 
 export function closeImportManager(): void {
   imports.open = false;
+  imports.focus = null;
   imports.report = null;
   imports.applied = null;
   imports.applying = false;

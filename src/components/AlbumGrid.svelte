@@ -9,6 +9,7 @@
   import { scanner } from "../lib/stores/scanner.svelte";
   import { albumTitleMatches, albumTrackMatches, fold } from "../lib/search";
   import type { Album } from "../lib/types";
+  import { openAlbumMenu } from "../lib/albumMenu";
   import ExpandedPanel from "./ExpandedPanel.svelte";
   import EmptyState from "./EmptyState.svelte";
   import GridSkeleton from "./GridSkeleton.svelte";
@@ -507,6 +508,7 @@
                   data-album-id={album.id}
                   data-section={section.key}
                   onclick={() => toggleExpand(album.id, section.key === "songs" ? "songs" : "albums")}
+                  oncontextmenu={(e) => openAlbumMenu(e, album.id)}
                 >
                   <span class="cover" class:ring={playingAlbum}>
                     {#if album.cover}

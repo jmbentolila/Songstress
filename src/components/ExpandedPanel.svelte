@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import type { Album, Track } from "../lib/types";
-  import { library } from "../lib/stores/library.svelte";
+  import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
   import { extractArtColors } from "../lib/artColors";
   import { artGradient, gradientFromColors } from "../lib/gradient";
@@ -8,6 +9,7 @@
   import {
     openContextMenu,
     contextMenu,
+    SEP,
     type MenuItem,
   } from "../lib/stores/contextMenu.svelte";
   import {
@@ -15,8 +17,9 @@
     discardImports,
     locateMissingTrack,
     removeTrack,
-    removeMissingTracks,
   } from "../lib/stores/scanner.svelte";
+  import { openAlbumMenu } from "../lib/albumMenu";
+  import { openImportManager } from "../lib/stores/imports.svelte";
 
   let {
     album,
@@ -66,35 +69,51 @@
   }
 
   function albumMenu(e: MouseEvent, albumId: string) {
-    e.preventDefault();
-    const items: MenuItem[] = [
-      { label: "Edit album tags…", action: () => (ui.tagEditor = { open: true, albumId, trackId: null }) },
-      { label: "Play album next", action: () => void queueTracks(library.tracksOf(albumId).filter((t) => !t.missing).map((t) => t.id), true) },
-    ];
-    const album = library.albums.find((a) => a.id === albumId);
-    if (album?.staged) {
-      items.push(
-        { label: "Save to library", action: () => void saveImports(albumId) },
-        { label: "Discard import", action: () => void discardImports(albumId) },
-      );
-    }
-    if (library.tracksOf(albumId).some((t) => t.missing)) {
-      items.push({
-        label: "Remove missing tracks",
-        action: () => void removeMissingTracks(albumId),
-      });
-    }
-    openContextMenu(e.clientX, e.clientY, items);
+    // One builder (lib/albumMenu) for the grid tile and this header, so the
+    // two album doors can't drift.
+    openAlbumMenu(e, albumId);
   }
 
   function trackMenu(e: MouseEvent, track: Track) {
     e.preventDefault();
     e.stopPropagation();
+    // Right-click selects, like every file browser on the planet: the menu
+    // acts on "what you pointed at", and the keyboard verbs that read the
+    // selection (Delete = discard/remove, Enter = play) come alive on the
+    // row you just looked at instead of whichever one a left-click last
+    // touched (owner request, 2026-09-03).
+    selectedId = track.id;
     const items: MenuItem[] = [
       { label: "Edit tags…", action: () => (ui.tagEditor = { open: true, albumId: null, trackId: track.id }) },
+      SEP,
+      // Three playback verbs, in the order of commitment: NOW interrupts
+      // (starts the album AT this track, same index base as row click —
+      // allTracks, not the search-filtered view), NEXT inserts before
+      // whatever is queued, ADD joins the back. (owner request 2026-09-03;
+      // "Play next" was previously the top row of this section.)
+      {
+        label: "Play now",
+        action: () => void playTrack(track.albumId, indexById.get(track.id) ?? 0),
+      },
       { label: "Play next", action: () => void queueTracks([track.id], true) },
       { label: "Add to queue", action: () => void queueTracks([track.id], false) },
+      SEP,
+      // Same door as the album menu's row — Rust-side path resolution,
+      // dolphin --select. Fake-library dev mode has no DB rows, so the
+      // row only exists where it can actually act.
+      ...(LIVE_LIBRARY
+        ? [
+            {
+              label: "Open containing folder",
+              action: () =>
+                void invoke("reveal_container", { trackId: track.id }).catch((e) =>
+                  console.error(e),
+                ),
+            },
+          ]
+        : []),
     ];
+    if (track.staged || track.missing) items.push(SEP);
     if (track.staged) {
       items.push(
         { label: "Save to library", action: () => void saveImports(undefined, track.id) },
@@ -438,7 +457,17 @@
             <div class="title-row">
               <h2>{displayAlbum.title}</h2>
               {#if displayAlbum.staged}
-                <span class="staged-badge" title="Not saved to the library folder yet">Imported</span>
+                <!-- Not a label any more, a door: it opens the import modal AT
+                     this album (expand, scroll, flash) — the same decision home
+                     the sidebar's manage row points at, because the destination
+                     is what the decision is about and only the modal states it.
+                     The grid tile's corner badge stays a label: it lives inside
+                     the tile's own button. -->
+                <button
+                  class="staged-badge"
+                  title="Not saved to the library folder yet — open the import list"
+                  onclick={() => void openImportManager(displayAlbum.id)}
+                >Imported</button>
               {/if}
               <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
               <button
@@ -661,6 +690,9 @@
   /* "Imported" marker for albums with staged (not yet saved) files. */
   .staged-badge {
     flex: none;
+    /* A button now (it opens the modal): reset the UA chrome, keep the pill. */
+    font: inherit;
+    cursor: pointer;
     padding: 3px 9px;
     border: 1px solid var(--border);
     border-radius: 999px;
@@ -670,6 +702,16 @@
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
+  }
+
+  /* Respond on hover/press like every other control — the pill answers
+     because it does something now. */
+  .staged-badge:hover {
+    border-color: var(--accent);
+  }
+
+  .staged-badge:active {
+    transform: scale(0.96);
   }
 
   .play-all {

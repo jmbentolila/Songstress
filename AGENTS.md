@@ -236,6 +236,14 @@ public/covers/            album art for the fake library (real folder.jpg files)
   attribute values need a template literal: ``style:transform={`scaleX(${pct/100})`}``.
   The tell (this is how EmptyState's first-scan bar sat still for whole scans):
   the counter *text* next to it is right, `style` is `""`, console says nothing.
+- **A `$derived` that early-returns on a plain `let` never wakes up.** Svelte 5
+  tracks only what a derived body ACTUALLY reads before it returns. A blast-
+  radius derived opened with `if (!snapshot) return null` where `snapshot` was
+  a plain script `let` — first pass (before the load finished) early-returned,
+  so `touched`/`census` were never registered as dependencies, and the derived
+  stayed null through every later edit. Symptom: every input is right, the
+  value is `null`, no error. The gate variable of a derived must be `$state`
+  (here: `snapshotJson = $state("")`), full stop.
 - **A class forwarded into a child component is unscoped.** `<SurfaceClose
   class="ab-close" />` puts the class on an element compiled in another file, so
   the parent's scoped rule `.ab-close { … }` is reported as *unused* and does

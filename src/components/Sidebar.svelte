@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { ui, resolvedTheme, openAbout } from "../lib/stores/ui.svelte";
-  import { library } from "../lib/stores/library.svelte";
+  import { ui, resolvedTheme, openAbout, resetAppearance } from "../lib/stores/ui.svelte";
+  import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
+  import { openContextMenu } from "../lib/stores/contextMenu.svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { ACCENT_PRESETS, accentVariants, hexToHsl } from "../lib/accent";
   import { menu, activateMenuItem } from "../lib/stores/menu.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
@@ -26,6 +28,7 @@
     setShuffleOn,
     setRepeatStage,
     setRepeatOn,
+    resetPlayback,
   } from "../lib/stores/playback.svelte";
   import {
     EQ_BANDS,
@@ -109,8 +112,11 @@
 
   let rootPanes = $derived([
     { id: APPEARANCE, label: "Appearance" },
+    // "appearance" now EXISTS in the Rust model (renamed from "view" in the
+    // 2026-09-03 Global Menu pass) — it feeds the panel, not this root; the
+    // bespoke pane above is the sidebar's Appearance.
     ...menu.menus
-      .filter((m) => m.id !== "view" && m.id !== "help")
+      .filter((m) => m.id !== "appearance" && m.id !== "view" && m.id !== "help")
       .map((m) => ({ id: m.id, label: m.label })),
   ]);
 
@@ -124,9 +130,12 @@
     return (detailMenu?.items ?? []).filter(
       (i) =>
         !PLAYBACK_TRANSPORT.has(i.id) &&
-        // "Save imported music" exists only to act on staged imports —
+        // Section breaks belong to the panel's menu-bar shape; a drawer
+        // renders its groups as spaced sections, so separators don't pass.
+        !i.separator &&
+        // "Manage imported music" exists only to act on staged imports —
         // in the sidebar it hides instead of standing as a dead row.
-        !(i.id === "library.save-imports" && !i.enabled),
+        !(i.id === "library.manage-imports" && !i.enabled),
     );
   });
   let detailTitle = $derived(
@@ -222,27 +231,11 @@
   // The native color input needs a concrete value; presets leave it alone.
   let customHex = $state(ui.accentColor ?? "#ff6ec7");
 
-  // --- pane footers + the Appearance reset -------------------------------
+  // --- pane footers ----------------------------------------------------------
   // Each detail layer gets one dim footer row: an action where a real reset
-  // exists, a status line where it doesn't. The Appearance pane is where you
-  // can get stuck (theme/accent are one-way picks), so it gets the undo.
-  function resetAppearance() {
-    ui.tileSize = 180;
-    ui.sidebarRowSize = 36;
-    ui.theme = "system";
-    ui.accentColor = null;
-    ui.playbarGradient = false; // the pane's other visible control; reset means reset
-  }
-  // Footer resets the pane's THREE subjects, not just the equalizer — a button
-  // under Repeat/Shuffle/Equalizer that only touched the third one lied about
-  // its scope (user decision, 2026-08-31).
-  function resetPlayback() {
-    setRepeatOn(false);
-    setShuffleOn(false);
-    setEqEnabled(false);
-    applyEqPreset("Flat");
-    setEqPreamp(0);
-  }
+  // exists, a status line where it doesn't. The resets themselves moved to
+  // the stores (2026-09-03) so the Global Menu's footer rows call the SAME
+  // code — the two surfaces can't drift on what "reset" means.
   let libStats = $derived(
     `${library.albums.length.toLocaleString()} albums · ${library.trackCount.toLocaleString()} tracks`,
   );
@@ -476,6 +469,18 @@
     return m;
   });
 
+  // artistId → albums awaiting import. Drives the accent dot on the row's
+  // count: the staged pile is a decision pending, and the artist list is
+  // where you learn an artist EXISTS — the indicator belongs there, not
+  // only on the album's own tile.
+  const stagedCounts = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const a of library.albums) {
+      if (a.staged) m.set(a.artistId, (m.get(a.artistId) ?? 0) + 1);
+    }
+    return m;
+  });
+
   // One field drives both surfaces: the artist list here and the
   // Songs/Albums sections in the grid. Diacritic-insensitive via fold()
   // — same matching rule as the grid ("bjork" finds Björk in both).
@@ -491,6 +496,28 @@
     ui.expandedAlbum.songs = null;
     ui.expandedAlbum.albums = null;
     ui.search = "";
+  }
+
+  // Right-click an artist → the same context menu as tiles/rows (shared
+  // component ⇒ identical scroll/blur/focus dismissal). One item only: an
+  // artist has no tags of its own to edit and no single thing to play. The
+  // folder Rust derives is the DEEPEST one holding all of the artist's files
+  // (lib.rs container_target), so a one-album artist lands on the album
+  // folder and a scattered one on the shared parent. Fake-library dev mode
+  // has no DB rows, so the menu only appears where it can act.
+  function artistMenu(e: MouseEvent, artistId: string) {
+    if (!LIVE_LIBRARY || !library.live) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openContextMenu(e.clientX, e.clientY, [
+      {
+        label: "Open containing folder",
+        action: () =>
+          void invoke("reveal_container", { artistId }).catch((err) =>
+            console.error(err),
+          ),
+      },
+    ]);
   }
 
   type Kind = "X" | "I" | "A";
@@ -678,9 +705,17 @@
             class:active={ui.activeArtistId === artist.id}
             style:height="var(--sidebar-row-size)"
             onclick={() => select(artist.id)}
+            oncontextmenu={(e) => artistMenu(e, artist.id)}
           >
             <span class="name">{artist.name}</span>
-            <span class="count">{albumCounts.get(artist.id) ?? 0}</span>
+            <span
+              class="count"
+              class:pending={stagedCounts.has(artist.id)}
+              title={stagedCounts.has(artist.id)
+                ? `${albumCounts.get(artist.id) ?? 0} albums — ${stagedCounts.get(artist.id)} awaiting import`
+                : undefined}
+              >{albumCounts.get(artist.id) ?? 0}</span
+            >
           </button>
         {/each}
         {#if loading}
@@ -1640,6 +1675,21 @@
     font-size: 11px;
     color: var(--text-dim);
     flex: none;
+  }
+
+  /* The pending-import dot: the accent dot is this app's "a decision lives
+     here" mark (same tier as the mode-button badge). Trailing so the COUNT
+     keeps its column alignment; the dot grows to the right where nothing
+     is measured. */
+  .count.pending::after {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-left: 5px;
+    vertical-align: middle;
   }
 
   /* The artist list's placeholder. `.sk-row` copies `.row`'s box exactly — same

@@ -56,6 +56,10 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Loading skeletons: grid + artist list, no scan bar in the stage | ✅ 2026-09-02 · **0.8.0** |
 | Failed scans always emit their reason + the empty state renders it | ✅ 2026-09-02 · **0.8.0** |
 | Arrival entrance: list cascades, grid unfolds on its diagonal | ✅ 2026-09-02 · **0.8.0** |
+| Playbar volume slider: glass styling, native chrome gone | ✅ 2026-09-03 · **0.9.0** |
+| Global Menu rebuild: the broadcast mirrors the panes | ✅ 2026-09-03 · **0.9.0** |
+| Context-menu pass: one album-menu builder, `reveal_container`, artist pending dot | ✅ 2026-09-03 · **0.9.0** |
+| Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D/E ⬜ |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -276,7 +280,8 @@ the upstream report.
 
 ### Explicitly deferred
 
-- Artwork editing in the tag editor (Step 1 decision).
+- Artwork editing in the tag editor (Step 1 decision). — specced 2026-09-03,
+  see **Tag Editor Redesign — working spec** at the end of this file.
 - Crossfade option — the eventual escape hatch for the Phase 3 audible seam
   at Epicus Furor→Emerald Sword (source-file MP3 encoder-padding estimation;
   not fixable app-side).
@@ -291,18 +296,13 @@ the upstream report.
   "Music folders…" (roots) keeps its name, and "Full Rescan (rebuild)" became
   "Full rescan (all files)". EmptyState's "Add music folder…" stays — it opens
   the ROOTS flow, where that name is the correct one.
-- **Global Menu: theme is 2-state there while the app has 3 modes** (parked
-  2026-08-31, user: "leave global menu for now, we'll be tweaking it later").
-  The Appearance pane now offers a Light | Dark | System segmented control, but
-  `menu.rs` still carries `theme_dark: bool` with one checkable "Dark theme"
-  item whose activation calls `cycleTheme()` — so from the menu bar a user can
-  reach dark and light but never back to `system`, and the checkmark reports
-  the RESOLVED theme, not the mode. When the Global Menu gets its pass: put
-  `theme: "light" | "dark" | "system"` in `MenuState` and render the View menu
-  either as three radio items (recommended — the whole pass-A finding was that
-  hiding a state is the bug) or as one cycling "Theme: …" item like
-  Shuffle/Repeat. Same pass should re-check every `pushMenuState()` field for
-  the same bool-vs-mode flattening.
+- ~~**Global Menu: theme is 2-state there while the app has 3 modes**~~ —
+  **resolved 2026-09-03** by the full Global Menu pass (see "The broadcast
+  mirrors the pane" at the end of this log): `MenuState.theme` is now the MODE,
+  the Appearance menu carries three radio items, and every `pushMenuState()`
+  field was re-checked for bool-vs-mode flattening (`stagedCount` carries the
+  sidebar door's count; `playbarGradient` joined the state; shuffle/repeat/eq
+  were already honest strings or true bools).
 
 ## Spec summary (from the brief)
 
@@ -2799,3 +2799,499 @@ preventing a jarring change — 251 covers otherwise teleport in over an empty g
 - **Landed:** all of 2026-09-02's loading work — harness, skeletons, scan-error
   emit, entrance — is one commit, **Version 0.8.0**. No RPM rebuilt (owner's call);
   the next `npm run tauri build` / RPM target will carry 0.8.0.
+
+## The playbar volume slider sheds its native chrome (2026-09-03)
+
+- User finding: at 100 the knob sat flush but a sliver of unfilled track stayed
+  visible to its right. The cause was shape, not math — `.volume input` was the last
+  natively-rendered range in the app (`appearance: auto` + `accent-color` only), and
+  WebKitGTK's native paint insets the thumb's travel inside a full-width track. The
+  settings panes had already solved this (glass slider: `appearance:none`, 4px rounded
+  track, value-sized `accent → hover` gradient, accent dot). The volume row gets the
+  same treatment, inline `style:background` gradient on `playback.volume` — at 100 the
+  fill is the whole box and there is no sliver to be. The seek bar is still native and
+  carries the same quirk at track end; deliberately not touched (owner's call pending).
+- **Gates:** check 0/0 · vitest 84/84 · build ok. No restart (hot-reloaded).
+
+## The broadcast mirrors the pane — Global Menu rebuild (2026-09-03)
+
+- The ask: bring `menu.rs` (which now feeds ONLY the Plasma Global Menu — every
+  sidebar pane is bespoke) up to date with what the sidebar actually offers, sections
+  and all. Owner decisions, all five: sliders stay in-window (with a door back),
+  manage-imports opens the modal, footer resets join, View renames to Appearance,
+  and the parked 3-state theme fix rides along.
+- **Separators are a model concept now.** `MenuItem` gains `separator` (and `radio`)
+  with serde defaults; `menu.rs::build()` emits breaks that mirror the panes' group
+  gaps — Playback: transport | repeat/shuffle | equalizer | reset (3), Library:
+  import | scan | storage (2), Appearance: theme | gradient+accent | more+reset (2).
+  `menu_dbus.rs` exports them as `type:"separator"` (visible, never enabled — a
+  stray Event hits the `!enabled` early-return), and checkables report
+  `toggle-type: "radio"` for the theme trio (KDE's importer degrades an ungrouped
+  radio to a checkable, so this is the safe way to say "mutually exclusive").
+- **`MenuState` de-flattened:** `themeDark: bool` → `theme: "light"|"dark"|"system"`
+  — the MODE, pushed from `ui.theme`, not `resolvedTheme()`; the App.svelte effect
+  tracks the mode + `playbarGradient`. `anyStaged` → `stagedCount` (albums, same
+  reduce the sidebar door's tail uses — it gates the row; the owner declined
+  putting the count in the label, so the label stays static). Re-checked
+  the rest: shuffle/repeat/eq were already honest; playing's Option<bool> is a
+  genuine tri-state feeding a binary label, fine.
+- **New doors, same setters.** `appearance.more` / `appearance.accent` open the
+  sidebar stack at the Appearance pane / its accent sub layer (state-only —
+  `openSettingsLayer`; the window typically lacks keyboard focus when the panel is
+  clicked, so there is no focus to hand off). `library.manage-imports` mirrors the
+  sidebar's door into the modal; `library.save-imports` is gone from the model (the
+  modal owns Save/Discard now; ExpandedPanel's context menu keeps calling
+  `saveImports()` directly — that store function stays). `help.about` was a silent
+  no-op in the dispatcher (`() => {}`) — it now calls `openAbout()`; the null
+  opener fallback covers "no trigger element to restore focus to."
+- **Resets moved to the stores** (`resetAppearance` in ui.svelte.ts, `resetPlayback`
+  in playback.svelte.ts) — the footers and the Global Menu rows now call one
+  function each; "the two surfaces cannot drift" is the repo's own principle and
+  this was the drift. `cycleTheme` deleted (nothing cycles a tri-state when the
+  menu shows all three).
+- Sidebar fallout: `rootPanes` filter now also drops the Rust-owned `"appearance"`
+  (the constant and the menu id collide by design — `openDetail("appearance")`
+  renders the bespoke pane); `detailItems` filters separators out and renames its
+  save-imports clause to manage-imports. The generic irow fallback loop stays
+  correct-by-filtering even though no pane currently uses it.
+- Verified on the wire (dbus-send depth 2): all new labels present, 2 separators in
+  Library's export, `3× "radio" + 1× "checkmark"` in Appearance's. Two owner
+  corrections followed: manage-imports keeps its STATIC label (the count lives only
+  in the sidebar door's tail — the owner declined it in the menu row, so the test
+  now asserts no count), and `help.about` was a silent no-op in the dispatcher —
+  it now calls `openAbout()`. About-open verified end to end: a dbusmenu
+  `Event(400,"clicked",…)` brought `.ab` into the DOM (`true`), and `.ab-close`
+  took it back out (`false`). Note `menu_activate` is the Rust-native path for
+  playback ids only; `help.about` re-emits to the frontend as `menu-action`.
+- **Gates:** check 0/0 · vitest 84/84 · cargo --lib 83/83 (4 menu tests rewritten to
+  look items up by id — the positional-index tests were exactly what broke today;
+  new tests pin the separator counts, the one-checked radio invariant, and the
+  mode-not-resolution theme report) · build ok. Rust change → cargo rebuilt and the
+  app restarted (cost: one window drag).
+
+## Right-click everywhere: the context-menu pass (2026-09-03)
+
+- **Grid tiles got a menu.** Albums already had one on the expanded panel's
+  header; the tile was a dead right-click. Extracted ONE builder —
+  `src/lib/albumMenu.ts` — and both doors (tile, panel header) call it; what
+  used to be two hand-maintained copies is one list again, unable to drift
+  (same principle as the store-owned resets).
+- **"Open containing folder" — and paths never enter the webview.** New Rust
+  command `reveal_container(albumId | trackId | artistId)`: the menu says
+  WHICH row, the DB says WHERE. A track resolves to its FILE (`dolphin
+  --select` → folder open, file highlighted); an album to artwork's
+  `dominant_dir` (majority rule, multi-disc safe); an artist to the DEEPEST
+  folder holding all of its files (`common_parent`, component-wise — the
+  `/m/b` vs `/m/bee` string-prefix trap is pinned by a test). Vanished file →
+  parent dir; vanished dir → honest error; no dolphin → xdg-open. Verified
+  live on all three levels.
+- **Bug the artist work caught: the Dir demote.** The first cut branched on
+  `target.is_file()`, so an album (whose resolution is ALREADY a directory)
+  got demoted to its PARENT — revealing the artist folder above the album,
+  and looking plausible enough that the first live check missed it. The
+  resolver now returns `Container::File | Container::Dir` and only a FILE
+  target is ever demoted. The artist-level check doubles as the regression:
+  the same row now opens the album folder itself, not one above it.
+- **Separators are a context-menu concept too.** `MenuItem.separator` +
+  shared `SEP` (same vocabulary as the Rust Global Menu model); the renderer
+  draws an inset hairline and keys the each-block BY INDEX — SEP is one
+  shared object and Svelte's default identity keys would collide the moment
+  a menu holds two breaks. Album: Edit | playback pair | container | import-
+  state (the last break only when there IS an import state). Track: Edit |
+  play verbs | container.
+- **Playback pairs replace single verbs**: album `Play album next` became
+  `Play album` (first file that exists — a missing opener must not make the
+  row a dead click) + `Add album to queue` (front, the old behavior); tracks
+  got `Play now` above `Play next` / `Add to queue` — same
+  `playTrack(albumId, indexById)` call the row-click path uses, so the
+  search-filtered view cannot play the wrong offset.
+- **Right-click selects (tracks)**: the menu acts on what you pointed at,
+  and the keyboard verbs (Enter/Delete) come alive on that row. Artists
+  deliberately do NOT select on right-click — selecting (a heavy filter
+  change) just to look at a menu is a worse surprise than on a track row.
+- **Artist rows got the minimal menu** — one item (an artist has no tags of
+  its own and nothing singular to play). "All Artists" is left without one:
+  it's a control, not a folder, and "the container of all artists" is a
+  claim the row shouldn't silently make.
+- **Dismissal grew up**: the menu now dies on scroll (captured on the whole
+  document — the grid scrolls in its own container), `focusin` outside the
+  box (Tab walks away), and window `blur` (a panel-menu click sends no DOM
+  event; without blur the menu floats over a library you walked away from).
+  No open-time race: the opener's mousedown focus lands BEFORE the
+  contextmenu event registers the listeners.
+- **Dev-loop notes:** plain `.ts` module chains (albumMenu.ts, the stores)
+  can HMR half-dead — the menu kept rendering the pre-separator list until a
+  `location.reload()`; when a DOM probe contradicts a just-landed edit,
+  reload before debugging. Synthetic `blur`/`scroll` fired in the SAME tick
+  as the open missed the not-yet-attached listeners — dismiss probes need
+  open and the trigger in separate evals.
+- **The staged-album doors all point at the modal.** The album menu's direct
+  `Save to library`/`Discard import` became one `Manage imported music…`
+  opening the modal AT that album, and the expanded panel's `Imported` pill
+  became a BUTTON doing the same (the tile's corner badge stays a label — it
+  lives inside the tile's own button). `openImportManager(albumId?)` gained
+  the address: the row expands even in a tall pile, `scrollIntoView`s, and
+  wears a 1.6 s accent ring (`mi-attn`, driven by STATE — a classList string
+  is invisible to Svelte's CSS scanner and rightly warned). The focus flag
+  is consumed on read, and close clears it. Rationale is the repo's own:
+  the DESTINATION is what the decision is about, and only the modal states
+  it per album — a menu applying the move blind skipped the one fact the
+  user was deciding on.
+- **Gates:** cargo --lib 85/85 (new: artist arm of container_target,
+  common_parent incl. the string-prefix trap) · check 0/0 · vitest 84/84 ·
+  build ok. Rust change → cargo rebuilt → one more app restart (one more
+  window drag).
+
+### The pending-import dot on artist rows (2026-09-03, same pass)
+
+- An artist with staged albums now wears an accent dot after the count in
+  the sidebar list (`.count.pending::after`, the app's "a decision lives
+  here" tier, same badge language as the mode buttons), with a hover title
+  spelling the claim: "N albums — M awaiting import". Trailing placement so
+  the count keeps its column alignment. Derived once as `stagedCounts`
+  (artistId → staged albums) next to `albumCounts`. "All Artists" stays
+  undotted — the pile is the artist's story, and the Library pane already
+  owns the global number.
+- Probe note: the staged pile is a MOVEABLE target during a session — the
+  owner's own testing moved it off Aimer mid-verification, and the first
+  probe dutifully "failed" against a stale assumption. Dump the actual
+  state (every row's class + the staged tile's caption) before debugging a
+  "missing" indicator.
+
+## Tag Editor Redesign — working spec (2026-09-03, approved; phases A+B+C built, D–E remain)
+
+Agreed shape (owner + agent, one long design chat; every rule below is a
+decision, not a default). Two SEPARATE modals with deliberately different
+jobs — the album modal is a bulk surface (never a track list: a 300-track
+compilation makes any list a scroll-punishment), the track modal is a
+surgical one (plus a header stepper `◂ ▸` to walk the album's tracks: the
+listless way to fix five files without closing the window).
+
+### The promise (both modals)
+
+**Fields you did not touch are never written.** A field the user did not
+edit goes to no file, even if the modal "knows better". Corollaries: a
+disputed field left alone stays disputed (no silent flattening); the write
+set is files differing in ≥1 *touched* field; and the modal states its blast
+radius before Save — footer reads `writes 4 of 18 files · cover`. Bulk tools
+that hide their reach are scary tools. (This is the answer to MusicBee's
+apply-checkboxes, achieved at file-diff granularity without the checkbox
+clutter.)
+
+### Album modal
+
+- No track list, ever. One summary line: `18 files · 2 discs`.
+- **Disputed fields resolve for real**: the `•` expands to chips of the
+  competing values with counts (`Power Metal · 12   Progressive · 6`);
+  click to adopt, or type. Rust must return the VALUES (today
+  `get_album_tags` computes the disagreement and throws the values away):
+  `conflicts: {field: [{value, count}]}`.
+- Smart save: only touched fields, only differing files. Fewer mtime bumps,
+  fewer re-parses. Year/number fields validate (4-digit, integers) — inline
+  caution, not today's silent `junk → null → cleared`.
+
+### Track modal
+
+- All fields; shows the file's name and folder (you are editing a file;
+  say which) with a reveal affordance.
+- Album field: `datalist` of existing albums (same-album-artist first).
+  When the edit would retag the track into another album while the FILE
+  stays behind (non-pending tracks), a caution note says so — see Phase E.
+- Split `TagEditor.svelte` → `AlbumTagsEditor.svelte` + `TrackTagsEditor.svelte`
+  sharing one field-grid piece; the mode branches already fight in one file.
+
+### Artwork — a first-class field, chosen not uploaded (MusicBee's model)
+
+- Both modals carry an **artwork selector**: candidate tiles, deduplicated
+  by hash — every distinct embedded picture with its census (`in 18 files`)
+  and every folder-art file by name. The resolved cover wears the selection
+  ring; clicking a tile adjudicates. Track modal candidates include the
+  album's other files' pictures too ("pull the real cover onto this one
+  file" is a compilation-fixing verb). New images arrive via kdialog picker,
+  **Ctrl+V** (clipboard → base64 → IPC; WebKitGTK image-paste to be verified
+  early, disk picker is the fallback), or drag-drop on the strip.
+- **Selecting is an instruction**: album mode = every file ends up carrying
+  exactly the chosen picture (files already equal are untouched — that IS
+  "reflected on each track", stated honestly); the folder-art winner's bytes
+  are replaced in place, or `cover.jpg` is created in the album dir (app
+  wrote it ⇒ app owns it). A written file ends with EXACTLY the chosen
+  picture — stray extra embedded images are normalized away, MusicBee-style.
+  Unwritten files keep what they had. Track mode: same rule, one file.
+- **Remove** = nothing selected: embedded cleared everywhere, folder-art
+  winner DELETED (explicit instruction; the save receipt names it —
+  `removed folder.jpg`), imports' honesty rule extended.
+- Ripple: cover change forces re-extraction of THAT album's thumbs and panel
+  colors (`process_album` already does both) — the album re-tints live.
+  Needs: targeted `refresh_album(album_id)` (runs even when a cover exists;
+  `refresh()` today only processes cover-less albums) and **hashed thumb
+  URLs** (the `thumb://…/512.webp` URL has no cache-buster today).
+
+### Phase E — "Add to existing album…" (pending tracks only)
+
+Ground truth from `scan.rs`: album identity is `stable_id(artist, title,
+year)` + an adopt pass matching (artist, norm-title) — so same album-artist
++ same album title ⇒ the track is APPENDED even from another folder.
+Directory-authoritative only means a folder is never SPLIT, and folders are
+where files live. Therefore the picker is a *retag*, not a mover: retag →
+scan adopts the row → later Save moves the file home via `album_destination`
+("the album's own folder" = the existing album's). Library (non-pending)
+tracks get only the datalist retag — and it warns, because the file stays
+behind in a split-folder album; the clean-merge promise holds only for
+pending tracks, hence the gate. The door: searchable album picker (that
+artist's albums first), shows *"will become track 12 of 14"* with the next
+free number prefilled + editable, writes album/album_artist (and adopts the
+target's year — cosmetic hygiene; year cannot split a row, adopt matches on
+title alone).
+
+### Phases
+
+- **A — Rust**: conflicts-as-values; `ArtChange{Keep,Use(selector),Clear}` +
+  picture-diff in the write-set math; `list_art_candidates`; folder-art
+  write/delete; `refresh_album`; hashed thumb URLs; numeric validation.
+  Pure functions, tested (`cargo test --lib`).
+- **B — Album modal**: chips, summary + blast-radius line, artwork selector,
+  validation, save receipts.
+- **C — Track modal**: component split, stepper, per-file well with album
+  candidates, datalist + stays-behind caution, filename/reveal.
+- **D**: entrances/dismissal carry-over (scrim contract, vanish guards), copy.
+- **E**: the pending-track picker door.
+
+Status: **Phase A executed 2026-09-03** (cargo --lib 88/88, +3 tests:
+conflicts-as-values w/ counts & majority order, diff-aware write set incl.
+the honest zero-save, full artwork lifecycle upload→hash-adjudicate→
+folder-JPEG replace→inventory→clear→refresh_one cover-NULL). Landed shapes:
+`AlbumTags.conflicts`, `TouchedFields` (omitted = legacy all),
+`ArtChange keep/clear/hash/upload`, `SaveReport {written,total,receipt}`
+(receipts name the user's `folder.jpg` when replaced/removed),
+`get_art_candidates(albumId, trackId?)` → census + `thumb://art-<hash8>/
+256.webp` previews + `current`/`folderArt`/`trackPics`; cover URLs now
+`…/512-<hash8>.webp` (handler parses size before the dash, legacy URLs
+resolve); `artwork::refresh_one` re-extracts one album and NULLs the cover
+when nothing is left. Uploads: base64, sniffed-mime (never trusted), 25 MB
+cap, webp/gif/tiff embeddable (folder art always JPEG). One behavior the
+tests pinned: the inventory is the album's CURRENT truth — an adjudicated
+image replaces what it displaced, no history tiles.
+**Phase B executed 2026-09-03** — the album modal, `ArtSelector` and the
+lightbox went through three owner-feedback rounds; see the Phase B sections
+below for what actually landed. **Phase C executed 2026-09-03** (the track
+modal + the component split — see the Phase C section at the end of this log).
+Phase D (entrances/copy carry-over) and Phase E (pending-track picker) remain.
+
+## Tag Editor Redesign — Phase B: the album modal executes the spec (2026-09-03)
+
+- **`TagEditor.svelte` album mode rebuilt around the promise.** The census
+  (`get_album_tags.conflicts` + `fileCount`) drives everything: a summary
+  line (`13 files · 2 discs · folder.jpg ranks first`), dispute CHIPS under
+  each field showing the competing values with counts (click = adopt, on
+  press), and the footer's pre-save promise — `writes 13 of 13 files ·
+  cover`, "up to" when several fields contribute (the union across fields
+  is not exact without per-file rows; the receipt prints the exact truth).
+- **`ArtSelector.svelte`** (shared, album-scoped — track mode hosts it in
+  Phase C): candidate tiles with census labels, ring on the adjudicated
+  choice, three arrival doors — kdialog (`pick_image`), Ctrl+V (clipboard →
+  base64, magic-byte sniffed), and webview drag-drop (tauri's own drop
+  events, so no HTML5 path dance) — plus `Remove artwork` with its promise
+  line ("removed from every file and folder.jpg deleted"). Arrivals render
+  as data-URL tiles; the `+` tile is the honest empty state.
+- **The save switched from "stamp everything" to the real `touched` diff**
+  (computed against the load snapshot) and the live `ArtChange`; on success
+  the footer BECOMES the receipt: `Wrote 4 of 18 files` + the folder-art
+  lines named, Done focused, rescan refreshing behind it. The track branch
+  keeps its old exit (its blast radius is one file, stated by its own
+  existence). Validation moved in front: junk numbers never reach Save —
+  caution border + footer naming the offending fields.
+- **Gotcha paid (see AGENTS.md):** the blast derived gated on a plain `let
+  snapshot`, early-returned its first pass, and therefore never subscribed
+  to `touched` — null forever. Gate variables of deriveds must be `$state`.
+- Rust side of the phase: census now covers QUIET fields too (a single-value
+  field reports its count; a disputed one reports each) plus `fileCount`, and
+  `ArtCandidate.count` counts FILES only (`folder` names the file) with
+  `filesWithArt` on the inventory — every clause of the blast line is
+  computable client-side, and the tests pin it (88/88).
+- Verified live (DOM probes, no save against his library): summary line,
+  tiles render, edit genre → `writes 13 of 13 files`; gates: cargo 88/88 ·
+  check 0/0 · vitest 84/84 · build ok.
+- **Left in Phase B deliberately:** the receipt-after-save visual (probe-only
+  session did not write to his collection — it is exercised the first time
+  he saves), chips on a genuinely disputed album (his library is clean).
+
+### Phase B, second look — two columns, no per-file numbering in album mode (2026-09-03, owner feedback)
+
+- Album modal is now ONE row of two columns: artwork left (190px, candidates
+  STACKED as real previews — one or two images earn to be seen, not queued
+  in a strip), fields right on a single label+input rhythm. Panel 620→680px.
+  Track mode keeps the compact double-column grid (it has no artwork column
+  yet; Phase C decides its layout too).
+- **Track/disc numbering left the album editor entirely.** The numbers belong
+  to the files, and the album row inherits them; the hint line says so. The
+  fields are unrendered → never touched → never written (the promise needs
+  no special case); Rust keeps `track_total`/`disc_total` in the shared
+  struct for callers that still mean them.
+- Mechanism: a `{#snippet fields()}` rendered into either layout — one loop,
+  two containers, no duplication. Verified by geometry probe (art x=279 w=190,
+  grid x=487, `te-trackNo` absent, year present), check 0/0, build ok.
+
+### Phase B, third look — the artwork interaction contract (2026-09-03, owner feedback)
+
+- **Click an image → see the image.** Tiles expand into a lightbox (the
+  candidate's 512px preview — `ArtCandidate.full`, written beside the 256 at
+  first sight; originals stay in the files, not in a cache copy). The
+  lightbox carries the artwork verdicts in context: `Use as cover` when the
+  viewed one is not the cover, `Remove artwork` / `Keep artwork`.
+- **Choosing moved to a corner dot** on each tile (iOS photo-picker language:
+  the image opens, the dot decides) — keyboard reachable (role=checkbox,
+  Enter/Space), answers on press with a scale dip.
+- **Remove moved onto the image it dismisses**: a corner ✕ on the COVER tile
+  only (hover-revealed, caution on hover), and the header's text button is
+  gone. Removal of the chosen art is a property of the chosen art.
+- Escape is layered honestly: lightbox owns the first press (the parent sets
+  `artLb=false`; the selector's `$effect(!open → view=null)` is the single
+  close path), the dialog owns the second.
+- Summary line: the body gained a real top measure (18px) and 12px under —
+  a caption of the whole editor must not sit flush on the header's rule.
+- Probe-verified: expand → lightbox with the 512 URL, dot-select, Escape×1
+  closes only the lightbox. check 0/0 · cargo 88/88 · build ok.
+
+### Lightbox first-open sizing + Close weight (2026-09-03, owner feedback)
+
+- **The small-first expansion was a fallback lie, not a size decision.** The
+  thumb protocol's lenient chain (512→256→96) answered a 512 URL with 256
+  bytes and an IMMUTABLE cache label — so the first open of a cache written
+  before 512s existed served small, and only the next open (which writes the
+  real 512) corrected it. Artwork previews (`art-<hash>`) are now served
+  STRICTLY — the inventory advertises only sizes it writes, and a mismatch
+  must be visible (404), never papered over with wrong bytes under a
+  forever-cache header. Album covers keep the lenient chain (older albums
+  may legitimately lack a size until their next refresh). His stale dirs
+  already healed: every `art-*` cache holds both sizes now.
+- **Close is the primary button in the lightbox** — more often than not the
+  image stays. `Use as cover` steps down to an accented ghost (present,
+  colored, one weight below); `Remove artwork` stays plain.
+- cargo 88/88 · check 0/0 · build ok.
+- Round two on the lightbox image: the mislabeled response lived in **WebKit's
+  disk cache**, outliving restarts under `immutable`. The 512 URL is now
+  content-addressed (`512-<hash8>.webp` — the handler ignores the suffix;
+  physical files keep their plain names), so a lying cached response is
+  unreachable by construction and `immutable` is finally honest. Verified:
+  first expansion of the session, `naturalWidth = 512`. The lightbox Close
+  takes a solid accent fill (over the scrim, the panel's translucent wash
+  reads disabled — a primary must read primary everywhere).
+- Round three was the truth: the disk and protocol were innocent (every
+  `512.webp` verified 512×512) — the lightbox `img` had NO definite width
+  (`max-width: 100%` against an auto-width figure is a circular percentage),
+  so the first view — async decode, no intrinsic size yet — collapsed, and
+  every later view laid out from the cache-served decode. An img sized by
+  viewport math (`width: min(512px, 100vw-140px, 100vh-220px)`) is correct
+  before a single byte decodes. Probe on a cold-cache session: first
+  expansion renders at the full box. The general law: anything that fades
+  in with async media needs a definite box, never an intrinsic one.
+- Lightbox final form: 384px base (75% of before), the dim behind it at 0.70,
+  and the card carries the MODAL's own radius token with `overflow: hidden`
+  doing the clipping — an `img` may paint its replaced content over its own
+  border-radius on WebKitGTK, so the clip belongs on the card, not the image.
+  It is now a sibling card of the dialog: same radius, border, material.
+  Geometry probe: w=384, radius token honored, overflow hidden, scrim 0.7.
+- One-rhythm follow-up (owner): the buttons row sits 13px from the card's outer
+  bottom border (12 padding + the border's own pixel), so the image→row `gap`
+  went 12 → 13 — measured to the visible border, every side of the mat now
+  spaces its content identically. Probe: `gapImgRow:13, gapRowBottom:13`.
+
+## Tag Editor Redesign — Phase C: the track modal (2026-09-03)
+
+- **The split.** `TagEditor.svelte` is a dispatcher now (trackId → track
+  modal, albumId → album modal). The modal CONTRACT — backdrop, the
+  `.scrim > .glass` pair, the `scrim-out` outro, Escape ownership with the
+  lightbox veto, the focus trap, the `waiting` hold while fields load —
+  lives in `TagSurface.svelte`, with the shared footer family in a `.te-*`
+  namespaced global sheet (AGENTS.md: a class rendered across a file
+  boundary is unscoped). Field rendering lives in `FieldGrid.svelte` —
+  dispute chips, inline "of N" totals, the album datalist — driven by data,
+  not by mode branches. The field model, census types and numeric
+  validation moved to `lib/tagFields.ts`, the one file both editors agree
+  on so the pair cannot drift.
+- **The track modal** (`TrackTagsEditor.svelte`) is the surgical one:
+  - *Identity row*: the file's name, its folder `~`-shortened (full path as
+    the tooltip), and a reveal button — paths travel as DISPLAY strings
+    only, revealing stays `reveal_container`'s job. Rust: `tags::track_file`
+    + the `get_track_file` command (+1 test: name, album id, staged flag).
+  - *Header stepper* `◂ n/N ▸` walks the album in display order
+    (`library.tracksOf`, the panel's own order). It DISABLES while unsaved —
+    it will not eat your edits silently — and a track save STAYS OPEN
+    (footer reads `Written ✓`, the fields re-read from disk): that is what
+    the walk is for, five fixes without the window ever closing.
+  - *Retag door*: the Album field is a `datalist` of existing titles,
+    same-album-artist matches first.
+  - *Artwork is per-file*: the album's candidates, applied to this file
+    (`ArtSelector` with `trackId` — the seam Phase A/B already carried).
+- **The stays-behind caution**: retagging a LIBRARY (non-pending) file to a
+  different album/album-artist moves the row, not the file — the modal says
+  so in the caution hue and names the folder it stays in until an import.
+  The clean-merge door (Phase E's picker) remains the pending-only path.
+- **Same body as the album modal (owner ruling)**: the track modal wears the
+  SAME two-column shape — `.te-cols` (artwork column left, stacked real
+  previews, fields right in the single label+field rhythm). Only the APPLY
+  target differs: this file, not the album. `.te-cols` moved into
+  TagSurface's shared global sheet; `layout` on FieldGrid now selects ROWS
+  only, the grid SHAPE is one rhythm for both.
+- check 0/0 · vitest 84 · cargo 89/89 (+1) · build ok. Owner eyes the
+  track-editor walk next (window re-centered by the cargo restart).
+- Owner layout rulings, same day: (1) the track modal wears the SAME body
+  as the album modal — `.te-cols` moved into TagSurface's shared sheet, and
+  FieldGrid's `layout` selects ROWS only, the grid SHAPE is one rhythm;
+  (2) small fields share rows — the grid is four shared tracks
+  (label|field|label|field), one-field rows span the right side, and the
+  pairs are Genre+Year (both modals) and Track#+Disc# (track modal);
+  year/number inputs are fixed-width (`half`), "of N" totals capped at the
+  same measure; (3) same day — the four shared tracks reserved a full column
+  for a four-digit year, so pairs moved INSIDE the field cell (grid is back
+  to label|field): genre stretches and pushes Year to the edge, the number
+  pair packs left as one unit, and dispute chips render after the row's
+  inputs so a wide chip never wraps the pair onto its own line; (4) the disc
+  cell fills the row's remainder (split evenly, ends at the column edge);
+  paired labels keep the SAME label→field distance the column labels have
+  (grp label margin-right 4 → 10px total, probe: discGap/yearGap = 10);
+  (5) **"More tag fields" fold on the track modal** (owner ruling): the
+  rarely-touched Composer/Label/Grouping/Comment behind a disclosure row
+  (the row is the button, chevron the indicator, instant swap — the
+  ManageImports family), collapsed by default, and the header ACCOUNTS for
+  the fold: "N fields filled" / "edited" — hidden state never silent.
+  FieldGrid gained track-core/track-more layouts; the album modal keeps
+  every field visible (the census promise — disputed fields may not sleep
+  behind a fold).
+  (6) SAME EVENING, critique-driven (impeccable critique of both modals,
+  29→34/40; snapshots under .impeccable/critique/): the FIELD ORDER swapped
+  to Album→Album artist; small-field geometry became MEASURED, not guessed
+  (the grid observes the disc tail — label, box, "of", total — with one
+  ResizeObserver, borderBoxSize only: getBoundingClientRect reads the modal's
+  scale-in transform and pinned Year short; hidden "of" pairs claim no row
+  room and must not be summed; every term exact layout px or the label sits
+  0.12px adrift): the track modal's Year label stands under "Disc #" and its
+  box under the disc box, the year box filling the mirrored cluster; the
+  album modal's Genre|Year row is symmetric by the measured year-label width
+  (--b = half of column minus label minus 16px separations; .te-grp needs
+  border-box or the label margin inflates the set width). CORRIDOR: modal
+  content is centered — body pays the 11px scrollbar gutter on the left too
+  (overflow-y: scroll makes the gutter permanently REAL: WebKitGTK reserves
+  ZERO with stable+auto while content fits), head/footer carry 13px margins.
+  SELECTION dot filled with the KWin decoration green (--tb-a, live from
+  decoration.svelte.ts; accent fallback for the pre-token frame). SHARED
+  SURFACE additions in TagSurface: .te-topline (the promise line, first
+  under the rule in BOTH modals — the bulk surface must never scroll its
+  reassurance away), the .te-more fold family + slide transition (svelte/
+  transition, prefersReducedMotion.current → instant, Svelte 5.9's is a
+  reactive value, NOT a store, NOT callable), and the disclosure styles.
+  ALBUM MODAL: orphan "N files" caption → FOOTER identity caption ("13 files
+  associated to this album"; blast message takes the slot while dirty, same
+  slot semantics as the track modal's path), and the SAME fold for
+  Composer/Label/Grouping/Comment — with the census promise held: AUTO-OPENS
+  when a hidden field is disputed, keyed on the DISPUTED FLAG, not on
+  conflicts-membership (conflicts_for returns a census entry for EVERY
+  field — membership test sprang the fold on every album; found by the
+  second critique run's own probe). KEYBOARD (critique: Flexibility 2→3):
+  quickKey prop on the surface — Enter=Save in both doors (form convention
+  inside fields, native activation on buttons), ←/→ walk the track stepper
+  outside text fields only; step() dismisses the artwork lightbox (probe:
+  it lingered a caption behind a moved context). FOCUS: the surface captures
+  its opener and restores focus on close (guarded: detached context-menu
+  openers, body). ArtSelector hint tightened to "Click to enlarge · the dot
+  marks the cover."

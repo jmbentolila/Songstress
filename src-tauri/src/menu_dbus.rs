@@ -128,12 +128,28 @@ fn item_id(menu_idx: usize, item_idx: usize) -> i32 {
 
 fn item_props(item: &MenuItem) -> HashMap<String, OwnedValue> {
     let mut props = HashMap::new();
+    if item.separator {
+        // dbusmenu's section break: type=separator, no label. Kept
+        // visible but disabled so Event() ignores anything a consumer
+        // might send it (find_item → enabled==false → early return).
+        props.insert("type".into(), owned("separator".to_string()));
+        props.insert("enabled".into(), owned(false));
+        props.insert("visible".into(), owned(true));
+        return props;
+    }
     props.insert("label".into(), owned(item.label.clone()));
     props.insert("enabled".into(), owned(item.enabled));
     props.insert("visible".into(), owned(true));
     props.insert("type".into(), owned("standard".to_string()));
     if let Some(checked) = item.checked {
-        props.insert("toggle-type".into(), owned("checkmark".to_string()));
+        // "radio" for the theme trio (mutually exclusive modes, like the
+        // Appearance pane's segmented control); "checkmark" elsewhere.
+        // KDE's importer treats an ungrouped radio as a checkable item, so
+        // this degrades to a checkmark rather than breaking.
+        props.insert(
+            "toggle-type".into(),
+            owned(if item.radio { "radio" } else { "checkmark" }.to_string()),
+        );
         props.insert("toggle-state".into(), owned(if checked { 1 } else { 0 }));
     }
     props

@@ -17,8 +17,8 @@
   });
 
   // Focus returns to the opener (recorded by openAbout, which knows the trigger
-  // — by the time this component unmounts, the dialog's own autofocus has
-  // already moved activeElement inside). Runs on either dismissal path: the ✕,
+  // — by the time this component unmounts, the dialog's own focus has already
+  // moved activeElement inside). Runs on either dismissal path: the ✕,
   // Escape, or the scrim.
   $effect(() => {
     const opener = ui.aboutOpener;
@@ -27,6 +27,17 @@
       if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
       ui.aboutOpener = null;
     };
+  });
+
+  // Focus the DIALOG on open, not its close button. About used to autofocus
+  // the ✕ (SurfaceClose's `autofocus` prop) — defensible in-window, but from
+  // the Global Menu the user arrives with no pointer history in the webview,
+  // window activation paints the focused control, and the ✕ looked "selected"
+  // (owner report, 2026-09-03). A `tabindex="-1"` dialog holding focus is the
+  // standard practice: Escape and the Tab trap own the surface instantly, the
+  // first Tab lands on the ✕ anyway, and nothing looks pressed.
+  $effect(() => {
+    if (ui.aboutOpen && panel) panel.focus({ preventScroll: true });
   });
 
   function close() {
@@ -85,8 +96,15 @@
     onclick={(e) => e.target === e.currentTarget && close()}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-    <section class="ab glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="About Songstress">
-      <SurfaceClose autofocus class="ab-close" label="Close" onclick={close} />
+    <section
+      class="ab glass"
+      bind:this={panel}
+      role="dialog"
+      aria-modal="true"
+      aria-label="About Songstress"
+      tabindex="-1"
+    >
+      <SurfaceClose class="ab-close" label="Close" onclick={close} />
       <h2>Songstress</h2>
       <p class="ver">Version {version}</p>
       <p class="tag">Album-grid music player for KDE</p>

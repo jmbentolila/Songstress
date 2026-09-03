@@ -421,6 +421,20 @@ export function cycleEqPreset() {
   applyEqPreset(EQ_PRESETS[(i + 1) % EQ_PRESETS.length].name);
 }
 
+/** The Playback pane's footer reset — its THREE subjects, not just the
+ *  equalizer (a button under Repeat/Shuffle/Equalizer that only touched the
+ *  third one lied about its scope, user decision 2026-08-31). Shared with
+ *  the Global Menu's "Reset playback" row (2026-09-03 pass). */
+export function resetPlayback() {
+  setRepeatOn(false);
+  setShuffleOn(false);
+  setEqEnabled(false);
+  // The first preset IS the flat line — named once (EQ_PRESETS[0]), the same
+  // anchor cycleEqPreset wraps on, so "reset" can't drift from the table.
+  applyEqPreset(EQ_PRESETS[0].name);
+  setEqPreamp(0);
+}
+
 // --- user queue (Step 7a) -------------------------------------------------------
 // Rust owns the queue (order engine); these just forward intent. The queue
 // mirror arrives via `queue-changed`. Browser/fake dev: UI-only no-op.

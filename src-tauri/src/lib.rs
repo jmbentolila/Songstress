@@ -1059,6 +1059,162 @@ async fn menu_activate(
     Ok(())
 }
 
+// --- Reveal in file manager ------------------------------------------------
+
+/// What a row resolves to: a FILE to --select, or a DIRECTORY to open.
+/// The distinction is load-bearing — a directory target must NOT be demoted
+/// to its parent (the first cut of this code did, so an album revealed the
+/// ARTIST folder above it; caught 2026-09-03 while adding the artist row).
+#[derive(Debug, PartialEq)]
+enum Container {
+    File(PathBuf),
+    Dir(PathBuf),
+}
+
+/// The deepest directory containing every given directory (component-wise
+/// common prefix; absolute Unix paths always keep at least "/").
+fn common_parent(dirs: &[PathBuf]) -> Option<PathBuf> {
+    let mut it = dirs.iter();
+    let first = it.next()?.clone();
+    let mut prefix: Vec<_> = first.components().collect();
+    for d in it {
+        let dc: Vec<_> = d.components().collect();
+        let n = prefix.len().min(dc.len());
+        let mut k = 0;
+        while k < n && prefix[k] == dc[k] {
+            k += 1;
+        }
+        prefix.truncate(k);
+    }
+    if prefix.is_empty() {
+        return None;
+    }
+    Some(prefix.iter().collect())
+}
+
+/// Resolve a row to what the file manager should show: a track to its FILE,
+/// an album to its folder (the directory the majority of its files live in —
+/// `artwork::dominant_dir`, multi-disc safe), an artist to the DEEPEST
+/// FOLDER containing all of its files (a scattered artist reveals what
+/// actually holds them; a one-album artist lands on the album folder).
+/// Paths never travel to the webview: the menu says WHICH row, this side
+/// says WHERE it lives.
+fn container_target(
+    conn: &rusqlite::Connection,
+    album_id: Option<&str>,
+    track_id: Option<&str>,
+    artist_id: Option<&str>,
+) -> Result<Container, String> {
+    if let Some(tid) = track_id {
+        let path: String = conn
+            .query_row("SELECT path FROM tracks WHERE id = ?1", [tid], |r| r.get(0))
+            .map_err(|_| "unknown track".to_string())?;
+        return Ok(Container::File(PathBuf::from(path)));
+    }
+    if let Some(aid) = album_id {
+        return crate::library::artwork::dominant_dir(conn, aid)
+            .map(Container::Dir)
+            .ok_or_else(|| "unknown album".to_string());
+    }
+    if let Some(arid) = artist_id {
+        let paths: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT t.path FROM tracks t JOIN albums a ON t.album_id = a.id
+                     WHERE a.artist_id = ?1",
+                )
+                .map_err(|e| e.to_string())?;
+            // Bound as a `let`, not the block tail: MappedRows borrows stmt,
+            // and tail-expression temporaries outlive the block's locals.
+            let rows = stmt
+                .query_map([arid], |r| r.get(0))
+                .map_err(|e| e.to_string())?;
+            let v: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+            v
+        };
+        let dirs: Vec<PathBuf> = paths
+            .iter()
+            .filter_map(|p| Path::new(p).parent().map(PathBuf::from))
+            .collect();
+        return common_parent(&dirs)
+            .map(Container::Dir)
+            .ok_or_else(|| "no files for this artist".to_string());
+    }
+    Err("nothing to reveal".into())
+}
+
+/// Open KDE's file manager at the container. A file gets
+/// `dolphin --select <file>` — folder open, file highlighted; a directory
+/// gets `dolphin <dir>`. A vanished file falls back to its parent (a missing
+/// track still has a known address); a vanished directory is the one honest
+/// error. No dolphin (or spawn failure) falls back to xdg-open on the folder.
+#[tauri::command]
+fn reveal_container(
+    state: tauri::State<AppState>,
+    album_id: Option<String>,
+    track_id: Option<String>,
+    artist_id: Option<String>,
+) -> Result<(), String> {
+    let target = {
+        let conn = state.db.lock().unwrap();
+        container_target(
+            &conn,
+            album_id.as_deref(),
+            track_id.as_deref(),
+            artist_id.as_deref(),
+        )?
+    };
+    // (arg, select?) — resolve each case to something that exists.
+    let (arg, select) = match &target {
+        Container::File(p) => {
+            if p.is_file() {
+                (p.clone(), true)
+            } else if let Some(parent) = p.parent().map(PathBuf::from) {
+                if parent.is_dir() {
+                    (parent, false)
+                } else {
+                    return Err("that file's folder is gone from disk".into());
+                }
+            } else {
+                return Err("that file's folder is gone from disk".into());
+            }
+        }
+        Container::Dir(d) => {
+            if d.is_dir() {
+                (d.clone(), false)
+            } else {
+                return Err("that folder is gone from disk".into());
+            }
+        }
+    };
+    let mut cmd = std::process::Command::new("dolphin");
+    if select {
+        cmd.arg("--select");
+    }
+    cmd.arg(&arg);
+    let spawned = cmd.spawn().map_err(|e| format!("dolphin: {e}"));
+    match spawned {
+        // Dolphin is a kded-registered app: it forks to the existing instance
+        // and exits fast. Nobody waits — a lingering process would hold the
+        // app's exit, so the Child is dropped on purpose.
+        Ok(_child) => Ok(()),
+        Err(e) => {
+            // Fallback: the generic opener on the containing folder (a file
+            // path would make xdg-open offer to PLAY the mp3).
+            let dir = if select {
+                arg.parent().map(PathBuf::from).unwrap_or(arg)
+            } else {
+                arg
+            };
+            std::process::Command::new("xdg-open")
+                .arg(&dir)
+                .spawn()
+                .map_err(|e2| format!("{e}; xdg-open: {e2}"))?;
+            Ok(())
+        }
+    }
+}
+
 #[tauri::command]
 fn get_settings(state: tauri::State<AppState>) -> Result<HashMap<String, String>, String> {
     library::settings::all(&state.db.lock().unwrap()).map_err(|e| e.to_string())
@@ -1101,6 +1257,59 @@ async fn pick_directory(start: PathBuf, title: &str) -> Result<Option<String>, S
         }
         let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
         Ok(if path.is_empty() { None } else { Some(path) })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Native KDE image picker (the artwork strip's "from disk" door). Same
+/// kdialog rule as every other picker in this app; starts in ~/Pictures,
+/// which is where a downloaded cover realistically waits.
+#[tauri::command]
+async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    let pictures = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map(|h| h.join("Pictures"))
+        .unwrap_or_else(|_| music_root(&state));
+    let start = if pictures.is_dir() { pictures } else { music_root(&state) };
+    let start_str = start.to_string_lossy().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = std::process::Command::new("kdialog")
+            .args([
+                "--getopenfilename",
+                &start_str,
+                "Images (*.png *.jpg *.jpeg *.webp *.gif *.tiff);;All files (*)",
+                "--title",
+                "Choose Cover Image",
+            ])
+            .output()
+            .map_err(|e| format!("kdialog: {e}"))?;
+        if !out.status.success() || out.stdout.is_empty() {
+            return Ok(None);
+        }
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(if path.is_empty() { None } else { Some(path) })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Read a picked image into base64 for `ArtChange.upload`. The 25 MB cap is
+/// enforced HERE too so a 400 MB "image" never traverses IPC; format truth is
+/// sniffed Rust-side at save time regardless of what this returned.
+#[tauri::command]
+async fn read_image(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::Engine as _;
+        let meta = std::fs::metadata(&path).map_err(|e| format!("{path}: {e}"))?;
+        if meta.len() > 25 * 1024 * 1024 {
+            return Err(format!(
+                "image is {} MB — 25 MB is the cap",
+                meta.len() / (1024 * 1024)
+            ));
+        }
+        Ok(base64::engine::general_purpose::STANDARD
+            .encode(std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1810,6 +2019,20 @@ async fn get_track_tags(
 }
 
 #[tauri::command]
+async fn get_track_file(
+  state: tauri::State<'_, AppState>,
+  track_id: String,
+) -> Result<library::tags::TrackFile, String> {
+    let db_path = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        library::tags::track_file(&conn, &track_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn get_album_tags(
     state: tauri::State<'_, AppState>,
     album_id: String,
@@ -1826,13 +2049,33 @@ async fn get_album_tags(
 #[tauri::command]
 async fn save_track_tags(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     track_id: String,
     tags: library::tags::TrackTags,
+    art: Option<library::tags::ArtChange>,
 ) -> Result<(), String> {
     let db_path = state.db_path.clone();
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::tags::save_track_tags(&conn, &track_id, &tags)
+        let album_id: String = conn
+            .query_row(
+                "SELECT album_id FROM tracks WHERE id = ?1",
+                [&track_id],
+                |r| r.get(0),
+            )
+            .map_err(|_| "unknown track".to_string())?;
+        let art = art.unwrap_or_default();
+        let changed = art != library::tags::ArtChange::Keep;
+        library::tags::save_track_tags(&conn, &track_id, &tags, &art)?;
+        // Artwork edits re-extract THIS album's thumbs + colors now (the
+        // bulk refresh only fills missing covers). Best-effort: a tag save
+        // that landed is a success even if thumbnailing later fails — the
+        // next scan pass retries the missing art.
+        if changed {
+            let _ = library::artwork::refresh_one(&conn, &cache_dir, &album_id);
+        }
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1841,13 +2084,48 @@ async fn save_track_tags(
 #[tauri::command]
 async fn save_album_tags(
     state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
     album_id: String,
     shared: library::tags::TrackTags,
-) -> Result<usize, String> {
+    touched: Option<library::tags::TouchedFields>,
+    art: Option<library::tags::ArtChange>,
+) -> Result<library::tags::SaveReport, String> {
     let db_path = state.db_path.clone();
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::tags::save_album_tags(&conn, &album_id, &shared)
+        let art = art.unwrap_or_default();
+        let changed = art != library::tags::ArtChange::Keep;
+        // A missing `touched` means a caller from before the diff-aware save:
+        // legacy semantics stamped EVERY shared field.
+        let report = library::tags::save_album_tags(
+            &conn,
+            &album_id,
+            &shared,
+            &touched.unwrap_or_else(library::tags::TouchedFields::all),
+            &art,
+        )?;
+        if changed {
+            let _ = library::artwork::refresh_one(&conn, &cache_dir, &album_id);
+        }
+        Ok(report)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_art_candidates(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    album_id: String,
+    track_id: Option<String>,
+) -> Result<library::tags::ArtInventory, String> {
+    let db_path = state.db_path.clone();
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        library::tags::list_art_candidates(&conn, &album_id, track_id.as_deref(), &cache_dir)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1881,9 +2159,25 @@ pub fn run() {
             let Ok(cache_dir) = ctx.app_handle().path().app_cache_dir() else {
                 return response(500, Vec::new());
             };
-            let size = file.trim_end_matches(".webp");
-            let chain: &[u32] = &[512, 256, 96];
-            let mut sizes: Vec<u32> = vec![size.parse().unwrap_or(512)];
+            let size = file
+                .trim_end_matches(".webp")
+                // Hashed cache-busting URLs (`512-a1b2c3d4.webp`) carry the
+                // size before the dash; hash-less (legacy) URLs parse whole.
+                .split('-')
+                .next()
+                .unwrap_or("");
+            let Ok(size_n) = size.parse::<u32>() else {
+                return response(400, Vec::new());
+            };
+            // Artwork-previews (`art-<hash>`) are served STRICTLY: the
+            // inventory writes every size it advertises, so a fallback there
+            // would serve small bytes under an immutable big URL — the exact
+            // mislabel that made a first expansion permanently blurry.
+            // Album covers keep the lenient chain (older albums may lack a
+            // size until their next refresh).
+            let strict = album_id.starts_with("art-");
+            let chain: &[u32] = if strict { &[] } else { &[512, 256, 96] };
+            let mut sizes: Vec<u32> = vec![size_n];
             sizes.extend(chain.iter().copied());
             for candidate in sizes {
                 let path =
@@ -2093,6 +2387,7 @@ pub fn run() {
             get_menu,
             appmenu_state,
             menu_activate,
+            reveal_container,
             set_setting,
             init_settings,
             scan_library,
@@ -2124,9 +2419,13 @@ pub fn run() {
             playback_queue_clear,
             playback_eq,
             get_track_tags,
+            get_track_file,
             get_album_tags,
             save_track_tags,
-            save_album_tags
+            save_album_tags,
+            get_art_candidates,
+            pick_image,
+            read_image
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -2342,6 +2641,62 @@ mod tests {
             .expect("count");
         assert_eq!(left, 2, "/music/a and /music/bc tracks survive");
         let _ = std::fs::remove_file(&dbp);
+    }
+
+    #[test]
+    fn container_target_resolves_rows_to_file_and_majority_dir() {
+        let dir = std::env::temp_dir().join("songstress-m1-tests");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let dbp = dir.join(format!("reveal-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&dbp);
+        let conn = crate::library::db::open(&dbp).expect("open");
+        conn.execute_batch(
+            "INSERT INTO artists VALUES ('ar-x','X','x');
+             INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);
+             INSERT INTO albums VALUES ('al-2','ar-x','B',2021,NULL,NULL,NULL);
+             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/one.flac',1,1,0);
+             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/two.flac',1,1,0);
+             INSERT INTO tracks VALUES ('tr-3','al-2',1,2,'t3',10.0,'/music/b/three.flac',1,1,0);
+             INSERT INTO tracks VALUES ('tr-4','al-2',2,1,'t4',10.0,'/music/b-cd2/four.flac',1,1,0);",
+        )
+        .expect("seed");
+        // A track reveals ITS FILE (the caller --selects it).
+        assert_eq!(
+            super::container_target(&conn, None, Some("tr-1"), None).unwrap(),
+            super::Container::File(std::path::PathBuf::from("/music/a/one.flac"))
+        );
+        // An album reveals the folder holding the MAJORITY of its files —
+        // the multi-disc split case, same rule as cover extraction.
+        assert_eq!(
+            super::container_target(&conn, Some("al-2"), None, None).unwrap(),
+            super::Container::Dir(std::path::PathBuf::from("/music/b"))
+        );
+        // An artist reveals the deepest folder holding ALL its files — across
+        // both albums here that is /music, not any one album's dir.
+        assert_eq!(
+            super::container_target(&conn, None, None, Some("ar-x")).unwrap(),
+            super::Container::Dir(std::path::PathBuf::from("/music"))
+        );
+        // Bad ids are errors, never panics (a Tauri-command panic kills the app).
+        assert!(super::container_target(&conn, None, Some("nope"), None).is_err());
+        assert!(super::container_target(&conn, Some("nope"), None, None).is_err());
+        assert!(super::container_target(&conn, None, None, Some("nope")).is_err());
+        assert!(super::container_target(&conn, None, None, None).is_err());
+        let _ = std::fs::remove_file(&dbp);
+    }
+
+    #[test]
+    fn common_parent_takes_the_deepest_shared_dir() {
+        use std::path::PathBuf;
+        let d = |s: &str| PathBuf::from(s);
+        // One dir → itself (single-album artist lands ON the album folder).
+        assert_eq!(super::common_parent(&[d("/m/a/One")]).unwrap(), d("/m/a/One"));
+        assert_eq!(super::common_parent(&[d("/m/a/One"), d("/m/a/Two")]).unwrap(), d("/m/a"));
+        // The b / bc trap: shared PREFIX STRING ≠ shared component — /m/b
+        // and /m/bee must resolve to /m, not /m/b.
+        assert_eq!(super::common_parent(&[d("/m/b"), d("/m/bee")]).unwrap(), d("/m"));
+        // No shared root component at all → None, never "".
+        assert_eq!(super::common_parent(&[] as &[PathBuf]), None);
     }
 }
 

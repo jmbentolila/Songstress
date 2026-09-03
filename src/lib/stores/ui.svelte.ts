@@ -17,10 +17,16 @@ function prefersDark(): Theme {
     : "dark";
 }
 
+// The tile/row defaults sit in ONE place: load() seeds the store with them,
+// and resetAppearance restores exactly them — the two used to agree only by
+// the courtesy of the literal 180/36 appearing twice (owner note, 2026-09-03).
+const DEFAULT_TILE_SIZE = 180;
+const DEFAULT_SIDEBAR_ROWS = 36;
+
 export const ui = $state({
   theme: load<"light" | "dark" | "system">("songstress.theme", "system"),
-  tileSize: load("songstress.tileSize", 180),
-  sidebarRowSize: load("songstress.sidebarRowSize", 36),
+  tileSize: load("songstress.tileSize", DEFAULT_TILE_SIZE),
+  sidebarRowSize: load("songstress.sidebarRowSize", DEFAULT_SIDEBAR_ROWS),
   /** Playbar backdrop = artwork gradient while something is playing (Step 2b). */
   playbarGradient: load("songstress.playbarGradient", false),
   /** Accent color (Step 4) — ONE hex; null = stock purple from app.css. */
@@ -80,8 +86,16 @@ export function resolvedTheme(): Theme {
   return ui.theme === "system" ? prefersDark() : ui.theme;
 }
 
-export function cycleTheme() {
-  ui.theme = resolvedTheme() === "dark" ? "light" : "dark";
+// The Appearance pane's footer reset — shared with the Global Menu's
+// "Reset appearance" row so the two surfaces can never disagree about what
+// "reset" means (was a Sidebar-local function until the Global Menu pass,
+// 2026-09-03).
+export function resetAppearance() {
+  ui.tileSize = DEFAULT_TILE_SIZE;
+  ui.sidebarRowSize = DEFAULT_SIDEBAR_ROWS;
+  ui.theme = "system";
+  ui.accentColor = null;
+  ui.playbarGradient = false; // the pane's other visible control; reset means reset
 }
 
 // --- SQLite-backed settings (Phase 2 M4) ------------------------------------

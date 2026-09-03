@@ -4,16 +4,27 @@ import { library, LIVE_LIBRARY } from "./library.svelte";
 import { playback } from "./playback.svelte";
 // NOTE: roots (Step 7c) are managed inside the Music folders modal, not from
 // the menu — library.add-folder is the Step 2a IMPORT path, unrelated to it.
-import { scanner, rescan, rescanFull, saveImports, openMusicFolders } from "./scanner.svelte";
-import { addMusicFiles, addMusicFolder } from "./imports.svelte";
-import { cycleShuffle, cycleRepeat, albumSkip, setEqEnabled, cycleEqPreset } from "./playback.svelte";
-import { cycleTheme, resolvedTheme, ui } from "./ui.svelte";
+import { scanner, rescan, rescanFull, openMusicFolders } from "./scanner.svelte";
+import { addMusicFiles, addMusicFolder, openImportManager } from "./imports.svelte";
+import {
+  cycleShuffle,
+  cycleRepeat,
+  albumSkip,
+  setEqEnabled,
+  cycleEqPreset,
+  resetPlayback,
+} from "./playback.svelte";
+import { resetAppearance, openAbout, ui } from "./ui.svelte";
 
 export type MenuItem = {
   id: string;
   label: string;
   enabled: boolean;
   checked: boolean | null;
+  /** Radio-dot checkable (the theme trio) vs checkmark. */
+  radio?: boolean;
+  /** Section break — mirrors the sidebar panes' group gaps. */
+  separator?: boolean;
 };
 
 export type Menu = { id: string; label: string; items: MenuItem[] };
@@ -33,9 +44,20 @@ function handleAction(id: string) {
     "library.rescan-full": () => rescanFull(),
     "library.add-files": () => addMusicFiles(),
     "library.add-folder": () => addMusicFolder(),
-    "library.save-imports": () => saveImports(),
+    // The sidebar's staged-pile door, mirrored: opens the manage modal
+    // (Save/Discard live there), instead of applying blind from the panel.
+    "library.manage-imports": () => openImportManager(),
     "library.choose-folder": () => openMusicFolders(),
-    "view.theme": () => cycleTheme(),
+    "appearance.theme-system": () => (ui.theme = "system"),
+    "appearance.theme-light": () => (ui.theme = "light"),
+    "appearance.theme-dark": () => (ui.theme = "dark"),
+    "appearance.playbar-gradient": () => (ui.playbarGradient = !ui.playbarGradient),
+    // Rows the menu cannot render: open the sidebar stack AT the pane (the
+    // size sliders) or the pane's sub layer (the accent picker).
+    "appearance.accent": () => openSettingsLayer("appearance", "accent"),
+    "appearance.more": () => openSettingsLayer("appearance", null),
+    "appearance.reset": () => resetAppearance(),
+    "playback.reset": () => resetPlayback(),
     "playback.shuffle": () => cycleShuffle(),
     "playback.repeat": () => cycleRepeat(),
     "playback.eq": () => setEqEnabled(!playback.eq.enabled),
@@ -43,10 +65,23 @@ function handleAction(id: string) {
     "playback.eq-customize": () => (ui.eqOpen = true),
     "playback.album-prev": () => albumSkip(-1),
     "playback.album-next": () => albumSkip(1),
-    "help.about": () => {},
+    // The old no-op: the sidebar's About footer passes its trigger element as
+    // the focus-restoration opener; from the panel there is none, and
+    // openAbout's null fallback covers it.
+    "help.about": () => openAbout(),
   };
   const fn = run[id];
   if (fn) void Promise.resolve(fn()).catch((e) => console.error(e));
+}
+
+/** Open the sidebar menu stack at a pane (and optionally its sub layer) —
+ *  the Global Menu's door into controls a menu bar cannot host (sliders,
+ *  the color grid). State-only: the window typically lacks keyboard focus
+ *  when its panel menu is clicked, so there is no focus to hand off. */
+function openSettingsLayer(detail: string, sub: string | null) {
+  ui.menuOpen = true;
+  ui.menuDetail = detail;
+  ui.menuSub = sub;
 }
 
 /** Item click from any frontend-rendered menu surface: one activation path
@@ -93,8 +128,11 @@ type MenuState = {
   playing: boolean | null;
   hasTrack: boolean;
   scanning: boolean;
-  anyStaged: boolean;
-  themeDark: boolean;
+  stagedCount: number;
+  /** The MODE, not the resolved theme — "system" must be reachable AND
+   *  reported from the menu (the old bool flattened it away). */
+  theme: string;
+  playbarGradient: boolean;
   shuffle: string;
   repeat: string;
   eqEnabled: boolean;
@@ -112,8 +150,9 @@ export function pushMenuState() {
     // "Custom" when the gains diverged from every preset (preset = null).
     eqPreset: playback.eq.preset ?? "Custom",
     scanning: scanner.running,
-    anyStaged: library.albums.some((a) => a.staged),
-    themeDark: resolvedTheme() === "dark",
+    stagedCount: library.albums.reduce((n, a) => n + (a.staged ? 1 : 0), 0),
+    theme: ui.theme,
+    playbarGradient: ui.playbarGradient,
   };
   void invoke("set_menu_state", { state }).catch(() => {});
 }

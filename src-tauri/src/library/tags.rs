@@ -6,9 +6,11 @@
 //! parallel DB-update code here.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{Accessor, ItemKey, Tag};
 use rusqlite::Connection;
 
@@ -33,8 +35,33 @@ pub struct TrackTags {
     #[serde(default)] pub grouping: String,
 }
 
+/// One distinct non-empty value of a disputed album field, with how many of
+/// the album's files carry it. The `•` in the UI expands to these — the
+/// disagreement is shown, not just announced.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueCount {
+    pub value: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldConflict {
+    /// camelCase field name, matching the editor's Editable keys.
+    pub field: String,
+    /// Distinct non-empty values, most-frequent first (ties keep file order).
+    /// EMPTY when every file is silent on this field; length ≥2 is what the
+    /// UI treats as a dispute (the `*_disputed` booleans say the same).
+    pub values: Vec<ValueCount>,
+    /// Files carrying any non-empty value — the census's remainder is
+    /// "no value", which the frontend needs to diff a CLEAR precisely.
+    pub present: u32,
+}
+
 /// Album-level view: consensus values ("first non-empty wins") with
-/// disagreement flags. Per-track fields are edited track-by-track only.
+/// disagreement flags and the competing values themselves. Per-track fields
+/// are edited track-by-track only.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlbumTags {
@@ -58,6 +85,13 @@ pub struct AlbumTags {
     #[serde(default)] pub track_total_disputed: bool,
     #[serde(default)] pub disc_total: Option<u32>,
     #[serde(default)] pub disc_total_disputed: bool,
+    /// The disputed fields as data (every shared field gets a census, even
+    /// quiet ones — the frontend diffs against it). Supersedes the
+    /// `*_disputed` booleans, which stay for compatibility.
+    #[serde(default)]
+    pub conflicts: Vec<FieldConflict>,
+    /// Files in the album — the denominator of "writes 4 of 18 files".
+    pub file_count: usize,
 }
 
 fn clean(v: Option<Cow<'_, str>>) -> String {
@@ -71,24 +105,39 @@ fn text(tag: Option<&Tag>, key: &ItemKey) -> String {
 }
 
 fn read_file(path: &Path) -> Result<TrackTags, String> {
+    Ok(read_file_full(path)?.0)
+}
+
+/// TrackTags + the blake3 hashes of every picture the file carries (across
+/// all its tags) — the fingerprint the artwork diff compares against.
+fn read_file_full(path: &Path) -> Result<(TrackTags, Vec<String>), String> {
     let tagged = lofty::read_from_path(path).map_err(|e| format!("{path:?}: {e}"))?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
-    Ok(TrackTags {
-        title: clean(tag.and_then(|t| t.title())),
-        artist: clean(tag.and_then(|t| t.artist())),
-        album_artist: text(tag, &ItemKey::AlbumArtist),
-        album: clean(tag.and_then(|t| t.album())),
-        year: tag.and_then(|t| t.year()).map(i64::from),
-        track_no: tag.and_then(|t| t.track()),
-        track_total: tag.and_then(|t| t.track_total()),
-        disc_no: tag.and_then(|t| t.disk()),
-        disc_total: tag.and_then(|t| t.disk_total()),
-        genre: clean(tag.and_then(|t| t.genre())),
-        composer: text(tag, &ItemKey::Composer),
-        label: text(tag, &ItemKey::Label),
-        comment: clean(tag.and_then(|t| t.comment())),
-        grouping: text(tag, &ItemKey::ContentGroup),
-    })
+    let pics: Vec<String> = tagged
+        .tags()
+        .iter()
+        .flat_map(|t| t.pictures())
+        .map(|p| blake3::hash(p.data()).to_hex().to_string())
+        .collect();
+    Ok((
+        TrackTags {
+            title: clean(tag.and_then(|t| t.title())),
+            artist: clean(tag.and_then(|t| t.artist())),
+            album_artist: text(tag, &ItemKey::AlbumArtist),
+            album: clean(tag.and_then(|t| t.album())),
+            year: tag.and_then(|t| t.year()).map(i64::from),
+            track_no: tag.and_then(|t| t.track()),
+            track_total: tag.and_then(|t| t.track_total()),
+            disc_no: tag.and_then(|t| t.disk()),
+            disc_total: tag.and_then(|t| t.disk_total()),
+            genre: clean(tag.and_then(|t| t.genre())),
+            composer: text(tag, &ItemKey::Composer),
+            label: text(tag, &ItemKey::Label),
+            comment: clean(tag.and_then(|t| t.comment())),
+            grouping: text(tag, &ItemKey::ContentGroup),
+        },
+        pics,
+    ))
 }
 
 pub fn get_track_tags(conn: &Connection, track_id: &str) -> Result<TrackTags, String> {
@@ -96,6 +145,51 @@ pub fn get_track_tags(conn: &Connection, track_id: &str) -> Result<TrackTags, St
         .query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| r.get(0))
         .map_err(|_| "unknown track".to_string())?;
     read_file(Path::new(&path))
+}
+
+/// The track modal's identity row (Phase C): WHICH file this editor is
+/// editing — name, human folder, full path for the tooltip — whether it is
+/// still pending (the stays-behind caution reads this), and the album the
+/// row currently points at (the stepper's sibling list). Paths travel out
+/// as DISPLAY strings only; revealing them stays `reveal_container`'s job.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackFile {
+    pub file: String,
+    pub folder: String,
+    pub path: String,
+    pub staged: bool,
+    pub album_id: String,
+}
+
+pub fn track_file(conn: &Connection, track_id: &str) -> Result<TrackFile, String> {
+    let (path, staged, album_id): (String, i64, String) = conn
+        .query_row(
+            "SELECT path, staged, album_id FROM tracks WHERE id = ?1",
+            [track_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|_| "unknown track".to_string())?;
+    let p = PathBuf::from(&path);
+    let folder_raw = p
+        .parent()
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
+    // Home reads as "~": the folder line answers WHERE the file is, and an
+    // absolute /home/<user> prefix is the part the eye skips.
+    let folder = match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() && folder_raw.starts_with(&home) => {
+            format!("~{}", &folder_raw[home.len()..])
+        }
+        _ => folder_raw,
+    };
+    Ok(TrackFile {
+        file: file_name(&p),
+        folder,
+        path,
+        staged: staged != 0,
+        album_id,
+    })
 }
 
 /// First non-empty value + "tracks disagree" flag (trimmed exact compare).
@@ -131,7 +225,432 @@ fn consensus_opt<T: PartialEq + Copy>(
     (first, disputed)
 }
 
+/// The census of one album field: distinct non-empty values with counts
+/// (most frequent first, ties keep file order) and how many files carry any
+/// value at all. Absence is never a contender — but it IS counted, so a
+/// clear knows exactly how many files it touches.
+fn conflicts_for(field: &str, values: impl Iterator<Item = String>) -> Option<FieldConflict> {
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    let mut present = 0u32;
+    for v in values {
+        let v = v.trim().to_string();
+        if v.is_empty() {
+            continue;
+        }
+        present += 1;
+        let e = counts.entry(v.clone()).or_default();
+        if *e == 0 {
+            order.push(v.clone());
+        }
+        *e += 1;
+    }
+    // Stable sort: equal counts keep their first-seen (file) order.
+    order.sort_by_key(|v| std::cmp::Reverse(counts[v]));
+    Some(FieldConflict {
+        field: field.to_string(),
+        values: order
+            .into_iter()
+            .map(|v| ValueCount {
+                count: counts[&v],
+                value: v,
+            })
+            .collect(),
+        present,
+    })
+}
+
+// ── Editor save semantics (Tag Editor Redesign spec, PLAN.md) ─────────────
+
+/// Which shared fields the user actually edited. **Fields that were not
+/// touched are never written** — the promise the whole save is built on.
+/// Older callers pass `all()` (every field), which keeps the pre-redesign
+/// behavior while still enjoying the per-file diff.
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TouchedFields {
+    pub album_artist: bool,
+    pub album: bool,
+    pub year: bool,
+    pub genre: bool,
+    pub composer: bool,
+    pub label: bool,
+    pub comment: bool,
+    pub grouping: bool,
+    pub track_total: bool,
+    pub disc_total: bool,
+}
+
+impl TouchedFields {
+    pub fn all() -> Self {
+        Self {
+            album_artist: true,
+            album: true,
+            year: true,
+            genre: true,
+            composer: true,
+            label: true,
+            comment: true,
+            grouping: true,
+            track_total: true,
+            disc_total: true,
+        }
+    }
+}
+
+/// What to do with the files' embedded picture(s) — and (album mode) the
+/// folder-art file — during a save. Externally tagged so the webview sends
+/// plain JSON: `"keep"`, `"clear"`, `{"hash": "<blake3>"}` or
+/// `{"upload": {"image": "<base64>", "mime": "image/jpeg"}}`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArtChange {
+    #[default]
+    Keep,
+    Clear,
+    /// Use an image the album already owns, identified by its blake3 hash
+    /// (bytes come from wherever they live — a sibling file or the folder
+    /// art — so multi-megabyte images never travel back over IPC).
+    Hash {
+        hash: String,
+    },
+    Upload {
+        image: String,
+        #[serde(default)]
+        mime: String,
+    },
+}
+
+/// A resolved artwork target: real bytes, sniffed (not claimed) mime, hash.
+#[derive(Debug, Clone)]
+struct ResolvedArt {
+    data: Vec<u8>,
+    mime: String,
+    hash: String,
+}
+
+enum ArtTarget {
+    Keep,
+    Clear,
+    Set(ResolvedArt),
+}
+
+/// The outcome of an album save — the modal prints its blast radius from
+/// this, and the folder-art lines in `receipt` are where a user's own
+/// `folder.jpg` being replaced or deleted gets said out loud.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveReport {
+    pub written: usize,
+    pub total: usize,
+    pub receipt: Vec<String>,
+}
+
+fn validate(tags: &TrackTags) -> Result<(), String> {
+    if let Some(y) = tags.year {
+        if !(0..=9999).contains(&y) {
+            return Err(format!("year must be a number up to 4 digits (got {y})"));
+        }
+    }
+    Ok(())
+}
+
+/// Sniff the real format (never trusting a claimed mime), reject anything
+/// undecodable or absurdly large, fingerprint the bytes.
+fn resolve_bytes(data: Vec<u8>) -> Result<ResolvedArt, String> {
+    if data.len() > 25 * 1024 * 1024 {
+        return Err("cover image is larger than 25 MB".into());
+    }
+    let reader = image::ImageReader::new(std::io::Cursor::new(&data))
+        .with_guessed_format()
+        .map_err(|e| format!("cover image: {e}"))?;
+    let mime = match reader.format() {
+        Some(image::ImageFormat::Jpeg) => "image/jpeg",
+        Some(image::ImageFormat::Png) => "image/png",
+        Some(image::ImageFormat::WebP) => "image/webp",
+        Some(image::ImageFormat::Gif) => "image/gif",
+        Some(image::ImageFormat::Tiff) => "image/tiff",
+        _ => return Err("not a readable image (jpeg, png, webp, gif or tiff)".into()),
+    };
+    Ok(ResolvedArt {
+        hash: blake3::hash(&data).to_hex().to_string(),
+        mime: mime.to_string(),
+        data,
+    })
+}
+
+fn to_jpeg(data: &[u8]) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(data).map_err(|e| format!("cover image: {e}"))?;
+    let rgb = img.to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90)
+        .encode(
+            rgb.as_raw().as_slice(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .map_err(|e| format!("cover image: {e}"))?;
+    Ok(out)
+}
+
+/// A file's picture list becomes exactly the target: cleared, or one
+/// CoverFront frame. (Other tags of the file keep their pictures — the
+/// reader-priority tag is the one the UI shows and the one we own.)
+fn set_pictures(tag: &mut Tag, target: Option<&ResolvedArt>) {
+    while !tag.pictures().is_empty() {
+        tag.remove_picture(0);
+    }
+    if let Some(r) = target {
+        tag.push_picture(Picture::new_unchecked(
+            PictureType::CoverFront,
+            Some(MimeType::from_str(&r.mime)),
+            None,
+            r.data.clone(),
+        ));
+    }
+}
+
+fn art_differs(pics: &[String], target: &ArtTarget) -> bool {
+    match target {
+        ArtTarget::Keep => false,
+        ArtTarget::Clear => !pics.is_empty(),
+        // "Already equal" means EXACTLY one picture with these bytes — a
+        // file carrying a stray second frame differs, and the save
+        // normalizes it (the MusicBee-style cleanup the spec decided on).
+        ArtTarget::Set(r) => !(pics.len() == 1 && pics[0] == r.hash),
+    }
+}
+
+fn fields_differ(a: &TrackTags, b: &TrackTags, t: &TouchedFields) -> bool {
+    (t.album_artist && a.album_artist != b.album_artist)
+        || (t.album && a.album != b.album)
+        || (t.year && a.year != b.year)
+        || (t.genre && a.genre != b.genre)
+        || (t.composer && a.composer != b.composer)
+        || (t.label && a.label != b.label)
+        || (t.comment && a.comment != b.comment)
+        || (t.grouping && a.grouping != b.grouping)
+        || (t.track_total && a.track_total != b.track_total)
+        || (t.disc_total && a.disc_total != b.disc_total)
+}
+
+/// Turn an ArtChange into concrete bytes (or the explicit Clear). `Hash`
+/// looks through the album's files first, then its folder-art candidates —
+/// the same inventory the candidate list is built from.
+fn resolve_art(conn: &Connection, album_id: &str, art: &ArtChange) -> Result<ArtTarget, String> {
+    match art {
+        ArtChange::Keep => Ok(ArtTarget::Keep),
+        ArtChange::Clear => Ok(ArtTarget::Clear),
+        ArtChange::Upload { image, .. } => {
+            use base64::Engine as _;
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(image)
+                .map_err(|e| format!("cover data: {e}"))?;
+            Ok(ArtTarget::Set(resolve_bytes(data)?))
+        }
+        ArtChange::Hash { hash } => {
+            let RowPaths(rows) = album_rows(conn, album_id)?;
+            for (_, p) in &rows {
+                let Ok(tagged) = lofty::read_from_path(p) else {
+                    continue;
+                };
+                for pic in tagged.tags().iter().flat_map(|t| t.pictures()) {
+                    if blake3::hash(pic.data()).to_hex().to_string() == *hash {
+                        return Ok(ArtTarget::Set(resolve_bytes(pic.data().to_vec())?));
+                    }
+                }
+            }
+            if let Some(dir) = crate::library::artwork::dominant_dir(conn, album_id) {
+                for path in crate::library::artwork::folder_art_all(&dir) {
+                    if let Ok(bytes) = std::fs::read(&path) {
+                        if blake3::hash(&bytes).to_hex().to_string() == *hash {
+                            return Ok(ArtTarget::Set(resolve_bytes(bytes)?));
+                        }
+                    }
+                }
+            }
+            Err(format!("selected artwork ({hash}) is no longer in this album"))
+        }
+    }
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string()
+}
+
 struct RowPaths(Vec<(String, PathBuf)>); // (track_id, path)
+
+/// One image the album owns: every distinct embedded picture (count = files
+/// carrying it) and/or a folder-art file by name. `preview` is a 256px
+/// thumb:// URL written on demand; `current` marks what the cover pipeline
+/// resolves today (the folder winner, else the largest embedded — the same
+/// precedence the grid shows).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtCandidate {
+    pub hash: String,
+    pub label: String,
+    /// Files this image is embedded in (0 when it only exists as folder art).
+    pub count: u32,
+    /// Filename when a folder-art copy exists (the tile says which).
+    pub folder: Option<String>,
+    pub preview: String,
+    /// 512px variant for the lightbox (same file the webview already caches
+    /// for the tile, one size up — originals live in the files, not in cache).
+    pub full: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtInventory {
+    pub candidates: Vec<ArtCandidate>,
+    pub current: Option<String>,
+    /// Filename of the folder-art winner, when one exists (the modal says
+    /// which file outranks the embedded pictures).
+    pub folder_art: Option<String>,
+    /// Files carrying at least one picture — "clear artwork" writes to
+    /// exactly these, and the blast-radius line says so.
+    pub files_with_art: u32,
+    /// Hashes of the asked-about track's own pictures, in tag order (empty
+    /// when no track was named) — the track modal's "this file carries" mark.
+    pub track_pics: Vec<String>,
+}
+
+/// Everything the artwork selector shows. Previews (256px webp) are written
+/// into the thumb cache under `art-<hash8>/` as a side effect — cheap once,
+/// then the webview caches them by URL.
+pub fn list_art_candidates(
+    conn: &Connection,
+    album_id: &str,
+    track_id: Option<&str>,
+    cache_dir: &Path,
+) -> Result<ArtInventory, String> {
+    let RowPaths(rows) = album_rows(conn, album_id)?;
+
+    #[derive(Default)]
+    struct Entry {
+        count: u32,
+        data: Vec<u8>,
+        folder: Option<String>,
+    }
+    let mut by_hash: HashMap<String, Entry> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    let mut largest_embedded: Option<(usize, String)> = None;
+    let mut track_pics: Vec<String> = Vec::new();
+    let mut files_with_art = 0usize;
+
+    for (tid, path) in &rows {
+        let tagged = match lofty::read_from_path(path) {
+            Ok(t) => t,
+            Err(_) => continue, // unreadable file contributes no candidates (and no error: browsing is not saving)
+        };
+        let mut seen: std::collections::HashSet<String> = Default::default();
+        for pic in tagged.tags().iter().flat_map(|t| t.pictures()) {
+            let hash = blake3::hash(pic.data()).to_hex().to_string();
+            if tid.as_str() == track_id.unwrap_or("") {
+                track_pics.push(hash.clone());
+            }
+            let len = pic.data().len();
+            if largest_embedded.as_ref().is_none_or(|(n, _)| len > *n) {
+                largest_embedded = Some((len, hash.clone()));
+            }
+            if !seen.insert(hash.clone()) {
+                continue; // one census per file
+            }
+            let e = by_hash.entry(hash.clone()).or_default();
+            if e.count == 0 {
+                order.push(hash);
+            }
+            e.count += 1;
+            if e.data.is_empty() {
+                e.data = pic.data().to_vec();
+            }
+        }
+        if !seen.is_empty() {
+            files_with_art += 1;
+        }
+    }
+
+    let mut folder_winner: Option<(PathBuf, String)> = None;
+    if let Some(dir) = crate::library::artwork::dominant_dir(conn, album_id) {
+        for path in crate::library::artwork::folder_art_all(&dir) {
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            if folder_winner.is_none() {
+                folder_winner = Some((path.clone(), hash.clone()));
+            }
+            let e = by_hash.entry(hash.clone()).or_default();
+            if e.count == 0 && e.folder.is_none() {
+                order.push(hash);
+            }
+            if e.data.is_empty() {
+                e.data = bytes;
+            }
+            if e.folder.is_none() {
+                e.folder = Some(file_name(&path));
+            }
+        }
+    }
+
+    let mut candidates: Vec<ArtCandidate> = Vec::new();
+    for hash in order {
+        let Some(entry) = by_hash.get(&hash) else { continue };
+        let Ok(img) = image::load_from_memory(&entry.data) else {
+            continue; // undecodable bytes show no tile (and write no thumb)
+        };
+        let h8 = hash[..8].to_string();
+        let dir = thumbs_preview_dir(cache_dir, &h8);
+        let url = format!("thumb://art-{h8}/256.webp");
+        if !dir.join("256.webp").is_file() {
+            let thumb = img.thumbnail(256, 256);
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = thumb.save(dir.join("256.webp"));
+        }
+        if !dir.join("512.webp").is_file() {
+            let thumb = img.thumbnail(512, 512);
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = thumb.save(dir.join("512.webp"));
+        }
+        let label = match (&entry.folder, entry.count) {
+            (Some(name), 0) => name.clone(),
+            (Some(name), n) => format!("{name} · in {n} files"),
+            (None, 1) => "in 1 file".into(),
+            (None, n) => format!("in {n} files"),
+        };
+        candidates.push(ArtCandidate {
+            hash,
+            label,
+            count: entry.count,
+            folder: entry.folder.clone(),
+            preview: url,
+            // Content-addressed: a URL whose bytes can never change carries
+            // `immutable` honestly, and a response cached by an older build
+            // (which once mislabeled 256 bytes under this URL) can never be
+            // handed back — the hash moves with the pixels.
+            full: format!("thumb://art-{h8}/512-{h8}.webp"),
+        });
+    }
+    candidates.sort_by_key(|c| std::cmp::Reverse(c.count));
+
+    let current = folder_winner
+        .as_ref()
+        .map(|(_, h)| h.clone())
+        .or_else(|| largest_embedded.map(|(_, h)| h));
+    Ok(ArtInventory {
+        candidates,
+        current,
+        folder_art: folder_winner.map(|(p, _)| file_name(&p)),
+        files_with_art: files_with_art as u32,
+        track_pics,
+    })
+}
+
+fn thumbs_preview_dir(cache_dir: &Path, hash8: &str) -> PathBuf {
+    crate::library::artwork::thumbs_dir(cache_dir).join(format!("art-{hash8}"))
+}
 
 fn album_rows(conn: &Connection, album_id: &str) -> Result<RowPaths, String> {
     let mut stmt = conn
@@ -172,6 +691,44 @@ pub fn get_album_tags(conn: &Connection, album_id: &str) -> Result<AlbumTags, St
     let (track_total, tt_d) = consensus_opt(files.iter().map(|f| f.track_total));
     let (disc_total, dt_d) = consensus_opt(files.iter().map(|f| f.disc_total));
 
+    // The same disagreements, as data: which values compete and how many
+    // files carry each. The UI shows these instead of a bare `•`.
+    let mut conflicts: Vec<FieldConflict> = Vec::new();
+    for (field, vals) in [
+        ("albumArtist", files.iter().map(|f| f.album_artist.clone()).collect::<Vec<_>>()),
+        ("album", files.iter().map(|f| f.album.clone()).collect::<Vec<_>>()),
+        ("genre", files.iter().map(|f| f.genre.clone()).collect::<Vec<_>>()),
+        ("composer", files.iter().map(|f| f.composer.clone()).collect::<Vec<_>>()),
+        ("label", files.iter().map(|f| f.label.clone()).collect::<Vec<_>>()),
+        ("grouping", files.iter().map(|f| f.grouping.clone()).collect::<Vec<_>>()),
+        ("comment", files.iter().map(|f| f.comment.clone()).collect::<Vec<_>>()),
+        (
+            "year",
+            files
+                .iter()
+                .map(|f| f.year.map(|y| y.to_string()).unwrap_or_default())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "trackTotal",
+            files
+                .iter()
+                .map(|f| f.track_total.map(|n| n.to_string()).unwrap_or_default())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            "discTotal",
+            files
+                .iter()
+                .map(|f| f.disc_total.map(|n| n.to_string()).unwrap_or_default())
+                .collect::<Vec<_>>(),
+        ),
+    ] {
+        if let Some(c) = conflicts_for(field, vals.into_iter()) {
+            conflicts.push(c);
+        }
+    }
+
     Ok(AlbumTags {
         album_artist,
         album_artist_disputed: aa_d,
@@ -193,6 +750,8 @@ pub fn get_album_tags(conn: &Connection, album_id: &str) -> Result<AlbumTags, St
         track_total_disputed: tt_d,
         disc_total,
         disc_total_disputed: dt_d,
+        conflicts,
+        file_count: rows.len(),
     })
 }
 
@@ -220,30 +779,52 @@ fn set_text(tag: &mut Tag, key: ItemKey, value: &str) {
 
 /// Album-level fields ONLY — safe to stamp on every file of an album
 /// (per-track fields are never touched here; empty strings still clear).
-fn apply_shared(tag: &mut Tag, t: &TrackTags) {
-    set_text(tag, ItemKey::AlbumArtist, &t.album_artist);
-    set_text(tag, ItemKey::AlbumTitle, &t.album);
-    set_text(tag, ItemKey::Genre, &t.genre);
-    set_text(tag, ItemKey::Composer, &t.composer);
-    set_text(tag, ItemKey::Label, &t.label);
-    set_text(tag, ItemKey::Comment, &t.comment);
-    set_text(tag, ItemKey::ContentGroup, &t.grouping);
+/// A field is written iff `sel` says it was touched — "fields you did not
+/// edit are never written" is enforced here, at the tag level.
+fn apply_shared(tag: &mut Tag, t: &TrackTags, sel: &TouchedFields) {
+    if sel.album_artist {
+        set_text(tag, ItemKey::AlbumArtist, &t.album_artist);
+    }
+    if sel.album {
+        set_text(tag, ItemKey::AlbumTitle, &t.album);
+    }
+    if sel.genre {
+        set_text(tag, ItemKey::Genre, &t.genre);
+    }
+    if sel.composer {
+        set_text(tag, ItemKey::Composer, &t.composer);
+    }
+    if sel.label {
+        set_text(tag, ItemKey::Label, &t.label);
+    }
+    if sel.comment {
+        set_text(tag, ItemKey::Comment, &t.comment);
+    }
+    if sel.grouping {
+        set_text(tag, ItemKey::ContentGroup, &t.grouping);
+    }
     // NOTE: the year() accessor falls back to RecordingDate (and set_year
     // rewrites an existing RecordingDate), so clearing must purge BOTH or
     // the old value keeps reading back.
-    if let Some(y) = t.year {
-        tag.set_year(u32::try_from(y.max(0)).unwrap_or(u32::MAX));
-    } else {
-        tag.remove_key(&ItemKey::Year);
-        tag.remove_key(&ItemKey::RecordingDate);
+    if sel.year {
+        if let Some(y) = t.year {
+            tag.set_year(u32::try_from(y.max(0)).unwrap_or(u32::MAX));
+        } else {
+            tag.remove_key(&ItemKey::Year);
+            tag.remove_key(&ItemKey::RecordingDate);
+        }
     }
-    tag.remove_key(&ItemKey::TrackTotal);
-    if let Some(n) = t.track_total {
-        tag.set_track_total(n);
+    if sel.track_total {
+        tag.remove_key(&ItemKey::TrackTotal);
+        if let Some(n) = t.track_total {
+            tag.set_track_total(n);
+        }
     }
-    tag.remove_key(&ItemKey::DiscTotal);
-    if let Some(n) = t.disc_total {
-        tag.set_disk_total(n);
+    if sel.disc_total {
+        tag.remove_key(&ItemKey::DiscTotal);
+        if let Some(n) = t.disc_total {
+            tag.set_disk_total(n);
+        }
     }
 }
 
@@ -338,13 +919,26 @@ fn repair_stacked_tags(path: &Path, expected: &Tag) -> Result<(), String> {
     Ok(())
 }
 
-pub fn save_track_tags(conn: &Connection, track_id: &str, tags: &TrackTags) -> Result<(), String> {
-    let path: String = conn
-        .query_row("SELECT path FROM tracks WHERE id = ?1", [track_id], |r| r.get(0))
+pub fn save_track_tags(
+    conn: &Connection,
+    track_id: &str,
+    tags: &TrackTags,
+    art: &ArtChange,
+) -> Result<(), String> {
+    validate(tags)?;
+    let (path, album_id): (String, String) = conn
+        .query_row(
+            "SELECT path, album_id FROM tracks WHERE id = ?1",
+            [track_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .map_err(|_| "unknown track".to_string())?;
+    let target = resolve_art(conn, &album_id, art)?;
     let tags = tags.clone();
+    // A track save always writes its one file — the modal shows every field
+    // of it, and a one-file blast radius needs no diff to state it.
     write_file(Path::new(&path), |tag| {
-        apply_shared(tag, &tags);
+        apply_shared(tag, &tags, &TouchedFields::all());
         apply_per_track(
             tag,
             &tags.title,
@@ -352,32 +946,105 @@ pub fn save_track_tags(conn: &Connection, track_id: &str, tags: &TrackTags) -> R
             tags.track_no,
             tags.disc_no,
         );
+        match &target {
+            ArtTarget::Keep => {}
+            ArtTarget::Clear => set_pictures(tag, None),
+            ArtTarget::Set(r) => set_pictures(tag, Some(r)),
+        }
     })
 }
 
-/// Apply the shared album-level fields to every file in the album.
-/// Per-track fields (title/artist/number/disc) are NEVER touched here —
-/// they are edited track-by-track. Every file is attempted even if some
-/// fail; returns all errors joined.
+/// Stamp the touched shared fields + the artwork decision onto the files
+/// that actually differ — the write set, not the whole album. Folder art is
+/// replaced/created/removed alongside (folder art outranks embedded, so the
+/// editor must not pretend otherwise) and every folder-level act lands in
+/// the receipt. Every file is attempted even if some fail; errors are
+/// joined, receipts kept out of them because a receipt is not an error.
 pub fn save_album_tags(
     conn: &Connection,
     album_id: &str,
     shared: &TrackTags,
-) -> Result<usize, String> {
+    touched: &TouchedFields,
+    art: &ArtChange,
+) -> Result<SaveReport, String> {
+    validate(shared)?;
     let RowPaths(rows) = album_rows(conn, album_id)?;
+    let total = rows.len();
     let shared = shared.clone();
+    let target = resolve_art(conn, album_id, art)?;
 
-    let mut saved = 0usize;
+    let mut written = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut receipt: Vec<String> = Vec::new();
     for (_, path) in &rows {
-        let result = write_file(path, |tag| apply_shared(tag, &shared));
+        let (current, pics) = match read_file_full(path) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
+        };
+        if !fields_differ(&current, &shared, touched) && !art_differs(&pics, &target) {
+            continue; // already says exactly this — do not touch its mtime
+        }
+        let result = write_file(path, |tag| {
+            apply_shared(tag, &shared, touched);
+            match &target {
+                ArtTarget::Keep => {}
+                ArtTarget::Clear => set_pictures(tag, None),
+                ArtTarget::Set(r) => set_pictures(tag, Some(r)),
+            }
+        });
         match result {
-            Ok(()) => saved += 1,
+            Ok(()) => written += 1,
             Err(e) => errors.push(e),
         }
     }
+
+    // Folder art moves with the album's decision. Encoding to JPEG here (not
+    // storing a PNG under .jpg) keeps the file honest for every other
+    // reader in the wild; a replaced winner keeps its name whatever its
+    // bytes, because the user's folder is where they left it.
+    if !matches!(target, ArtTarget::Keep) {
+        if let Some(dir) = crate::library::artwork::dominant_dir(conn, album_id) {
+            match &target {
+                ArtTarget::Clear => {
+                    if let Some(w) = crate::library::artwork::folder_art(&dir) {
+                        match std::fs::remove_file(&w) {
+                            Ok(()) => receipt.push(format!("removed {}", file_name(&w))),
+                            Err(e) => errors.push(format!("{}: {e}", w.display())),
+                        }
+                    }
+                }
+                ArtTarget::Set(r) => {
+                    match to_jpeg(&r.data) {
+                        Ok(jpeg) => {
+                            let (path, verb) =
+                                match crate::library::artwork::folder_art(&dir) {
+                                    Some(w) => (w, "replaced"),
+                                    None => (dir.join("cover.jpg"), "wrote"),
+                                };
+                            match std::fs::write(&path, &jpeg) {
+                                Ok(()) => {
+                                    receipt.push(format!("{} {}", verb, file_name(&path)))
+                                }
+                                Err(e) => errors.push(format!("{}: {e}", path.display())),
+                            }
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                }
+                ArtTarget::Keep => unreachable!(),
+            }
+        }
+    }
+
     if errors.is_empty() {
-        Ok(saved)
+        Ok(SaveReport {
+            written,
+            total,
+            receipt,
+        })
     } else {
         Err(errors.join("; "))
     }
@@ -448,6 +1115,35 @@ mod tests {
     }
 
     #[test]
+    fn track_file_names_the_file_and_flags_pending() {
+        let root = temp_dir("track-file");
+        copy_tree(&fixtures_src(), &root);
+        let conn = scanned_db(&root);
+        let tid = track_id(&conn, "Silent Echoes");
+        let album = conn
+            .query_row(
+                "SELECT album_id FROM tracks WHERE id = ?1",
+                [&tid],
+                |r| r.get::<_, String>(0),
+            )
+            .expect("album id");
+        let info = track_file(&conn, &tid).expect("track file");
+        // The identity row shows a real file name; the stepper reads the id.
+        assert!(
+            info.file.starts_with("01 - Silent Echoes.") && info.file.contains("."),
+            "got {:?}",
+            info.file
+        );
+        assert_eq!(info.album_id, album);
+        assert!(!info.staged);
+        assert!(info.path.contains(&info.file));
+        // The stays-behind caution's gate: a pending file reads as pending.
+        conn.execute("UPDATE tracks SET staged = 1 WHERE id = ?1", [&tid])
+            .expect("flag");
+        assert!(track_file(&conn, &tid).expect("staged").staged);
+    }
+
+    #[test]
     fn save_read_roundtrip_incl_clearing() {
         let root = temp_dir("roundtrip");
         copy_tree(&fixtures_src(), &root);
@@ -475,7 +1171,7 @@ mod tests {
             comment: "edited by the tag editor test".into(),
             grouping: "Ween Era".into(),
         };
-        save_track_tags(&conn, &tid, &full).expect("save");
+        save_track_tags(&conn, &tid, &full, &ArtChange::Keep).expect("save");
 
         // Read straight from the FILE (no rescan involved).
         let reread = get_track_tags(&conn, &tid).expect("reread");
@@ -490,7 +1186,7 @@ mod tests {
         cleared.year = None;
         cleared.track_total = None;
         cleared.disc_total = None;
-        save_track_tags(&conn, &tid, &cleared).expect("clear-save");
+        save_track_tags(&conn, &tid, &cleared, &ArtChange::Keep).expect("clear-save");
         let after = get_track_tags(&conn, &tid).expect("post-clear read");
         assert_eq!(after, cleared);
 
@@ -547,7 +1243,7 @@ mod tests {
             track_no: Some(1),
             ..Default::default()
         };
-        save_track_tags(&conn, &tid, &tags).expect("save onto tagless file");
+        save_track_tags(&conn, &tid, &tags, &ArtChange::Keep).expect("save onto tagless file");
         let reread = get_track_tags(&conn, &tid).expect("reread");
         assert_eq!(reread, tags);
         let _ = std::fs::remove_dir_all(&root);
@@ -596,7 +1292,14 @@ mod tests {
         };
         for artist_name in ["The Real Band", "Wrong Artist"] {
             let aid = album_id(&conn, "Split Me", artist_name);
-            save_album_tags(&conn, &aid, &shared).expect("save album half");
+            save_album_tags(
+                &conn,
+                &aid,
+                &shared,
+                &TouchedFields::all(),
+                &ArtChange::Keep,
+            )
+            .expect("save album half");
         }
 
         // Rescan through the REAL grouping path: now one album, two tracks.
@@ -703,6 +1406,7 @@ mod tests {
                 album_artist: "The Survivors".into(),
                 ..Default::default()
             },
+            &ArtChange::Keep,
         )
         .expect("save");
 
@@ -715,6 +1419,227 @@ mod tests {
         );
         assert_eq!(tag.get_string(&ItemKey::AlbumArtist), Some("The Survivors"));
         assert_eq!(final_read.tags().len(), 1, "collapsed to a single ID3v2");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── Tag Editor Redesign, Phase A ──────────────────────────────────────
+
+    fn png_solid(color: [u8; 3]) -> Vec<u8> {
+        let buf = image::RgbaImage::from_pixel(8, 8, image::Rgba([color[0], color[1], color[2], 255]));
+        let img = image::DynamicImage::ImageRgba8(buf);
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn genre_of(path: &Path) -> String {
+        read_file(path).unwrap().genre
+    }
+
+    fn pics_of(path: &Path) -> Vec<String> {
+        read_file_full(path).unwrap().1
+    }
+
+    fn giants(root: &Path) -> (Connection, String, Vec<PathBuf>) {
+        copy_tree(&fixtures_src(), root);
+        let conn = scanned_db(root);
+        let aid = album_id(&conn, "Giants & Monsters", "Helloween");
+        let files = conn
+            .prepare_cached("SELECT path FROM tracks WHERE album_id = ?1")
+            .unwrap()
+            .query_map([&aid], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| PathBuf::from(r.unwrap()))
+            .collect();
+        (conn, aid, files)
+    }
+
+    #[test]
+    fn conflicts_report_values_with_counts() {
+        let root = temp_dir("conflicts");
+        let (conn, aid, files) = giants(&root);
+        let before = get_album_tags(&conn, &aid).unwrap();
+        assert!(before.genre.is_empty(), "fixtures carry no genre");
+        let g0 = before.conflicts.iter().find(|c| c.field == "genre").expect("census");
+        assert!(g0.values.is_empty() && g0.present == 0, "census covers quiet fields too");
+
+        // Two files start disagreeing; the third stays silent. Absence is
+        // not a contender — exactly two values must show, count 1 each.
+        let mut tag_file = |p: &Path, g: &str| {
+            let mut tagged = lofty::read_from_path(p).unwrap();
+            tagged.primary_tag_mut().unwrap().set_genre(g.to_string());
+            tagged.save_to_path(p, Default::default()).unwrap();
+        };
+        tag_file(&files[0], "Folk");
+        tag_file(&files[1], "Metal");
+
+        let at = get_album_tags(&conn, &aid).unwrap();
+        let c = at.conflicts.iter().find(|c| c.field == "genre").expect("genre conflict");
+        assert!(at.genre_disputed, "legacy flag still set");
+        assert_eq!(c.values.len(), 2, "the silent file does not contend");
+        assert_eq!(c.present, 2, "…but the census still knows it is silent");
+        assert_eq!(c.values[0].value, "Folk", "first-seen order on equal counts");
+        assert_eq!(c.values[0].count, 1);
+        assert_eq!(c.values[1].value, "Metal");
+        assert_eq!(c.values[1].count, 1);
+
+        // A majority reads first:
+        tag_file(&files[2], "Metal");
+        let at = get_album_tags(&conn, &aid).unwrap();
+        let c = at.conflicts.iter().find(|c| c.field == "genre").unwrap();
+        assert_eq!(c.values[0].value, "Metal");
+        assert_eq!(c.values[0].count, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn album_save_writes_only_files_that_differ() {
+        let root = temp_dir("wrideset");
+        let (conn, aid, files) = giants(&root);
+        let touched = TouchedFields { genre: true, ..Default::default() };
+
+        // The fixtures have no genre: stamping one reaches every file…
+        let shared = TrackTags { genre: "X".into(), ..Default::default() };
+        let rep = save_album_tags(&conn, &aid, &shared, &touched, &ArtChange::Keep).unwrap();
+        assert_eq!(rep.written, files.len(), "empty differs from X");
+        for f in &files {
+            assert_eq!(genre_of(f), "X");
+        }
+
+        // …saving the same value again writes NOTHING — no mtime bumps, no
+        // re-parse, an honest zero the modal can print.
+        let rep = save_album_tags(&conn, &aid, &shared, &touched, &ArtChange::Keep).unwrap();
+        assert_eq!(rep.written, 0, "untouched-equal save is a no-op");
+        assert_eq!(rep.total, files.len());
+
+        // One file drifts; the next save is a one-file write set, and only
+        // the touched field moved anywhere.
+        let mut tagged = lofty::read_from_path(&files[1]).unwrap();
+        tagged.primary_tag_mut().unwrap().set_genre("Folk".into());
+        tagged.save_to_path(&files[1], Default::default()).unwrap();
+        let title_before = read_file(&files[1]).unwrap().title;
+        let rep = save_album_tags(&conn, &aid, &shared, &touched, &ArtChange::Keep).unwrap();
+        assert_eq!(rep.written, 1, "the drift is healed, the two agreeing files untouched");
+        assert_eq!(genre_of(&files[1]), "X");
+        assert_eq!(read_file(&files[1]).unwrap().title, title_before, "untouched fields stay");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn artwork_lifecycle_upload_hash_clear_and_folder_art() {
+        let root = temp_dir("artwork");
+        let (conn, aid, files) = giants(&root);
+        let cache = root.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let flac = files.iter().find(|f| f.extension().is_some_and(|e| e == "flac")).unwrap();
+        let other = files.iter().find(|f| *f != flac).unwrap();
+        let red = png_solid([255, 0, 0]);
+        let blue = png_solid([0, 0, 255]);
+        let red_hash = blake3::hash(&red).to_hex().to_string();
+        let blue_hash = blake3::hash(&blue).to_hex().to_string();
+        let untouched = TouchedFields::default();
+        let aid_s = aid.clone();
+
+        // Upload onto one track: the file ends with EXACTLY that picture.
+        let tid: String = conn
+            .query_row("SELECT id FROM tracks WHERE path = ?1", [flac.to_str().unwrap()], |r| r.get(0))
+            .unwrap();
+        save_track_tags(
+            &conn, &tid,
+            &get_track_tags(&conn, &tid).unwrap(),
+            &ArtChange::Upload { image: b64(&red), mime: String::new() },
+        ).unwrap();
+        let pics = pics_of(flac);
+        assert_eq!(pics, vec![red_hash.clone()], "one picture, uploaded bytes");
+
+        // The blue one goes onto a sibling by upload too…
+        let tid2: String = conn
+            .query_row("SELECT id FROM tracks WHERE path = ?1", [other.to_str().unwrap()], |r| r.get(0))
+            .unwrap();
+        save_track_tags(
+            &conn, &tid2,
+            &get_track_tags(&conn, &tid2).unwrap(),
+            &ArtChange::Upload { image: b64(&blue), mime: String::new() },
+        ).unwrap();
+
+        // …then the ALBUM adjudicates on the blue via its hash: the red file
+        // is written, the already-blue one is not, and the fixture's
+        // folder.jpg is replaced in place (JPEG bytes) with a receipt naming
+        // it — folder art outranks embedded, so the editor must not lie.
+        let rep = save_album_tags(
+            &conn, &aid_s,
+            &TrackTags::default(),
+            &untouched,
+            &ArtChange::Hash { hash: blue_hash.clone() },
+        ).unwrap();
+        assert_eq!(rep.written, 2, "the red file and the picture-less one differed; the blue one did not");
+        assert_eq!(pics_of(flac), vec![blue_hash.clone()]);
+        assert_eq!(pics_of(other), vec![blue_hash.clone()]);
+        assert!(rep.receipt.iter().any(|r| r.starts_with("replaced ") && r.contains("folder.jpg")), "{rep:?}");
+        let folder_jpg = root.join("Helloween/Giants & Monsters (2021)/folder.jpg");
+        let folder_bytes = std::fs::read(&folder_jpg).unwrap();
+        let fmt = image::ImageReader::new(std::io::Cursor::new(&folder_bytes))
+            .with_guessed_format()
+            .unwrap()
+            .format();
+        assert!(matches!(fmt, Some(image::ImageFormat::Jpeg)), "replaced with real JPEG");
+        let img = image::load_from_memory(&folder_bytes).unwrap();
+        let px = *img.to_rgb8().get_pixel(2, 2);
+        assert!(px.0[2] > 128 && px.0[0] < 64, "it is the blue one: {:?}", px.0);
+
+        // Inventory: candidates with census, folder winner named, the folder
+        // art CURRENT (pipeline precedence), previews written. The folder
+        // tile is its OWN candidate — it holds re-encoded JPEG bytes, not
+        // the PNG that was adjudicated (dedupe is by bytes, as specced).
+        let inv = list_art_candidates(&conn, &aid_s, Some(&tid), &cache).unwrap();
+        assert_eq!(inv.folder_art.as_deref(), Some("folder.jpg"));
+        let folder_hash = blake3::hash(&folder_bytes).to_hex().to_string();
+        assert_eq!(inv.current.as_deref(), Some(folder_hash.as_str()), "winner = replaced folder art");
+        assert_eq!(inv.track_pics, vec![blue_hash.clone()], "the asked track's own picture");
+        let blue_c = inv.candidates.iter().find(|c| c.hash == blue_hash).expect("blue candidate");
+        assert_eq!(blue_c.count, 3, "all three files carry the PNG bytes");
+        assert!(blue_c.label.starts_with("in 3 files"), "{}", blue_c.label);
+        let folder_c = inv
+            .candidates
+            .iter()
+            .find(|c| c.hash == folder_hash)
+            .expect("the folder JPEG is its own tile");
+        assert_eq!(folder_c.folder.as_deref(), Some("folder.jpg"));
+        assert_eq!(folder_c.count, 0, "it lives in no file (yet)");
+        assert!(
+            !inv.candidates.iter().any(|c| c.hash == red_hash),
+            "the adjudication REPLACED the red — the inventory is the album's current truth"
+        );
+        assert_eq!(inv.files_with_art, 3, "every file carries the blue now");
+        assert_eq!(inv.candidates.len(), 2, "blue + the folder JPEG, nothing else");
+        let h8 = &blue_hash[..8];
+        assert!(crate::library::artwork::thumbs_dir(&cache).join(format!("art-{h8}")).join("256.webp").is_file(), "preview thumb");
+
+        // Clear: embedded gone from every file that had one, folder art
+        // deleted, receipt says so out loud…
+        let rep = save_album_tags(&conn, &aid_s, &TrackTags::default(), &untouched, &ArtChange::Clear).unwrap();
+        for f in &files {
+            if f.extension().is_some_and(|e| e == "wav") {
+                continue;
+            }
+            assert!(pics_of(f).is_empty(), "{} cleared", f.display());
+        }
+        assert!(rep.receipt.iter().any(|r| r.starts_with("removed ") && r.contains("folder.jpg")), "{rep:?}");
+
+        // …and the targeted refresh turns that truth into a NULLed cover —
+        // the placeholder returns honestly.
+        crate::library::artwork::refresh_one(&conn, &cache, &aid_s).unwrap();
+        let cover: Option<String> = conn
+            .query_row("SELECT cover FROM albums WHERE id = ?1", [&aid_s], |r| r.get(0))
+            .unwrap();
+        let cover_gone = cover.is_none() || cover.as_deref() == Some("");
+        assert!(cover_gone, "no source left: cover = {cover:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -14,9 +14,11 @@
          fades in reads as a delay.
        • Inset accent ring on `:focus-visible` — the app's only focus language,
          inset because the box sits inside the surface's padding.
-       • `autofocus` only for a surface with nothing else to focus (About). A
-         surface that opens ON work takes focus to the work instead (the import
-         list focuses its first decision).
+       • Surfaces place focus inside themselves on open — but ON THE DIALOG
+         (a `tabindex="-1"` container, see About), never on this button: an
+         autofocused ✕ paints on window activation and reads as "selected"
+         to an owner who never touched it (2026-09-03). First Tab arrives
+         here anyway.
        • Escape and the scrim/backdrop do the same verb. This is the visible one,
          never the only one.
        • Closing returns focus to whatever opened it — the caller's job, and the
@@ -42,7 +44,6 @@
   let {
     onclick,
     label = "Close",
-    autofocus = false,
     class: klass = "",
   }: {
     onclick: () => void;
@@ -50,23 +51,10 @@
      *  drift apart. "Close" is enough inside a dialog that says what it is;
      *  "Close equalizer" is right when several surfaces look alike. */
     label?: string;
-    /** Surfaces must place focus inside themselves on open. */
-    autofocus?: boolean;
     /** Positioning for a surface with no header row (About). Forwarded onto the
      *  button, so the rule that uses it must live in `:global()`. */
     class?: string;
   } = $props();
-
-  let btn = $state<HTMLButtonElement | null>(null);
-  let focusedOnce = false;
-  $effect(() => {
-    if (autofocus && btn && !focusedOnce) {
-      focusedOnce = true;
-      // preventScroll: a surface whose body is a scroll port would jump the list
-      // to whatever the focus landed on.
-      btn.focus({ preventScroll: true });
-    }
-  });
 </script>
 
 <button
@@ -75,7 +63,6 @@
   aria-label={label}
   title={label}
   {onclick}
-  bind:this={btn}
 >
   <!-- The gear's ✕, verbatim: 16-unit box, 8-unit cross, 1.4 stroke, round caps.
        Drawn, not a font glyph — a text ✕ is a third typographic family in a glass

@@ -29,7 +29,7 @@ pub fn thumb_path(cache_dir: &Path, album_id: &str, size: u32) -> PathBuf {
 
 /// The dominant directory among an album's tracks (most tracks wins; ties →
 /// first seen). Cover art lives in album directories.
-fn dominant_dir(conn: &Connection, album_id: &str) -> Option<PathBuf> {
+pub(crate) fn dominant_dir(conn: &Connection, album_id: &str) -> Option<PathBuf> {
     let mut stmt = conn
         .prepare("SELECT path FROM tracks WHERE album_id = ?1")
         .ok()?;
@@ -47,10 +47,19 @@ fn dominant_dir(conn: &Connection, album_id: &str) -> Option<PathBuf> {
         .map(|(dir, _)| dir)
 }
 
-fn folder_art(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn folder_art(dir: &Path) -> Option<PathBuf> {
+    folder_art_all(dir).into_iter().next()
+}
+
+/// Every existing folder-art file in the directory, in FOLDER_ART priority
+/// order. The tag editor's candidate list shows each by name; `folder_art`
+/// is just the first (the winner the cover pipeline resolves to).
+pub(crate) fn folder_art_all(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     // Case-insensitive match (Cover.jpg, FOLDER.PNG, …) while preserving the
     // FOLDER_ART priority order. One read_dir per album directory.
-    let entries = std::fs::read_dir(dir).ok()?;
     let mut by_lower: HashMap<String, PathBuf> = HashMap::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -63,7 +72,9 @@ fn folder_art(dir: &Path) -> Option<PathBuf> {
     }
     FOLDER_ART
         .iter()
-        .find_map(|name| by_lower.get(*name).cloned())
+        .filter_map(|name| by_lower.get(*name).cloned())
+        .filter(|p| p.is_file())
+        .collect()
 }
 
 /// Largest embedded picture among the given track files (lofty Picture data).
@@ -87,7 +98,7 @@ fn embedded_art(paths: &[PathBuf]) -> Option<Vec<u8>> {
 
 struct Job {
     album_id: String,
-    source: Source,
+    source: Option<Source>,
 }
 
 enum Source {
@@ -96,10 +107,27 @@ enum Source {
     Embedded(Vec<PathBuf>),
 }
 
+/// Resolve one album's cover source (folder art > largest embedded),
+/// shared by the bulk `refresh` and the targeted `refresh_one`.
+fn album_source(conn: &Connection, album_id: &str) -> Option<Source> {
+    if let Some(path) = dominant_dir(conn, album_id).and_then(|dir| folder_art(&dir)) {
+        return Some(Source::Folder(path));
+    }
+    let mut stmt = conn
+        .prepare("SELECT path FROM tracks WHERE album_id = ?1")
+        .ok()?;
+    let rows = stmt
+        .query_map([&album_id], |r| r.get::<_, String>(0))
+        .ok()?;
+    Some(Source::Embedded(
+        rows.flatten().map(PathBuf::from).collect(),
+    ))
+}
+
 /// Decode + thumbnail + color-extract for one album. DB-free by design so it
 /// can run on rayon workers (rusqlite `Connection` is not `Sync`).
 fn process_album(job: &Job, cache_dir: &Path) -> Option<(String, String, String)> {
-    let img = match &job.source {
+    let img = match job.source.as_ref()? {
         Source::Folder(path) => image::open(path).ok(),
         Source::Embedded(paths) => embedded_art(paths).and_then(|d| image::load_from_memory(&d).ok()),
     }?;
@@ -114,7 +142,18 @@ fn process_album(job: &Job, cache_dir: &Path) -> Option<(String, String, String)
     let colors = colors::extract_image(&img).ok()?;
     let c1 = format!("{:02x}{:02x}{:02x}", colors[0], colors[1], colors[2]);
     let c2 = format!("{:02x}{:02x}{:02x}", colors[3], colors[4], colors[5]);
-    Some((format!("thumb://{}/512.webp", job.album_id), c1, c2))
+    // Cache-busting lives in the URL: `<size>-<hash8>` where hash8 hashes the
+    // bytes just written. The thumb protocol parses the size before the dash,
+    // so old hash-less URLs keep resolving; a cover that regenerates
+    // identically keeps its URL (and its webview cache), an edited one does
+    // not — which is what artwork editing requires.
+    let bytes = std::fs::read(thumb_path(cache_dir, &job.album_id, 512)).ok()?;
+    let h8 = blake3::hash(&bytes).to_hex()[..8].to_string();
+    Some((
+        format!("thumb://{}/512-{}.webp", job.album_id, h8),
+        c1,
+        c2,
+    ))
 }
 
 /// Process every album that still lacks cover or colors. Returns how many
@@ -147,21 +186,12 @@ pub fn refresh(
 
     let mut jobs: Vec<Job> = Vec::new();
     for album_id in pending {
-        let source = match dominant_dir(conn, &album_id).and_then(|dir| folder_art(&dir)) {
-            Some(path) => Source::Folder(path),
-            None => {
-                let Ok(mut stmt) =
-                    conn.prepare("SELECT path FROM tracks WHERE album_id = ?1")
-                else {
-                    continue;
-                };
-                let Ok(rows) = stmt.query_map([&album_id], |r| r.get::<_, String>(0)) else {
-                    continue;
-                };
-                Source::Embedded(rows.flatten().map(PathBuf::from).collect())
-            }
-        };
-        jobs.push(Job { album_id, source });
+        if let Some(source) = album_source(conn, &album_id) {
+            jobs.push(Job {
+                album_id,
+                source: Some(source),
+            });
+        }
     }
 
     // Phase 2 (parallel): decode, write thumbs, extract colors.
@@ -212,6 +242,35 @@ pub fn refresh(
     Ok(filled)
 }
 
+/// Re-run the artwork pipeline for ONE album regardless of what the DB
+/// believes it already has — the path an artwork edit (or a cleared one)
+/// takes. Old thumbs are deleted so stale sizes cannot linger; an album left
+/// with no art source at all has its cover/colors NULLed, and the UI
+/// placeholder returns honestly.
+pub fn refresh_one(conn: &Connection, cache_dir: &Path, album_id: &str) -> Result<(), String> {
+    let known: bool = conn
+        .query_row("SELECT 1 FROM albums WHERE id = ?1", [album_id], |_| Ok(true))
+        .unwrap_or(false);
+    if !known {
+        return Err(format!("unknown album {album_id}"));
+    }
+    let _ = std::fs::remove_dir_all(thumbs_dir(cache_dir).join(album_id));
+    let job = Job {
+        album_id: album_id.to_string(),
+        source: album_source(conn, album_id),
+    };
+    let (cover, c1, c2) = match process_album(&job, cache_dir) {
+        Some(v) => (Some(v.0), Some(v.1), Some(v.2)),
+        None => (None, None, None),
+    };
+    conn.execute(
+        "UPDATE albums SET cover = ?2, color_c1 = ?3, color_c2 = ?4 WHERE id = ?1",
+        rusqlite::params![album_id, cover, c1, c2],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,7 +317,10 @@ mod tests {
             )
             .expect("folder row");
         assert!(cover.starts_with("thumb://al-"), "cover = {cover}");
-        assert!(cover.ends_with("/512.webp"));
+        assert!(
+            cover.contains("/512-") && cover.ends_with(".webp"),
+            "hashed cache-busting URL: {cover}"
+        );
         assert_eq!(c1.len(), 6);
         let album_id = cover
             .trim_start_matches("thumb://")
