@@ -448,7 +448,7 @@
     border-radius: 50%;
     border: 1.5px solid rgba(255, 255, 255, 0.85);
     background: rgba(0, 0, 0, 0.35);
-    color: #fff;
+    color: var(--on-cover);
     font-size: 12px;
     line-height: 17px;
     text-align: center;
@@ -482,7 +482,7 @@
     height: 20px;
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.45);
-    color: #fff;
+    color: var(--on-cover);
     font-size: 11px;
     line-height: 19px;
     text-align: center;

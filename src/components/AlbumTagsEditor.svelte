@@ -12,6 +12,7 @@
   import { prefersReducedMotion } from "svelte/motion";
   import { library } from "../lib/stores/library.svelte";
   import { ui } from "../lib/stores/ui.svelte";
+  import { announcer } from "../lib/stores/announcer.svelte";
   import { rescan } from "../lib/stores/scanner.svelte";
   import TagSurface from "./TagSurface.svelte";
   import FieldGrid from "./FieldGrid.svelte";
@@ -245,8 +246,13 @@
         },
       );
       receipt = { written: rep.written, total: rep.total, lines: rep.receipt };
+      // The receipt, heard verbatim (WCAG 4.1.3).
+      announcer.say(
+        `Wrote ${rep.written} of ${rep.total} ${rep.total === 1 ? "file" : "files"}`,
+      );
     } catch (e) {
       error = String(e);
+      announcer.say(`Saving failed: ${error}`);
     } finally {
       saving = false;
     }

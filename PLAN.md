@@ -60,6 +60,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Global Menu rebuild: the broadcast mirrors the panes | ✅ 2026-09-03 · **0.9.0** |
 | Context-menu pass: one album-menu builder, `reveal_container`, artist pending dot | ✅ 2026-09-03 · **0.9.0** |
 | Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D/E ⬜ |
+| Audit pass: aria-live announcer (WCAG 4.1.3) + radii on-scale + --on-cover | ✅ 2026-09-03 · **0.9.1** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -3295,3 +3296,21 @@ Phase D (entrances/copy carry-over) and Phase E (pending-track picker) remain.
   its opener and restores focus on close (guarded: detached context-menu
   openers, body). ArtSelector hint tightened to "Click to enlarge · the dot
   marks the cover."
+  (7) APP-WIDE AUDIT (impeccable, 16/20 Good; the two detector
+  layout-transition warnings VERIFIED intentional — the .panel-slot margin
+  rides the expansion's own reflow, documented in-component). The one real
+  gap, fixed in 0.9.1: **status messages were silent** (WCAG 4.1.3) —
+  src/lib/stores/announcer.svelte.ts + ONE visually-hidden
+  role=status/aria-live=polite region in App.svelte, deliberately OUTSIDE
+  the inert stage so a modal cannot mute it; fed by scan-finished (success
+  AND failure), both tag editors' save paths (success and failure), the
+  same sentences the visual layer shows; say() grows a space tail on equal
+  consecutive messages because equal text = no node change = no
+  announcement. ManageImports and the sidebar scan-note already own their
+  polite regions — nothing double-announces. Verified by screenshotting the
+  region with its sr-only temporarily stripped ("Library updated" — the
+  watcher rescan after a file save, narrated). The two off-scale radii are
+  on-scale (--radius-icon on the toggle box, --radius-pill on the scrollbar
+  thumb — 5px wide, it was always a pill), and cover-overlay white is now
+  var(--on-cover) (3 sites). Detector residue: only the two intentional
+  warnings.

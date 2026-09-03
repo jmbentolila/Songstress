@@ -6,6 +6,7 @@ import { sortKey } from "../sort";
 import { BOOT_GRACE_MS, ENTER_MS } from "../loadingState";
 import { isTauri } from "../window";
 import { pushSetting, ui } from "./ui.svelte";
+import { announcer } from "./announcer.svelte";
 
 /**
  * Live mode is the default inside Tauri; `VITE_LIB=fake` opts out (and the
@@ -74,6 +75,9 @@ class LibraryStore {
         this.scanning = false;
         const err = (e.payload as { error?: string | null }).error ?? "";
         this.scanError = err;
+        // The same sentence the chrome shows, heard (WCAG 4.1.3): a scan
+        // that failed while you watched something else must reach you.
+        announcer.say(err ? `Scan failed: ${err}` : "Library updated");
         if (err) {
           // Nothing was written — the run stops before grouping and the upserts —
           // so there is no new dump to read, and the footer must not stamp

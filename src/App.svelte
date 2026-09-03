@@ -16,6 +16,7 @@
   import { importMusic } from "./lib/stores/imports.svelte";
   import { modalOpen } from "./lib/stores/surfaces.svelte";
   import { library } from "./lib/stores/library.svelte";
+  import { announcer } from "./lib/stores/announcer.svelte";
   import { playback, initEq } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
 
@@ -126,6 +127,11 @@
     <Sidebar />
     <PlayBar />
   </div>
+  <!-- The app's one status-message region (audit 0.9.0 / WCAG 4.1.3):
+       visually hidden, OUTSIDE the inert stage so a modal cannot mute it,
+       fed by announcer.say() from the stores and editors — the same
+       sentences the footers and notes show. -->
+  <div class="sr-only" role="status" aria-live="polite">{announcer.message}</div>
   <TagEditor />
   <About />
   <MusicFolders />

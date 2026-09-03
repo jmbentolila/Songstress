@@ -71,7 +71,7 @@
     display: grid;
     place-items: center;
     border: 1px solid var(--border);
-    border-radius: 5px;
+    border-radius: var(--radius-icon);
     background: var(--hover);
     transition: background 160ms ease-out, border-color 160ms ease-out;
   }

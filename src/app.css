@@ -14,6 +14,16 @@
   --radius-window: var(--tb-radius, 14px);
   --radius-panel: 12px;
   --radius-cover: 10px;
+  /* The small end of the scale (audit 0.9.0: two radii lived off-scale —
+     the scale already documents these values; materializing them is the
+     cheapest way to keep drift impossible to re-introduce by typing). */
+  --radius-control: 8px;
+  --radius-icon: 7px;
+  --radius-pill: 999px;
+  /* Text/glyph color for anything that sits ON cover artwork — today
+     always white (covers are scrimmed dark in both themes), tomorrow a
+     token if the light world ever overlays art directly. */
+  --on-cover: #fff;
   /* Motion tokens — extend these, don't hand-type curves per component.
      --ease-out is the user-verified panel-choreography curve (frame
      traces + the 20px-line decision in PLAN.md): do not "improve" it. */
@@ -246,7 +256,7 @@ button {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-pill); /* the thumb is 5px wide: a pill */
   border: 3px solid transparent;
   background-clip: content-box;
 }

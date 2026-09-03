@@ -783,7 +783,7 @@
     padding: 2px 8px;
     border-radius: 999px;
     background: rgba(0, 0, 0, 0.62);
-    color: #fff;
+    color: var(--on-cover);
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.07em;

@@ -15,6 +15,7 @@
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { ui } from "../lib/stores/ui.svelte";
   import { rescan } from "../lib/stores/scanner.svelte";
+  import { announcer } from "../lib/stores/announcer.svelte";
   import TagSurface from "./TagSurface.svelte";
   import FieldGrid from "./FieldGrid.svelte";
   import ArtSelector from "./ArtSelector.svelte";
@@ -200,8 +201,11 @@
       // so the fields show disk truth again and the next step starts clean.
       await load();
       written = true;
+      // "Written ✓" in the footer, heard (WCAG 4.1.3).
+      announcer.say(`Written to ${meta?.file ?? "the file"}`);
     } catch (e) {
       error = String(e);
+      announcer.say(`Writing failed: ${error}`);
     } finally {
       saving = false;
     }
