@@ -463,18 +463,25 @@
   // splits. Above the threshold the SHAPE depends on the album (owner
   // ruling, 2026-09-05): a MULTI-DISC album splits into BALANCED halves —
   // it is a genuinely big record, and two even columns match its weight.
-  // SINGLE-disc albums keep the dominant-column form: column 1 caps at 7
-  // and the rest spills into a short second column (9 → 7+2, 10 → 7+3) —
-  // the tail reads as a forming column, not an appendix, and a lone long
-  // disc never sprouts two stumps. Per-disc blocks are part of a
-  // multi-disc album, so they take the balanced shape too (the old disc
+  // The 7-cap dominant-column form (9 → 7+2, 10 → 7+3) is reserved for
+  // SINGLE-disc albums AND for that band only: grid-auto-flow: column
+  // spills EVERY cap-sized chunk into a new column, so a big single-disc
+  // album capped at 7 grows columns (a 23-track "Forever" measured a
+  // 7+7+7+2 four-column octopus the day the cap lost its balance
+  // fallback, same day). Single-disc from 11 therefore halves like the
+  // multi-disc branch — the panel's column budget is TWO, always. The
+  // flag comes from `hasMultipleDiscs` (a fat disc block, living in the
+  // multi-disc branch, takes the balanced shape too; the old disc
   // threshold was 5).
   const SPLIT_MIN = 9;
   const PRE_BALANCE_HEAD = 7;
+  const BALANCE_MIN = 11;
   // Column 1's row count; grid-auto-flow: column fills it before spilling
   // the remainder into column 2.
   function splitRows(n: number, multiDisc: boolean): number {
-    return multiDisc ? Math.ceil(n / 2) : Math.min(PRE_BALANCE_HEAD, n);
+    return multiDisc || n >= BALANCE_MIN
+      ? Math.ceil(n / 2)
+      : Math.min(PRE_BALANCE_HEAD, n);
   }
   function halfRows(n: number, multiDisc: boolean): string {
     return `repeat(${splitRows(n, multiDisc)}, auto)`;

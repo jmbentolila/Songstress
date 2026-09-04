@@ -3898,3 +3898,16 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   the picker cannot drift from what the scanner indexes). Save rides the
   existing ArtChange::Upload wire: extract → arrive as a tile → Save
   writes it like any brought-in image. Version 0.9.15.
+
+### The 7-cap grew a four-column octopus (2026-09-05, same day as the rule)
+
+  Owner screenshot: Queen "Forever" (23 rows, ALL tagged disc 1 — one
+  album, no disc blocks) rendered 7+7+7+2 in FOUR columns. Cause: the
+  same-day rule removed the balance fallback from the single-disc branch,
+  and `grid-auto-flow: column` with a 7-row template spills EVERY 7-item
+  chunk into a NEW column — the cap was only ever sound for the 9–10
+  band it was designed on. Restored (measured owner-side): single-disc
+  BALANCES from 11 like before; the 7-cap lives at 9–10 only; multi-disc
+  balances from 9. The panel's column budget is TWO, always. (The album's
+  skipped numbers 5/19 were innocent: its tags genuinely jump, the count
+  label agreed.) Version 0.9.16.
