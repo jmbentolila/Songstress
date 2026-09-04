@@ -21,7 +21,9 @@ export function albumMenuItems(albumId: string): MenuItem[] {
   const items: MenuItem[] = [
     {
       label: "Edit album tags…",
-      action: () => (ui.tagEditor = { open: true, albumId, trackId: null }),
+      action: () => {
+        ui.tagEditor = { open: true, albumId, trackId: null };
+      },
     },
     SEP,
     // The pair the tracks already are: play NOW (first file that exists —

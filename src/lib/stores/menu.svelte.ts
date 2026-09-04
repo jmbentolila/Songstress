@@ -48,10 +48,10 @@ function handleAction(id: string) {
     // (Save/Discard live there), instead of applying blind from the panel.
     "library.manage-imports": () => openImportManager(),
     "library.choose-folder": () => openMusicFolders(),
-    "appearance.theme-system": () => (ui.theme = "system"),
-    "appearance.theme-light": () => (ui.theme = "light"),
-    "appearance.theme-dark": () => (ui.theme = "dark"),
-    "appearance.playbar-gradient": () => (ui.playbarGradient = !ui.playbarGradient),
+    "appearance.theme-system": () => { ui.theme = "system"; },
+    "appearance.theme-light": () => { ui.theme = "light"; },
+    "appearance.theme-dark": () => { ui.theme = "dark"; },
+    "appearance.playbar-gradient": () => { ui.playbarGradient = !ui.playbarGradient; },
     // Rows the menu cannot render: open the sidebar stack AT the pane (the
     // size sliders) or the pane's sub layer (the accent picker).
     "appearance.accent": () => openSettingsLayer("appearance", "accent"),
@@ -62,7 +62,7 @@ function handleAction(id: string) {
     "playback.repeat": () => cycleRepeat(),
     "playback.eq": () => setEqEnabled(!playback.eq.enabled),
     "playback.eq-preset": () => cycleEqPreset(),
-    "playback.eq-customize": () => (ui.eqOpen = true),
+    "playback.eq-customize": () => { ui.eqOpen = true; },
     "playback.album-prev": () => albumSkip(-1),
     "playback.album-next": () => albumSkip(1),
     // The old no-op: the sidebar's About footer passes its trigger element as

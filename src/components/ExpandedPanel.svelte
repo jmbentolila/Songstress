@@ -86,7 +86,7 @@
     // touched (owner request, 2026-09-03).
     selectedId = track.id;
     const items: MenuItem[] = [
-      { label: "Edit tags…", action: () => (ui.tagEditor = { open: true, albumId: null, trackId: track.id }) },
+      { label: "Edit tags…", action: () => { ui.tagEditor = { open: true, albumId: null, trackId: track.id }; } },
       SEP,
       // Three playback verbs, in the order of commitment: NOW interrupts
       // (starts the album AT this track, same index base as row click —
