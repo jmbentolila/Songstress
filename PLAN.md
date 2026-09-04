@@ -3493,3 +3493,15 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   business. `window.set_icon` stays — it is the correct app-side push.
 - `kbuildsycoca6 --nosignal` is GONE on Plasma 6.7 (rc=1, quiet) — the
   silent no-op that hid this whole hunt. Plain `kbuildsycoca6`.
+
+### Cache hygiene: thumbnails no longer outlive albums — 0.9.8
+
+  Orphan cleanup at scan end was DB-side only; per-album WebP dirs under
+  the cache leaked whenever an album died (discards, retags to a new
+  key). Measured 301 dirs / 251 rows on the live library.
+  artwork::prune_orphan_thumbs now runs after every scan's artwork
+  post-pass; the live sweep reclaimed 50 dirs (155→129 MB). New DEV
+  door `__scan()` in main.ts (devctl has no __TAURI__; the API is
+  bundle-imported). Doc note: PHASE2.md deleted as dead weight — every
+  root doc earns its place now (README/AGENTS/PLAN + the two impeccable
+  briefs).

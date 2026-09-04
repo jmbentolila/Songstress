@@ -2,6 +2,7 @@ import { mount } from "svelte";
 import "./app.css";
 import { initDevtools } from "./lib/devtools";
 import { library } from "./lib/stores/library.svelte";
+import { rescan } from "./lib/stores/scanner.svelte";
 import App from "./App.svelte";
 
 // DEV-only devtools bridge (no-op in prod): console/IPC/error sink +
@@ -20,6 +21,11 @@ if (import.meta.env.DEV) {
     library.devLoading = on !== false;
     return library.devLoading;
   };
+  // Fire a real incremental scan from the bridge — the devctl console has no
+  // __TAURI__ (the API is bundle-imported, not exposed), and "click the menu"
+  // is not a scriptable door. Used by the thumb-prune verification; kept as
+  // the general scan door for future loops.
+  (window as unknown as { __scan?: () => Promise<void> }).__scan = () => rescan();
 }
 
 const app = mount(App, {
