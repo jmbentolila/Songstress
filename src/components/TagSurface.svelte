@@ -5,12 +5,13 @@
    * place. The body and footer are the editors' business (snippets), because
    * an album save leaves a receipt and a track save does not.
    *
-   * The entrance is timed to its CONTENT, not to the click: `get_album_tags`
-   * / `get_track_tags` is a lofty walk over files, not a cached query, so
-   * this is the one modal where "fetch, then open" is off the table. The dim
-   * arrives on the click (the press is answered in its own frame); the panel
-   * holds still until the fields exist (`waiting`), so the surface never
-   * animates a box it is about to outgrow.
+   * The entrance is sized to its FINAL BOX, not to the fetch: the panel
+   * appears on the click's frame at the STANDARD size (min-height below)
+   * and shows "Reading file tags…" inside it; content only ever EXPANDS
+   * the box (owner ruling 2026-09-05 — the old "wait invisible, reveal
+   * sized to whatever loaded first" made opening a jump). The fetch
+   * behind it (get_album_tags / get_track_tags) is a lofty walk over
+   * files, not a cached query, which is why the loader is shown at all.
    */
   import type { Snippet } from "svelte";
   import { ui } from "../lib/stores/ui.svelte";
@@ -120,7 +121,6 @@
 <div
   class="te-backdrop scrim"
   class:out
-  class:waiting={loading}
   role="presentation"
   onanimationend={onOutroEnd}
   onclick={(e) => e.target === e.currentTarget && close()}
@@ -144,13 +144,15 @@
 </div>
 
 <style>
-  .te-backdrop.waiting > .te {
-    animation: none;
-    opacity: 0;
-  }
-
   .te {
     width: min(680px, calc(100vw - 80px));
+    /* The STANDARD box (owner ruling 2026-09-05): the loading state is
+       shown INSIDE the modal's standard dimensions, and content may
+       only ever EXPAND it — never the other way around, which read as
+       a jump on open. 525px is the measured resting height of the track
+       modal (680x525 sampled live); the album modal starts at this
+       floor too and grows from its own content (chips, receipt). */
+    min-height: 525px;
     max-height: calc(100vh - 120px);
     display: flex;
     flex-direction: column;

@@ -3961,3 +3961,23 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   skeleton activations, dialog geometry unmeasurable-flat (98 rAF frames
   at 680×525 through the earlier step). Owner's track title touched by
   the drive-in tests was restored through the app's own save. 0.9.18.
+
+### The loader lives IN the standard box (2026-09-05, owner ruling)
+
+  The first-open jump survived the skeleton fix because the surface did
+  the opposite of what a modal should: `waiting` hid the panel until the
+  fields existed, then revealed it sized to whatever loaded FIRST — and
+  the stack's 3-tile artwork skeleton (3×172px) was TALLER than the
+  finished picker, so opening a track measured 749 → 525: inflate, then
+  shrink. Owner's rule: the loader sits inside the modal's standard
+  dimensions and content may only ever EXPAND the box.
+  TagSurface: `.te { min-height: 525px }` (the track modal's measured
+  resting height; the album modal floors there too and grows from its
+  own content), the invisible-waiting trick is gone — the panel enters
+  on the click's frame, at final width and the standard height, showing
+  "Reading file tags…" inside it. ArtSelector: stack mode reserves ONE
+  placeholder tile sized exactly like a real one (strip keeps three —
+  sideways, height-neutral). Re-measured open: gone → 674×520 →
+  678×523 → 680×525 — the 520→525 leg is the entrance scale itself; the
+  LAYOUT box is 680×525 from its first frame. Many-candidate albums now
+  can only expand, per the rule. 0.9.19.

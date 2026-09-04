@@ -229,7 +229,14 @@
 
   {#if loading}
     <div class="as-strip" class:as-stack={stack}>
-      {#each [0, 1, 2] as i (i)}
+      <!-- Stack: ONE placeholder, sized exactly like a real stacked tile —
+           three of them made the loading column TALLER than the finished
+           picker (measured 749 → 525 shrink on open), which is the
+           inflate-then-shrink jump the owner ruled against (2026-09-05):
+           the loader sits in the standard box and content may only
+           EXPAND it. Strip: the row scrolls sideways, skeletons there
+           cost no height. -->
+      {#each stack ? [0] : [0, 1, 2] as i (i)}
         <div class="as-tile as-sk"></div>
       {/each}
     </div>
