@@ -487,7 +487,23 @@
 <div class="expander" class:closed={phase === "closed"} class:closing={phase === "closing"}>
   <div class="inner" bind:this={innerEl} style:height={initInnerH}>
     <div class="fade" class:entering>
-      <section class="panel" bind:this={panelEl} style:background={gradient ?? undefined}>
+      <!-- Per-layer background layers: the neutral --panel-bg base under
+           the border, the art gradient clipped to the PADDING box.
+           The old inline `background: <gradient>` shorthand silently
+           reset background-clip to border-box, so the artwork gradient
+           painted under the translucent rounded border — the band came
+           out as a hard, oversaturated rim (the red arc on the red-
+           accented Of Time and Parallels cover; reddest exactly where
+           the 135deg ramp is reddest). The shorthand also dropped the
+           --panel-bg base the .panel class declares. (owner: "that
+           solid line of red looks a bit weird", 2026-09-05) -->
+      <section
+        class="panel"
+        bind:this={panelEl}
+        style:background={gradient
+          ? `${gradient} padding-box padding-box, var(--panel-bg) border-box`
+          : undefined}
+      >
         {#if displayAlbum.cover}
           <img class="art" src={displayAlbum.cover} alt="" draggable="false" decoding="async" />
         {:else}
@@ -839,7 +855,8 @@
   .play-all svg {
     width: 15px;
     height: 15px;
-    translate: 1px 0;
+    /* transform, not standalone `translate` — see Sidebar .search-clear. */
+    transform: translateX(1px);
   }
 
   header p {

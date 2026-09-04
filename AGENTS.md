@@ -134,6 +134,23 @@ public/covers/            album art for the fake library (real folder.jpg files)
   bucket-center incident in git-less history / PLAN.md).
 - **Covers live in `public/covers/`** (plain Vite — `static/` is a SvelteKitism).
   `tauri.conf.json` `frontendDist` is `../dist`.
+- **lofty 0.22.4's `write_id3v1` PANICS truncating legacy fields** — it cuts
+  title/artist/album at 30 bytes and comment at 28 with `split_at` (a BYTE
+  slice), so any v1 field whose cut lands inside a multi-byte char kills the
+  save task mid-write (owner data: a cp1251 ID3v1 comment, album Road To The
+  Unknown). The message reads `end byte index 28 is not a char boundary` —
+  blame the ID3v1 WRITER, not the string's reader (the first diagnosis here
+  fingered parse_ini; wrong — see PLAN.md 2026-09-05). `tags::write_file` is
+  armored: temp+rename under catch_unwind, char-boundary pre-trim of v1
+  fields, retry-once-with-v1-dropped. Upstream fix is lofty ≥0.23.
+- **Probes never compute paths on owner-owned files.** A scratch scheme derived
+  from the target's own path (`path.with_extension("tmp")` → a sibling that can
+  collide with the original, cleanup that deletes "the temp") cost the owner a
+  real mp3 in 2026-09-04 (backup saved it; a temp test's rename landed on the
+  original and its cleanup deleted it). Rule: copy the file to /tmp FIRST and
+  probe the copy; never rename onto, write in, or remove_file a path under
+  ~/Music from test or debug code. Same energy as the panic gotchas: user data
+  gets character ops, char boundaries, and temp+rename — always.
 - **mpv must be spawned with `--no-config`** — the user's `~/.config/mpv/mpv.conf`
   is a broken Windows config (d3d11, C:\ fonts).
 - **No GTK dialogs.** File/folder pickers must go through `kdialog` (see the
@@ -185,6 +202,15 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **Screenshots lie when the game is fullscreen.** Raise our window first:
   WindowsRunner `Match` → `Run(matchId, "activate")`. Never minimize/kill the
   user's windows or change their wallpaper without asking.
+- **This WebKitGTK ignores some modern CSS that computes cleanly.** Measured
+  2026-09-05: unprefixed `user-select` is a no-op (every `none` in the app was
+  dead code — `-webkit-user-select` is mandatory), and the INDIVIDUAL transform
+  properties (`translate:`/`rotate:`/`scale:`) mis-resolve percentage
+  centering on some svg elements — getComputedStyle reports the right value,
+  layout is 4px off (the search-clear ×; traffic lights using the same rule
+  measured fine, so it is per-element, no rule of thumb). Dialect that never
+  lies on this engine: prefixed `user-select`, plain `transform`. Audit with
+  `grep 'user-select' src/ ; grep -rnE '^\s*(translate|rotate|scale):' src/`.
 - **WebKitGTK backdrop-filter does NOT blur in-window content** (verified
   2026-08-27, 2.52/DMABUF): a 32px-bold probe element under the playbar
   stayed pixel-sharp through `blur(80px)` — radius changes are invisible.

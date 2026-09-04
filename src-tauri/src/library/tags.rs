@@ -311,9 +311,14 @@ pub enum ArtChange {
     /// Use an image the album already owns, identified by its blake3 hash
     /// (bytes come from wherever they live — a sibling file or the folder
     /// art — so multi-megabyte images never travel back over IPC).
-    Hash {
-        hash: String,
-    },
+    /// NEWTYPE on purpose: the wire shape the webview sends is
+    /// `{"hash":"<hex>"}` (see src/lib/artChange.ts). As a STRUCT variant
+    /// serde would demand the doubly-nested `{"hash":{"hash":"…"}}` and
+    /// every candidate-pick from the UI died with `invalid args 'art':
+    /// invalid type: string` — measured 2026-09-05 picking a cover on the
+    /// ASMR compilation, where each of the 10 files carries its own
+    /// picture so the candidate pile is the whole point of the modal.
+    Hash(String),
     Upload {
         image: String,
         #[serde(default)]
@@ -449,7 +454,7 @@ fn resolve_art(conn: &Connection, album_id: &str, art: &ArtChange) -> Result<Art
                 .map_err(|e| format!("cover data: {e}"))?;
             Ok(ArtTarget::Set(resolve_bytes(data)?))
         }
-        ArtChange::Hash { hash } => {
+        ArtChange::Hash(hash) => {
             let RowPaths(rows) = album_rows(conn, album_id)?;
             for (_, p) in &rows {
                 let Ok(tagged) = lofty::read_from_path(p) else {
@@ -856,9 +861,81 @@ fn write_file(path: &Path, f: impl FnOnce(&mut Tag)) -> Result<(), String> {
     let tag = ensure_tag(&mut tagged);
     f(tag);
     let expected = tag.clone();
-    tagged
-        .save_to_path(path, lofty::config::WriteOptions::default())
-        .map_err(|e| format!("{path:?}: {e}"))?;
+    // TEMP + RENAME, and a CATCHED PANIC. lofty 0.22.4's write_id3v1
+    // truncates the 30-byte legacy field with a byte slice and PANICS on
+    // a field whose 28th byte lands inside a multi-byte char (measured:
+    // 'í' at 27..29, album Road To The Unknown, artwork removal 2026-09-05
+    // — the panic escaped the save task as a red banner and the retry
+    // fails forever on the same file). Saving into a sibling temp keeps
+    // the ORIGINAL untouched through such a panic, and catch_unwind
+    // downgrades it from "task died, whole save aborted, file possibly
+    // half-written" to one honest per-file line in the report. The
+    // upstream fix lives in lofty ≥0.23; upgrading the API across
+    // tags/scan/artwork is a dedicated session — until then the writer
+    // is armored.
+    let tmp = path.with_extension("songstress-tmp");
+    // lofty's save_to_path EDITS its target in place (it never creates),
+    // so the temp starts as a byte-copy of the original; the panic can
+    // then only ever damage the copy.
+    std::fs::copy(path, &tmp).map_err(|e| format!("{path:?}: temp: {e}"))?;
+    // Fix the known panic at its source when we can: lofty's write_id3v1
+    // truncates each legacy field with a BYTE slice, so any field longer
+    // than its budget whose cut lands inside a multi-byte char panics.
+    // Char-boundary-trim every ID3v1 text field to its exact budget and
+    // the writer can no longer fall in that hole.
+    if let Some(v1) = tagged.tag_mut(lofty::tag::TagType::Id3v1) {
+        for key in [
+            ItemKey::TrackTitle,
+            ItemKey::TrackArtist,
+            ItemKey::AlbumTitle,
+            ItemKey::Comment,
+        ] {
+            if let Some(s) = v1.get_string(&key) {
+                let budget = if key == ItemKey::Comment { 28 } else { 30 };
+                if s.len() > budget {
+                    let mut cut = budget;
+                    while !s.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    let trimmed = s[..cut].to_string();
+                    v1.remove_key(&key);
+                    v1.insert_text(key, trimmed);
+                }
+            }
+        }
+    }
+    let mut save = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        tagged.save_to_path(&tmp, lofty::config::WriteOptions::default())
+    }));
+    if matches!(save, Err(_)) {
+        // Something in the legacy tag still bites lofty's writer (an
+        // unmapped genre string, a field we do not touch): retry ONCE
+        // with the ID3v1 tag gone. ID3v1 is a 1997-era duplicate of the
+        // v2 fields we just wrote — dropping it costs the user nothing
+        // modern, and a file that refuses the writer forever costs
+        // everything.
+        let _ = std::fs::remove_file(&tmp);
+        std::fs::copy(path, &tmp).map_err(|e| format!("{path:?}: temp: {e}"))?;
+        tagged.remove(lofty::tag::TagType::Id3v1);
+        save = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tagged.save_to_path(&tmp, lofty::config::WriteOptions::default())
+        }));
+    }
+    match save {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("{path:?}: {e}"));
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("{path:?}: tag writer panicked twice (id3v1?)"));
+        }
+    }
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{path:?}: rename: {e}")
+    })?;
 
     // Verify the edit actually landed. Some files (Lavf52-era muxers) carry
     // STACKED ID3v2 tags: the reader merges them, but the writer only
@@ -886,21 +963,56 @@ fn write_file(path: &Path, f: impl FnOnce(&mut Tag)) -> Result<(), String> {
 /// reader produced already contains the union of all stacked blocks.
 fn repair_stacked_tags(path: &Path, expected: &Tag) -> Result<(), String> {
     let tt = expected.tag_type();
-    for attempt in 1..=16 {
-        let present = lofty::read_from_path(path)
-            .map_err(|e| format!("{path:?}: {e}"))?
-            .contains_tag_type(tt);
-        if !present {
-            break;
+    // Same armor as write_file, one notch stronger: lofty's writer panics
+    // LEAVE THE TARGET HALF-WRITTEN (measured 2026-09-04: the pre-armor
+    // in-place save died inside write_id3v1 and the file carried a
+    // garbage tail until the next scan re-read it). So the repair works
+    // on a sibling copy — SAME EXTENSION, lofty probes the format by
+    // extension — and the original is replaced only by rename once the
+    // rewrite has verified. The id3v1 fields are char-trimmed by the
+    // same rule as write_file, and a panic anywhere is caught, not
+    // allowed to escape the save task.
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{path:?}: no file name"))?;
+    let tmp = path.with_file_name(format!(".songstress-repair-{name}"));
+    let res = (|| -> Result<(), String> {
+        std::fs::copy(path, &tmp).map_err(|e| format!("{path:?}: temp: {e}"))?;
+        for attempt in 1..=16 {
+            let present = lofty::read_from_path(&tmp)
+                .map_err(|e| format!("{path:?}: {e}"))?
+                .contains_tag_type(tt);
+            if !present {
+                break;
+            }
+            let removed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tt.remove_from_path(&tmp)
+            }));
+            match removed {
+                Err(_) => {
+                    return Err(format!("{path:?}: tag writer panicked (strip {attempt})"))
+                }
+                Ok(r) => r.map_err(|e| format!("{path:?}: strip {attempt}: {e}"))?,
+            }
         }
-        tt.remove_from_path(path)
-            .map_err(|e| format!("{path:?}: strip {attempt}: {e}"))?;
+        let mut tagged = lofty::read_from_path(&tmp).map_err(|e| format!("{path:?}: {e}"))?;
+        tagged.insert_tag(expected.clone());
+        let saved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tagged.save_to_path(&tmp, lofty::config::WriteOptions::default())
+        }))
+        .map_err(|_| format!("{path:?}: tag writer panicked (rewrite)"))?;
+        saved.map_err(|e| format!("{path:?}: rewrite: {e}"))?;
+        Ok(())
+    })();
+    if let Err(e) = res {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    let mut tagged = lofty::read_from_path(path).map_err(|e| format!("{path:?}: {e}"))?;
-    tagged.insert_tag(expected.clone());
-    tagged
-        .save_to_path(path, lofty::config::WriteOptions::default())
-        .map_err(|e| format!("{path:?}: rewrite: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{path:?}: rename: {e}")
+    })?;
 
     // The repair must land; a second failure is a hard error, never silence.
     let check = lofty::read_from_path(path).map_err(|e| format!("{path:?}: {e}"))?;
@@ -1040,6 +1152,24 @@ pub fn save_album_tags(
     }
 
     if errors.is_empty() {
+        // The albums ROW must follow a year edit now, not someday: the
+        // scan that re-reads these files only ever INSERTs the album row
+        // (ON CONFLICT DO NOTHING, and retag-adopt matches on
+        // artist+title), so without this block clearing Year in the modal
+        // wrote every file and updated NOTHING — the grid and the panel
+        // kept printing the fossil year (owner report 2026-09-05, the
+        // 218-file Anison compilation). Title and artist stay the SCAN's
+        // to re-key (identity); year is pure stored metadata, so a
+        // successful album save mirrors it into the row directly. The
+        // TRACK modal deliberately does not: one file's year is not an
+        // album consensus.
+        if touched.year {
+            conn.execute(
+                "UPDATE albums SET year = ?2 WHERE id = ?1",
+                rusqlite::params![album_id, shared.year],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(SaveReport {
             written,
             total,
@@ -1461,6 +1591,58 @@ mod tests {
     }
 
     #[test]
+    fn write_file_survives_id3v1_multibyte_truncation() {
+        // lofty 0.22.4's write_id3v1 cuts each legacy field with
+        // split_at(BYTES), so a field whose cut lands inside a multi-byte
+        // char PANICS the whole writer (owner report 2026-09-04, clearing
+        // artwork on the Road To The Unknown compilation — Walla Walla's
+        // v1 comment carried cp1251 cyrillic, the cut at 28 landed inside
+        // a decoded char). write_file must still save the file.
+        let root = temp_dir("id3v1panic");
+        copy_tree(&fixtures_src(), &root);
+        let file = root.join("Helloween/Giants & Monsters (2021)/02 - Throne of the Iron Vigil.mp3");
+        // A hand-built legacy tag at EOF — the real-world shape, which
+        // lofty's own writer cannot produce (writing it is the panic).
+        let mut v1 = b"TAG".to_vec();
+        let mut title = b"Throne of the Iron Vigil".to_vec();
+        title.resize(30, 0);
+        v1.extend(title);
+        v1.extend([0u8; 60]); // artist + album blank
+        v1.extend(b"2021");
+        let mut comment = b"Collected by ".to_vec();
+        comment.extend(std::iter::repeat(0xD0).take(17)); // 30 bytes,
+        // first non-ASCII byte at 13 (odd) — the decoded comment's split
+        // at 28 lands inside a char, exactly like the real Walla Walla.
+        v1.extend(comment);
+        v1.push(0xFF); // genre: none
+        assert_eq!(v1.len(), 128);
+        let mut bytes = std::fs::read(&file).unwrap();
+        bytes.extend(v1);
+        std::fs::write(&file, bytes).unwrap();
+
+        // The exact edit from the incident: clear pictures, touch genre.
+        super::write_file(&file, |tag| {
+            while !tag.pictures().is_empty() {
+                tag.remove_picture(0);
+            }
+            tag.insert_text(ItemKey::Genre, "Power Metal".into());
+        })
+        .expect("save must not die on the id3v1 truncation");
+
+        let after = lofty::read_from_path(&file).unwrap();
+        let v2 = after.tag(lofty::tag::TagType::Id3v2).expect("v2 written");
+        assert_eq!(v2.get_string(&ItemKey::Genre).unwrap(), "Power Metal");
+        // The legacy tag SURVIVES, its panic-cut field char-trimmed.
+        let v1 = after.tag(lofty::tag::TagType::Id3v1).expect("v1 kept");
+        let c = v1.get_string(&ItemKey::Comment).unwrap();
+        // lofty's v1 READER decodes one char per byte, so compare chars:
+        // the on-disk FIELD is the char count (must sit inside the 28).
+        assert!(c.chars().count() <= 28, "comment trimmed to the field budget: {c:?}");
+        assert!(c.starts_with("Collected by"), "head kept: {c:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn conflicts_report_values_with_counts() {
         let root = temp_dir("conflicts");
         let (conn, aid, files) = giants(&root);
@@ -1532,6 +1714,97 @@ mod tests {
     }
 
     #[test]
+    fn relabel_then_targeted_rescan_regroups_rows() {
+        // The Xandria bug (owner report 2026-09-05): a staged album lives
+        // where no library root points, an incremental scan can never
+        // revisit it, so after the tag editor renamed it the DB carried
+        // the OLD title forever. The save command's follow-up —
+        // run_scan_files with the written files' parents as roots and
+        // only=the written files — must re-group the rows like any scan.
+        let root = temp_dir("retarget");
+        let (mut conn, aid, files) = giants(&root);
+        let touched = TouchedFields { album: true, ..Default::default() };
+        let shared = TrackTags {
+            album: "Keeper of The Seven Keys".into(),
+            ..Default::default()
+        };
+        let rep = save_album_tags(&conn, &aid, &shared, &touched, &ArtChange::Keep).unwrap();
+        assert_eq!(rep.written, files.len(), "every file took the new album tag");
+
+        let mut roots: Vec<PathBuf> =
+            files.iter().filter_map(|f| f.parent().map(PathBuf::from)).collect();
+        roots.sort();
+        roots.dedup();
+        let only: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
+        crate::library::scan::run_scan_files(&mut conn, &roots, Some(&only), |_, _| {}, false)
+            .expect("targeted rescan");
+
+        assert_eq!(count_albums(&conn, "Keeper of The Seven Keys"), 1, "new album row");
+        assert_eq!(count_albums(&conn, "Giants & Monsters"), 0, "old row died with its rows");
+        let moved: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM tracks t JOIN albums a ON t.album_id = a.id
+                 WHERE a.title = 'Keeper of The Seven Keys'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(moved, files.len() as i64, "every row followed the tag");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn year_edit_updates_the_album_row() {
+        // The grid/panel must stop printing a year the user cleared (the
+        // scan never UPDATEs an existing album row — see save_album_tags).
+        let root = temp_dir("year-row");
+        let (conn, aid, _files) = giants(&root);
+        let touched = TouchedFields { year: true, ..Default::default() };
+
+        let shared = TrackTags { year: Some(1999), ..Default::default() };
+        save_album_tags(&conn, &aid, &shared, &touched, &ArtChange::Keep).unwrap();
+        let year: Option<i64> = conn
+            .query_row("SELECT year FROM albums WHERE id = ?1", [&aid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(year, Some(1999), "a year edit lands in the row immediately");
+
+        let shared = TrackTags { year: None, ..Default::default() };
+        save_album_tags(&conn, &aid, &shared, &touched, &ArtChange::Keep).unwrap();
+        let year: Option<i64> = conn
+            .query_row("SELECT year FROM albums WHERE id = ?1", [&aid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(year, None, "clearing the field clears the row, not just the files");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn art_change_wire_shape_is_the_webview_contract() {
+        // src/lib/artChange.ts IS the contract: exactly "keep" | "clear" |
+        // {hash} | {upload:{image,mime}}. Any drift dies at Tauri's arg
+        // parse as `invalid args \`art\`: invalid type: string` — which is
+        // exactly how picking a cover art candidate on the ASMR
+        // compilation failed 2026-09-05 (Hash had been a STRUCT variant,
+        // demanding {"hash":{"hash":…}}). Test the WIRE, not the
+        // constructor — the constructor never lies about a serde shape.
+        let keep: ArtChange = serde_json::from_str("\"keep\"").unwrap();
+        assert_eq!(keep, ArtChange::Keep);
+        let clear: ArtChange = serde_json::from_str("\"clear\"").unwrap();
+        assert_eq!(clear, ArtChange::Clear);
+        let hash: ArtChange = serde_json::from_str("{\"hash\":\"2d4afec9\"}").unwrap();
+        assert_eq!(hash, ArtChange::Hash("2d4afec9".into()));
+        let up: ArtChange =
+            serde_json::from_str("{\"upload\":{\"image\":\"aGk=\",\"mime\":\"image/jpeg\"}}")
+                .unwrap();
+        assert!(matches!(up, ArtChange::Upload { image, mime }
+            if image == "aGk=" && mime == "image/jpeg"));
+        assert_eq!(
+            serde_json::to_string(&ArtChange::Hash("2d4afec9".into())).unwrap(),
+            "{\"hash\":\"2d4afec9\"}",
+            "round-trip must emit the exact tagged shape the webview sends"
+        );
+    }
+
+    #[test]
     fn artwork_lifecycle_upload_hash_clear_and_folder_art() {
         let root = temp_dir("artwork");
         let (conn, aid, files) = giants(&root);
@@ -1576,7 +1849,7 @@ mod tests {
             &conn, &aid_s,
             &TrackTags::default(),
             &untouched,
-            &ArtChange::Hash { hash: blue_hash.clone() },
+            &ArtChange::Hash(blue_hash.clone()),
         ).unwrap();
         assert_eq!(rep.written, 2, "the red file and the picture-less one differed; the blue one did not");
         assert_eq!(pics_of(flac), vec![blue_hash.clone()]);

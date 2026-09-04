@@ -3569,3 +3569,260 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   balanced halves. The 7-cap makes 9s and 10s the same panel height, gives
   column 2 enough mass to read as a forming column, and keeps the closer
   company in the tail. splitRows(n) = n>=11 ? ceil(n/2) : min(7, n).
+
+### Selection is chrome's no: the prefixed user-select (2026-09-05)
+
+  Owner: dragging across grid/sidebar/playbar painted selections. The
+  intent was already in app.css (body none, input text) plus three
+  component rules — all DEAD CODE on this engine: WebKitGTK here (UA
+  reports Version/60.5) ignores the unprefixed `user-select`; measured
+  body's computed `-webkit-user-select` = UA `text`. Fix in the global
+  sheet: `-webkit-user-select: none` on body (inherits to every surface,
+  grid/panels/sidebar/playbar alike), editable exception widened from
+  bare `input` to `input, textarea, [contenteditable="true"]` with both
+  spellings. The four component `none`s are now redundant belts under the
+  body inheritance — left in place. Probe after edit: body `none`,
+  input `text`.
+
+### The × that sat 4px high: no standalone transform properties (2026-09-05)
+
+  Owner: search-field clear button off-center. Measured: button box
+  centered fine; the svg inside it rode 4px high. Root cause: this
+  WebKitGTK misapplies the INDIVIDUAL transform properties
+  (`translate`/`rotate`/`scale`) on at least some svg elements —
+  computed values look right, layout disagrees (same silence family as
+  unprefixed `user-select` above). Traffic lights and the button itself,
+  using the same properties, measured correct — so it is per-element,
+  which is worse: no rule of thumb, only the dialect that never lies.
+  Policy adopted: centering uses `transform: translate(...)` (the
+  magnifier icon proved it) everywhere; converted every standalone
+  translate/rotate/scale in the app — Sidebar (.search-clear button +
+  svg, .tb-light svg, .gear .icon — its morph now transitions a combined
+  `transform: translate(-50%,-50%) rotate(±90deg)`), SurfaceClose .sc
+  svg, ExpandedPanel .play-all svg nudge, ProgressRing -90deg.
+  `grep '^\s*(translate|rotate|scale):' src/` is now empty. Re-measured
+  after: .tb-light 3.5/3.5, .search-clear 5/5 — exact.
+
+### Tag saves now re-index the files they wrote (2026-09-05, owner report)
+
+  Xandria's staged Sacrificium Bonus CD was retitled via the tag editor
+  (files confirmed: TALB=Sacrificium) but the expanded view never moved.
+  Diagnosis: staged albums stay WHERE THEY WERE IMPORTED (BT pile under
+  ~/Downloads, outside every library root) — and an incremental scan only
+  revisits files under a root, while the watcher is blind out there too.
+  `save_album_tags` wrote the files and nothing ever re-read them: the DB
+  carried the pre-edit tags forever (the journal's `missing 13` WAS those
+  rows — the scan could not see them; every path verified to exist).
+  Library-root albums only appeared to work because the watcher rescans
+  them a beat after the save.
+
+  Fix: both save commands now end with `rescan_written(conn, app, paths)`
+  (lib.rs) — the import's own mechanism: roots = the written files'
+  parents, only = the written files, no removal sweep — so the rows are
+  re-parsed, re-grouped (album identity follows the new tags: merge,
+  move, split) and `scan-finished` is emitted so the dump reloads like
+  any scan. Journal: `[scan] retag-rescan: added U updated N (asked K)`
+  on every save, FAILED variant included.
+  Regression test: tags.rs::relabel_then_targeted_rescan_regroups_rows.
+  Live verification: re-fired the owner's exact save via devctl invoke —
+  `[scan] retag-rescan: added 0 updated 13 (asked 13)`, DB now shows ONE
+  Sacrificium, 25 rows across discs 1–2; the Bonus CD tile dissolved
+  into a real disc 2, staged flags intact (13 still pending, they still
+  live in Downloads until Save). Also: Cargo.lock version 0.9.13 caught
+  up (missed by the bump — the lock is a fourth place, not three).
+
+### Phase E accordion: fixed width + why the joined album isn't offered (2026-09-05)
+
+  Width bug (owner: "it should stay full width no matter the string of
+  the item inside"): .te-pick sat as a row-wrap FLEX ITEM of .te-join —
+  content-based width, so typing in the search literally resized the
+  walls. Fix: flex:1 1 100% (the promise line's own dialect) — own line,
+  always full width, options ellipsize inside.
+
+  Sacrificium missing from the list was CORRECT: after the owner's album
+  retag + the new retag-rescan, the file's own tag already says
+  "Sacrificium" and its row ALREADY IS in that album (disc 2, staged) —
+  and the picker deliberately hides "the album the file already points
+  at" (joining where you already are is a no-op). It shows as the
+  album's own disc-2 block, not as a join target.
+
+### ArtChange::Hash was a struct variant: candidate picks died at the IPC wall
+  (2026-09-05, owner screenshot: `invalid args 'art' … invalid type:
+  string "2d4afec97…"` while setting a cover on the ASMR compilation)
+
+  The webview's documented wire shape (src/lib/artChange.ts) is
+  externally tagged: "keep" | "clear" | {"hash":"<hex>"} | {"upload":{…}}.
+  Rust declared Hash as a STRUCT variant (`Hash { hash }`), whose tagged
+  JSON is DOUBLY nested — {"hash":{"hash":…}} — so every pick from the
+  candidate grid failed serde before the command ran. Upload { image,
+  mime } happens to match the contract (its payload IS a map of those
+  fields) and unit variants are plain strings, so uploading a new image
+  always worked and only "use one of the album's OWN covers" broke —
+  which is precisely the verb a compilation modal is built around (10
+  files, 10 pictures). Fix: Hash is a newtype variant now; the comment
+  records the wire contract where it lives. Regression test asserts the
+  WIRE both ways (from_str/to_str on the literal JSON), not the
+  constructor — the constructor never lies about a serde shape.
+  Verified live against the very album: save_album_tags with
+  art={"hash": <current>} returned {written:10, total:10,
+  receipt:["replaced Folder.jpg"]}. (The hash in the owner's error is no
+  longer among ASMR's candidates — one of the album's pictures changed
+  with his earlier field edits, so the failed save's target had since
+  retired from the pile.)
+
+### Cleared year stayed on the tile + "duplicate" artwork rows (2026-09-05, owner questions)
+
+  Year: the album save wrote the files (TDRC verified gone) but the
+  albums ROW is only ever INSERTed (ON CONFLICT DO NOTHING; retag-adopt
+  matches artist+title on purpose), so a cleared/changed year never
+  reached the DB and the grid printed the fossil forever. Fix:
+  save_album_tags, on a clean write and touched.year, UPDATEs
+  albums.year directly — title/artist stay the scan's to re-key (identity),
+  year is stored metadata; the TRACK save deliberately doesn't touch the
+  row (one file's year is no album consensus). Test:
+  year_edit_updates_the_album_row (set AND clear). Live: Anison no
+  Kokoro's row is NULL now; owner's own save, completed by the fix.
+
+  Artwork rows: NOT a bug. The 218-file Anison compilation embeds at
+  least 6 byte-distinct encodings of the same 1000x1000 cover (71.8k…
+  101k) plus a folder Cover.jpg that is a 7th; the inventory dedupes by
+  blake3, so every real image is shown with its honest file count
+  ("in 156 files", "in 20 files"). Candidate UX idea (NOT built):
+  perceptual grouping of byte-distinct look-alikes.
+
+### Artwork clear: ghost the victim, not the graveyard (2026-09-05)
+
+  Owner: "Remove artwork… if I press it all artworks get a disabled
+  look." The clear-decision preview dimmed EVERY candidate tile
+  (as-ghost on cleared), which reads "the picker broke" while the note
+  below the strip correctly promised removal from every file. Now only
+  the album's CURRENT cover ghosts — the single image the decision
+  removes — with its caption swapped to "removing on Save" in the
+  caution hue; every other candidate keeps full contrast, because
+  clicking one IS the recovery path and should look like it. Undo
+  remains the header's Keep artwork / re-picking anything. The ✕
+  living only on the selected tile is by design (removal is a verb on
+  THE cover — it strips the picture from every file plus folder art),
+  now backed by the captioned ghost so the state has a subject.
+
+### The red arc: inline `background` shorthand repainted the border band (2026-09-05)
+
+  Owner: "that solid line of red looks a bit weird" along Of Time and
+  Parallels' rounded top edge (the album whose extracted accent is a 0.1%
+  red logo stamp). DOM probe exonerated everything (border neutral
+  rgba(255,255,255,.1), no outline/pseudo/shadow) — the culprit was the
+  inline `style:background={<gradient>}` SHORTHAND: it silently reset
+  background-clip to border-box, so the artwork gradient painted under
+  the translucent rounded border; a translucent border over a saturated
+  1px sliver prints a hard oversaturated rim, reddest where the 135°
+  ramp is reddest. (The same shorthand had also been wiping .panel's own
+  --panel-bg base all along.) Fixed with per-layer layers:
+  `${gradient} padding-box padding-box, var(--panel-bg) border-box` —
+  gradient inside the border, neutral base under it. Verified by owner
+  screenshot + pixel scan (the line measured rgb(102..128,49..55,66..72)
+  before; gone). Note the grammar trap: a single <box> keyword on a
+  NON-final layer is ORIGIN, not clip — the doubled padding-box is
+  load-bearing. Screenshot capture note: WindowsRunner Match returns an
+  empty list on this KWin session and queryWindowInfo times out — manual
+  owner screenshots are the eyes until that DBus path is debugged.
+
+### Artwork picker: real placeholders for both slow phases (2026-09-05)
+
+  Owner: Anison's cover grid took a while after opening. Two phases were
+  un-cushioned: (1) get_art_candidates parses EVERY file of the album
+  (218 for Anison) and the existing skeleton was invisible in the album
+  modal — `.as-stack .as-sk { height: auto }` collapsed it to zero, i.e.
+  the loader died in the exact modal that needs it; and (2) after the
+  inventory arrived, each preview <img> streamed from disk and POPPED
+  per-tile. Now: stack skeleton matches the real stack tile (172px) and
+  wears --sk-base (app.css's dedicated placeholder pair — the tile's own
+  bg was --hover, a token its own comment warns against reusing for
+  placeholders); and every tile image reveals through a 220 ms opacity
+  fade via a cache-safe reveal action (complete+naturalWidth checked at
+  connect; error also reveals). Layout never moves; covers arrive INTO
+  their boxes. A pop is the jarring event, the fade is not — no separate
+  reduced-motion branch.
+
+### Picker order: the worn cover leads (2026-09-05)
+
+  Candidates are ordered by file count server-side, which on a
+  multi-encoding album buried "which one is the cover" in scavenger
+  hunt. orderedCandidates promotes the tile the save will wear (the
+  user's fresh pick if any, else the album's current; nothing while the
+  clear decision is pending, since then nothing is worn; nothing for
+  uploads, whose tile is the arrival already at the head) to position 1
+  — position is the loudest ordering cue, dot and ring keep saying it
+  too. Keyed each: picking a different tile MOVES it to the head (node
+  moves, image persists) — deliberate: the jump is feedback.
+
+### The artwork-removal banner was lofty's ID3v1 writer (2026-09-05)
+
+  Owner screenshot: red banner mid-save on Road To The Unknown — `task
+  906 panicked … end byte index 28 is not a char boundary; inside 'í'`.
+  First diagnosis (this entry) blamed parse_ini's `line[1..len-1]` —
+  WRONG: that slice only runs on lines ending in ASCII `]`, so its end
+  index is always a char boundary. The real backtrace (second
+  occurrence, full symbols in the journal) is `write_id3v1 →
+  Id3v1TagRef::write_to → save_to_path → tags::write_file`: lofty
+  0.22.4 truncates each legacy ID3v1 field with `val.split_at(BYTES)`,
+  and the COMMENT field's budget is 28 — inside 'í' (bytes 27..29).
+  Reproduced byte-exactly: "Walla Walla.mp3" carries a cp1251 comment
+  ("Collected by Тарантиныч"); lofty's v1 reader decodes one char per
+  byte, and the split at 28 lands inside the 'í'. Every save of that
+  file — artwork clear included — died there, and the first (unarmed)
+  occurrence left the tail half-written until the next scan.
+
+  The writer is now armored in layers (tags.rs write_file):
+  the save goes to a sibling temp under catch_unwind (a panic cannot
+  touch the original); every ID3v1 text field is pre-trimmed to its
+  exact budget at a char boundary, which removes the known panic at
+  its source; if the writer panics anyway (a field we don't map), the
+  save retries ONCE with the ID3v1 tag dropped — a 1997-era duplicate
+  of fields we just wrote into v2 is worth less than a file that saves
+  at all. repair_stacked_tags got the same treatment, and now runs on
+  a same-extension sibling (lofty probes the format by extension — a
+  `.songstress-tmp` re-READs as UnknownFormat, measured). Regression
+  test: write_file_survives_id3v1_multibyte_truncation plants a
+  hand-built legacy tag at EOF (lofty's own writer can't produce the
+  shape — producing it is the panic) and asserts the save lands AND
+  the v1 survives char-trimmed. The parse_ini strip_prefix/suffix fix
+  and its test stay — character ops on user data is the rule — but
+  that parser was innocent. Verified live: re-save of the whole album
+  against the dev instance writes Walla Walla (and the other 66) with
+  the v1 intact.
+
+  NOTE, lost data: while probing, a temp test renamed its copy onto
+  `Where Is The Love_.mp3` (the sibling name collided with the
+  original via with_extension) and its cleanup DELETED the original.
+  The file is gone from the collection (not in Trash, no snapshot);
+  the DB row (tr-a3ecc4f2c5c3e69d) now points at a missing path —
+  Restore the file or prune the row, owner's call.
+
+### Relink landed outside the album folder (2026-09-05)
+
+  Owner restored Where Is The Love_.mp3 from backup and double-clicked the
+  missing row to relink. The command COPIED it (correct — the file was
+  outside every scan root, and rows outside the roots are swept) but into
+  its own naive `<primary root>/<Artist>/<Album>` layout, orphaning it a
+  directory away from the 66 files it belongs to. relink_track predates
+  import staging and never learned about `album_destination`, whose rule
+  1 is exactly this case: the album already lives somewhere → join that
+  folder. Now wired to it (folder also checked against ALL roots, not
+  just the primary — secondary-root files no longer copy unnecessarily).
+  The stray copy was moved into the album folder with its row re-pointed
+  (same id, mtime zeroed → the watcher re-parsed it back into the album);
+  the two folders relink had created were pruned (the app wrote them, so
+  the never-delete-what-you-didnt-write rule is satisfied).
+
+### App icon: padded to the theme's visual weight (2026-09-05)
+
+  Owner: "ours looks larger". Taskbar measurement said equal (all tiles
+  76x82 @2x) — but the KRunner/app-launcher list prints the hicolor PNG
+  as art, measured 50x51 against Reversal's 43-45: our tile was
+  full-bleed (99% canvas), the theme's app tiles carry ~14% margin, so
+  the launcher drew us genuinely bigger than the row. Fix in the SVG
+  master: the whole tile wrapped in scale(0.86) at the center — corners
+  and stencil scale with it, nothing redrawn. Regenerated via
+  `npx tauri icon assets/app-icon.svg -o src-tauri/icons`, installed to
+  every hicolor size the desktop files reference (48/512 rasterized
+  from the SVG with ImageMagick), icon cache refreshed. Version 0.9.14.

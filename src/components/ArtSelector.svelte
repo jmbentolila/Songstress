@@ -61,6 +61,36 @@
   const selectedHash = $derived(
     typeof change === "string" ? null : "hash" in change ? change.hash : null,
   );
+  /** The picker's reading order: the cover that IS (or will be) worn goes
+     first, then the rest in the server's order (most-worn first). The
+     corner-dot idiom alone left "which one is the cover" a scavenger hunt
+     on a 6-encoding compilation — position is the loudest ordering cue
+     (owner request 2026-09-05). Stable: exactly one promotion, no ties.
+     While the clear decision is up, nothing is worn, so no promotion. */
+  const orderedCandidates = $derived.by(() => {
+    const list = inventory?.candidates ?? [];
+    if (cleared) return list;
+    const winner = selectedHash ?? (uploaded ? null : inventory?.current ?? null);
+    if (!winner) return list;
+    const i = list.findIndex((c) => c.hash === winner);
+    if (i <= 0) return list;
+    return [list[i], ...list.slice(0, i), ...list.slice(i + 1)];
+  });
+  /** Reveal-on-load for tile images. A candidate preview is a real file
+     read (and for a 218-file album, several), so tiles would otherwise
+     pop in one by one after the inventory arrives — the SECOND late
+     phase the owner saw on Anison. The tile box is always there (its bg
+     is the dedicated placeholder token); the image fades in when it's
+     actually painted. Cache-safe: `complete` is checked at connect, so a
+     cached image is revealed on the same frame it mounts. */
+  function reveal(node: HTMLImageElement) {
+    const done = () => node.classList.add("as-load");
+    if (node.complete && node.naturalWidth > 0) done();
+    else {
+      node.addEventListener("load", done);
+      node.addEventListener("error", done); // a broken src must not ghost forever
+    }
+  }
   const cleared = $derived(change === "clear");
   const uploaded = $derived(change !== "keep" && change !== "clear" && "upload" in change);
 
@@ -180,7 +210,7 @@
           onclick={() => expand({ src: a.url, label: "New image" })}
           title="Click to see the full image"
         >
-          <img src={a.url} alt="" decoding="async" />
+          <img src={a.url} alt="" decoding="async" use:reveal />
           <span
             class="as-badge as-sel-badge"
             role="checkbox"
@@ -194,16 +224,24 @@
           <span class="as-cap">New image</span>
         </button>
       {/each}
-      {#each inventory?.candidates ?? [] as c (c.hash)}
+      {#each orderedCandidates as c (c.hash)}
         {@const isSel =
           !cleared &&
           (selectedHash
             ? selectedHash === c.hash
             : c.hash === inventory?.current && !uploaded)}
+        <!-- The image this decision removes. GHOSTING USED TO FALL ON
+             EVERY TILE, which read as "the whole picker broke" when the
+             truth is "THE cover goes away, these others are still here"
+             — and they are: clicking any of them replaces the decision.
+             The ghost is now the single victim; the others stay full
+             contrast so the recovery path is the loudest thing left
+             (owner confusion 2026-09-05). -->
+        {@const willRm = cleared && c.hash === inventory?.current}
         <button
           class="as-tile"
           class:as-sel={isSel}
-          class:as-ghost={cleared}
+          class:as-ghost={willRm}
           onclick={() =>
             expand({
               src: c.full,
@@ -216,7 +254,7 @@
             })}
           title="Click to see the full image"
         >
-          <img src={c.preview} alt="" decoding="async" />
+          <img src={c.preview} alt="" decoding="async" use:reveal />
           <!-- selection: the corner dot (iOS photo-picker language) -->
           <span
             class="as-badge"
@@ -257,7 +295,7 @@
               >✕</span
             >
           {/if}
-          <span class="as-cap">{c.count > 0 ? `in ${c.count} ${c.count === 1 ? "file" : "files"}` : c.label}</span>
+          <span class="as-cap" class:as-cap-rm={willRm}>{willRm ? "removing on Save" : c.count > 0 ? `in ${c.count} ${c.count === 1 ? "file" : "files"}` : c.label}</span>
         </button>
       {/each}
       <button class="as-tile as-add" onclick={() => void browse()} disabled={busy} title="Choose an image from disk">
@@ -353,6 +391,13 @@
     width: 100%;
     height: auto;
   }
+  /* The stack skeleton had height:auto via the rule above — i.e. ZERO
+     height, an invisible loader in exactly the modal (album, stacked
+     column) whose slow inventory fetch needs it most (Anison: 218 files
+     parsed per open). Match the real stack tile: img room + caption. */
+  .as-stack .as-sk {
+    height: 172px;
+  }
   .as-stack .as-tile img {
     width: 100%;
     height: 148px;
@@ -367,7 +412,10 @@
     padding: 0;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--hover);
+    /* The placeholder material, not --hover: app.css spells out that a
+       placeholder is a fourth thing, tuned for sitting quiet-but-present,
+       and the sk tokens were made for exactly that job. */
+    background: var(--sk-base);
     color: inherit;
     cursor: pointer;
     overflow: hidden;
@@ -379,6 +427,17 @@
     height: 76px;
     object-fit: cover;
     border-radius: 7px 7px 0 0;
+    /* Late images arrive INTO the placeholder instead of popping: the
+       reveal-on-load action adds as-load when the bytes are painted.
+       No motion preference is honored here on purpose — an opacity
+       fade is the calmest possible event; the jarring one is a pop. */
+    opacity: 0;
+    transition: opacity 220ms ease-out;
+  }
+  /* :global() because the class is added by the reveal ACTION, invisible
+     to the scoped-CSS scanner. */
+  .as-tile :global(img.as-load) {
+    opacity: 1;
   }
   .as-tile:hover:not(:disabled) {
     border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
@@ -392,6 +451,11 @@
   }
   .as-ghost img {
     opacity: 0.45;
+  }
+  /* The victim says so itself, in the caution hue — the strip-wide ghost
+     used to do the shouting with no subject. */
+  .as-cap-rm {
+    color: var(--caution);
   }
   .as-cap {
     display: block;
@@ -427,6 +491,7 @@
   }
   .as-sk {
     height: 95px;
+    background: var(--sk-base);
     animation: as-pulse 1.1s ease-in-out infinite;
   }
   @keyframes as-pulse {

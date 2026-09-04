@@ -29,10 +29,16 @@
       </g>
     </mask>
   </defs>
+  <!-- 14% transparent margin (measured 2026-09-05: the KRunner row drew us
+       at 50x51 against Reversal's 43-45 — the theme's app tiles carry this
+       much margin, a full-bleed PNG prints over them). Content ratio now
+       ~86%, corners scale with it. -->
+  <g transform="translate(35.84 35.84) scale(0.86)">
   <rect width="512" height="512" rx="115" fill="url(#stage)"/>
   <g clip-path="url(#tile)">
     <rect width="512" height="512" fill="url(#vib)"/>
     <rect width="512" height="512" fill="#f5f2fb" mask="url(#stencil)"/>
   </g>
   <rect x="1" y="1" width="510" height="510" rx="114" fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="2"/>
+  </g>
 </svg>

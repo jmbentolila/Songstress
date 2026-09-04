@@ -702,6 +702,13 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
     padding: 8px;
+    /* Full width, own line, ALWAYS. Without this the picker was a mere
+       flex item of .te-join (row-wrap), so its width was content-based —
+       the whole accordion resized as the option strings resized (the
+       search filter literally moved the walls). Same `flex: 1 1 100%`
+       dialect the promise line below uses; option text ellipsizes, the
+       container does not breathe. (owner ruling 2026-09-05) */
+    flex: 1 1 100%;
   }
 
   .te-pop-q {

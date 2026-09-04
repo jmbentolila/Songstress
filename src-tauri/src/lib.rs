@@ -573,6 +573,44 @@ async fn scan_inner(
     counts_or_err.map(|_| summary)
 }
 
+/// Tag-save follow-up: re-index exactly the files that were written.
+/// An incremental scan only revisits files under a library root, and a
+/// saved file may live anywhere — a staged album stays where it was
+/// imported (Downloads, a BT pile) and the watcher is blind there, so
+/// without this the DB would carry the PRE-EDIT tags forever and the
+/// expanded view would keep lying about what Save wrote (owner report
+/// 2026-09-05: Xandria's staged Bonus CD retitled on disk, tile stale
+/// through every rescan). Same mechanism an import uses: walk each
+/// file's parent, index only the written files, skip the removal sweep.
+/// A retag that changes album identity regroups the rows (merge, move,
+/// split) exactly as a normal scan would. `scan-finished` is emitted so
+/// the frontend reloads its dump the way it does after any scan.
+fn rescan_written(
+    conn: &mut rusqlite::Connection,
+    app: &tauri::AppHandle,
+    paths: &[PathBuf],
+) {
+    if paths.is_empty() {
+        return;
+    }
+    let mut roots: Vec<PathBuf> = paths.iter().filter_map(|p| p.parent().map(PathBuf::from)).collect();
+    roots.sort();
+    roots.dedup();
+    let only: std::collections::HashSet<PathBuf> = paths.iter().cloned().collect();
+    match library::scan::run_scan_files(conn, &roots, Some(&only), |_, _| {}, false) {
+        Ok(counts) => eprintln!(
+            "[scan] retag-rescan: added {} updated {} (asked {})",
+            counts.added,
+            counts.updated,
+            paths.len()
+        ),
+        // Same rule as every scan path: say it loudly and still emit —
+        // a silent failure here is the exact bug this function fixes.
+        Err(e) => eprintln!("[scan] retag-rescan FAILED: {e}"),
+    }
+    let _ = app.emit("scan-finished", serde_json::json!({ "error": null }));
+}
+
 /// Step 7c: all library roots. `musicDirs` (JSON array) is AUTHORITATIVE
 /// once present (an empty list = no roots = empty library); before the
 /// one-time setup migration writes it, the legacy single `musicDir` (incl.
@@ -941,8 +979,17 @@ fn parse_ini(
             continue;
         }
         if line.starts_with('[') && line.ends_with(']') {
-            section = line[1..line.len() - 1].to_string();
-            continue;
+            // strip_prefix/suffix, NOT byte slicing — character ops are
+            // the rule on user data. (Note: this was blamed for the
+            // 2026-09-04 artwork-removal panic, but a header ending in
+            // ']' can never slice mid-char here; the real culprit was
+            // lofty's write_id3v1 — see tags.rs write_file and PLAN.md.)
+            if let Some(rest) = line.strip_prefix('[') {
+                if let Some(name) = rest.strip_suffix(']') {
+                    section = name.to_string();
+                    continue;
+                }
+            }
         }
         if let Some((key, val)) = line.split_once('=') {
             out.entry(section.clone())
@@ -1545,10 +1592,15 @@ async fn choose_relink_file(start: String) -> Result<Option<String>, String> {
 }
 
 /// Point a missing track's row at a file the user located. Files outside the
-/// library dir are COPIED into `<musicDir>/<Artist>/<Album>/` first (the
-/// scan only walks the library + staging roots, so an external path would
-/// be swept as an orphan on the next rescan). mtime is zeroed so the next
-/// scan re-parses the file's tags through the real grouping path.
+/// library roots are COPIED IN first (the scan only walks the library +
+/// staging roots, so an external path would be swept as an orphan on the
+/// next rescan) — and the landing folder is `album_destination`'s answer,
+/// which for a track whose album already lives somewhere is that folder
+/// (rule 1, merge), NOT a fresh `<root>/<Artist>/<Album>` beside it. The
+/// naive layout here once orphaned a restored backup one directory away
+/// from the 66 files it belonged to (owner report 2026-09-05). mtime is
+/// zeroed so the next scan re-parses the file's tags through the real
+/// grouping path.
 #[tauri::command]
 async fn relink_track(
     app: tauri::AppHandle,
@@ -1564,24 +1616,24 @@ async fn relink_track(
         return Err("that file type is not supported".into());
     }
     let music_dir = music_root(&state);
+    let roots = music_roots(&state);
     let import_root = app
         .path()
         .app_cache_dir()
         .map(|d| library::import::import_dir(&d))
         .map_err(|e| e.to_string())?;
 
-    let final_path = if new_path.starts_with(&music_dir) || new_path.starts_with(&import_root) {
+    let final_path = if roots.iter().any(|r| new_path.starts_with(r))
+        || new_path.starts_with(&import_root)
+    {
         new_path.clone()
     } else {
-        let (artist, album): (String, String) = {
+        let album_id: String = {
             let conn = state.db.lock().unwrap();
             conn.query_row(
-                "SELECT ar.name, al.title FROM tracks t
-                 JOIN albums al ON al.id = t.album_id
-                 JOIN artists ar ON ar.id = al.artist_id
-                 WHERE t.id = ?1",
+                "SELECT album_id FROM tracks WHERE id = ?1",
                 [&track_id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                |r| r.get::<_, String>(0),
             )
             .map_err(|_| "unknown track".to_string())?
         };
@@ -1589,10 +1641,15 @@ async fn relink_track(
             .file_name()
             .map(|n| n.to_os_string())
             .unwrap_or_default();
-        let dest = music_dir
-            .join(library::import::sanitize_path(&artist))
-            .join(library::import::sanitize_path(&album))
-            .join(name);
+        // The resolver the import system uses: merge into the album's own
+        // folder if it exists, else the artist's layout, else the library's
+        // majority layout, else the primary root.
+        let dest = {
+            let conn = state.db.lock().unwrap();
+            library::import::album_destination(&conn, &roots, &music_dir, &album_id)?
+                .folder
+        }
+        .join(name);
         match library::import::resolve_collision(&new_path, &dest)? {
             Some(d) => {
                 if let Some(p) = d.parent() {
@@ -2061,7 +2118,7 @@ async fn save_track_tags(
     let db_path = state.db_path.clone();
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        let mut conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
         let album_id: String = conn
             .query_row(
                 "SELECT album_id FROM tracks WHERE id = ?1",
@@ -2069,6 +2126,7 @@ async fn save_track_tags(
                 |r| r.get(0),
             )
             .map_err(|_| "unknown track".to_string())?;
+        let file_path = library::tags::track_file(&conn, &track_id).map(|f| f.path).unwrap_or_default();
         let art = art.unwrap_or_default();
         let changed = art != library::tags::ArtChange::Keep;
         library::tags::save_track_tags(&conn, &track_id, &tags, &art)?;
@@ -2079,6 +2137,7 @@ async fn save_track_tags(
         if changed {
             let _ = library::artwork::refresh_one(&conn, &cache_dir, &album_id);
         }
+        rescan_written(&mut conn, &app, std::slice::from_ref(&PathBuf::from(file_path)));
         Ok(())
     })
     .await
@@ -2097,7 +2156,19 @@ async fn save_album_tags(
     let db_path = state.db_path.clone();
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        let mut conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        let paths: Vec<PathBuf> = {
+            let mut stmt = conn
+                .prepare("SELECT path FROM tracks WHERE album_id = ?1")
+                .map_err(|e| e.to_string())?;
+            let out = stmt
+                .query_map([&album_id], |r| r.get::<_, String>(0))
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .map(PathBuf::from)
+                .collect();
+            out
+        };
         let art = art.unwrap_or_default();
         let changed = art != library::tags::ArtChange::Keep;
         // A missing `touched` means a caller from before the diff-aware save:
@@ -2112,6 +2183,7 @@ async fn save_album_tags(
         if changed {
             let _ = library::artwork::refresh_one(&conn, &cache_dir, &album_id);
         }
+        rescan_written(&mut conn, &app, &paths);
         Ok(report)
     })
     .await
@@ -2493,6 +2565,18 @@ mod tests {
         let deco = &ini["org.kde.kdecoration2"];
         assert_eq!(deco["ButtonsOnLeft"], "XIA");
         assert_eq!(ini["Other"]["Key"], "1");
+    }
+
+    #[test]
+    fn ini_section_ending_in_multibyte_char_does_not_panic() {
+        // A byte-slice in a hot parser is a panic waiting for user data:
+        // section names are locale data, and the cut must be a character
+        // op. (This parser was initially blamed for the 2026-09-04
+        // artwork-removal panic — it was NOT the culprit, lofty's
+        // write_id3v1 was; the hardening and this test still stand.)
+        let ini = parse_ini("[Rastreadores del Café]\nKey=7\n[After]\nKey=8\n");
+        assert_eq!(ini["Rastreadores del Café"]["Key"], "7");
+        assert_eq!(ini["After"]["Key"], "8");
     }
 
     #[test]

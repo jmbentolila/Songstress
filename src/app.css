@@ -99,10 +99,22 @@ body {
   font-size: 14px;
   color: var(--text);
   overflow: hidden;
+  /* This app is chrome, not a document: dragging across the grid, the
+     sidebar or the playbar must never paint a selection. The PREFIXED
+     property is mandatory — this WebKitGTK (UA reports Version/60.5)
+     ignores the unprefixed `user-select` outright, so the old unprefixed
+     rules here and in three components were dead code and every surface
+     highlighted on drag (owner report, 2026-09-05). Measured: body's
+     computed -webkit-user-select was the UA default 'text'. */
+  -webkit-user-select: none;
   user-select: none;
 }
 
-input {
+/* The editable exception: real fields stay fully editable/selectable. */
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
   user-select: text;
 }
 

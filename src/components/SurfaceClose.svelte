@@ -96,12 +96,14 @@
   }
 
   /* Absolutely centered, not place-items on a native <button> — that drifts ~1px
-     down on this WebKitGTK (the traffic lights learned it first). */
+     down on this WebKitGTK (the traffic lights learned it first). In
+     `transform`: the standalone `translate` property mis-resolves percentages
+     on svg in this engine (measured 2026-09-05). */
   .sc svg {
     position: absolute;
     top: 50%;
     left: 50%;
-    translate: -50% -50%;
+    transform: translate(-50%, -50%);
     width: 16px;
     height: 16px;
   }

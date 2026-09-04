@@ -1287,7 +1287,7 @@
     position: absolute;
     top: 50%;
     left: 50%;
-    translate: -50% -50%;
+    transform: translate(-50%, -50%);
     width: 8px;
     height: 8px;
     stroke: rgba(255, 255, 255, 0.9);
@@ -1344,10 +1344,10 @@
     left: 50%;
     width: 16px;
     height: 16px;
-    translate: -50% -50%;
+    transform: translate(-50%, -50%);
     transition:
       opacity 160ms ease-out,
-      rotate 160ms ease-out;
+      transform 160ms ease-out;
   }
 
   .gear .icon:not(.show) {
@@ -1355,11 +1355,11 @@
   }
 
   .gear .icon-gear:not(.show) {
-    rotate: 90deg;
+    transform: translate(-50%, -50%) rotate(90deg);
   }
 
   .gear .icon-x:not(.show) {
-    rotate: -90deg;
+    transform: translate(-50%, -50%) rotate(-90deg);
   }
 
   /* --- menu stack (iOS Settings-style) -----------------------------------
@@ -1567,7 +1567,14 @@
     position: absolute;
     right: 5px;
     top: 50%;
-    translate: 0 -50%;
+    /* Centering lives in `transform` everywhere on this engine: this
+       WebKitGTK misapplies the STANDALONE `translate`/`rotate`/`scale`
+       properties on some elements (measured: the × sat 4px high — the
+       svg's percentage translate resolved wrong on the block axis), the
+       same class of silence as unprefixed `user-select`. transform is the
+       dialect this engine provably honors (the search magnifier above).
+       (owner report 2026-09-05) */
+    transform: translateY(-50%);
     display: grid;
     place-items: center;
     width: 18px;
@@ -1587,11 +1594,12 @@
   .search-clear svg {
     /* Absolute centering — place-items:center on a native <button> drifts
        ~1px down in WebKitGTK (shadow-DOM layout); same fix as the traffic
-       lights (critique: "× not centered in its hover circle"). */
+       lights (critique: "× not centered in its hover circle"). transform,
+       not the standalone `translate` property — see .search-clear. */
     position: absolute;
     top: 50%;
     left: 50%;
-    translate: -50% -50%;
+    transform: translate(-50%, -50%);
     width: 8px;
     height: 8px;
     stroke: currentColor;

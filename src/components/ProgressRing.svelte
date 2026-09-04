@@ -71,7 +71,9 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    rotate: -90deg;
+    /* transform, not standalone `rotate` — this WebKitGTK misapplies the
+       individual transform properties on svg (2026-09-05). */
+    transform: rotate(-90deg);
     overflow: visible;
   }
 
