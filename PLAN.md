@@ -3460,3 +3460,23 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   imports — no cycle. Re-runs persisted for all four surfaces (sidebar
   24→32, modals 34→36, panel 30→34, imports 30→35; audit ≈18/20, residue
   = the two intentional panel-slot warnings).
+
+### The app icon becomes ours, 2026-09-04 — Version 0.9.7
+
+  Shipped since day one: the TAURI DEFAULT LOGO. The revision ran the
+  full dreaded loop — glyph families (monogram/note/wave), dioramas
+  (mini-stage/sleeves), a generated-diva detour, potrace plans — and
+  stalled on two diagnoses the owner named himself: too abstract (the S
+  wore Tauri's bones) or too clunky (freehand beziers; the honest hand
+  was mine). The reference he produced (a stencil mic with a face in the
+  negative space) set the language: STENCIL DISCIPLINE — bold broken
+  geometry where gaps are the message and the composition, not the
+  curves, carries the mark. The keeper: dark stage (the app's actual
+  material), user-accent glow, stencil mic tilted up-right with grille
+  slits as true mask cutouts, voice arcs riding its axis into the light;
+  reads clean at 32px. The hidden-profile cameo failed honestly (edge
+  notches read as chips, not a face — the reference's face works because
+  it IS the composition). Master: assets/app-icon.svg →
+  `npx tauri icon assets/app-icon.svg` regenerates the full set;
+  hicolor 128/256 refreshed, gtk-cache + sycoca rebuilt. The next
+  revision starts from the SVG, not from archaeology.
