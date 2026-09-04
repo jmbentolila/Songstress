@@ -2194,6 +2194,14 @@ pub fn run() {
             // below); activation doesn't heal it. A 1px shrink+restore forces
             // a reconfigure that does. Harmless if sizing already succeeded.
             let win = app.get_webview_window("main").expect("main window");
+            // A Wayland GTK window must PUSH its icon or KWin shows the
+            // generic Wayland mark in the overview (desktop-file matching
+            // covers dock and KRunner only). The bundle icon is embedded so
+            // dev builds carry it too; the master art lives in
+            // assets/app-icon.svg and regenerates icons/icon.png.
+            if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                let _ = win.set_icon(icon);
+            }
             std::thread::spawn(move || {
                 for delay_ms in [600u64, 2500] {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
