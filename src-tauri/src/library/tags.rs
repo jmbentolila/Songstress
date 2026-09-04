@@ -925,6 +925,23 @@ fn write_file(path: &Path, f: impl FnOnce(&mut Tag)) -> Result<(), String> {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
             let _ = std::fs::remove_file(&tmp);
+            // "No format could be determined" is lofty's PROBE refusing
+            // the file, not a write failure — measured 2026-09-05 on the
+            // owner's "19 Flash.mp3": a fat ID3v2.3 block (387 KB APIC)
+            // followed at its DECLARED end by a second ID3v2.4 block. The
+            // merged view reads fine (extension hint), but the write
+            // probe cannot place the audio, so NOTHING can be saved to
+            // any path. The repair strips the stacked headers by raw size
+            // math first (cut_leading_tags), which provably returns the
+            // file to lofty's sight (verified on /tmp copies of the
+            // incident file and its mutants). The verify path below can
+            // never be reached for such a file — no save ever returned
+            // Ok — so this is the single extra door.
+            if e.to_string().contains("No format could be determined") {
+                return repair_stacked_tags(path, &expected).map_err(|re| {
+                    format!("{path:?}: {e} (stacked-tag repair: {re})")
+                });
+            }
             return Err(format!("{path:?}: {e}"));
         }
         Err(_) => {
@@ -958,9 +975,55 @@ fn write_file(path: &Path, f: impl FnOnce(&mut Tag)) -> Result<(), String> {
     Ok(())
 }
 
+/// Remove every leading ID3v2 block from a file using ONLY the header's
+/// own size field — no tag library involved, so it works on exactly the
+/// files lofty's probe goes blind on (adjacent stacked ID3v2 blocks, the
+/// "No format could be determined" save failure — owner's "19 Flash.mp3",
+/// 2026-09-05: ID3v2.3 covering a 387 KB APIC, and an ID3v2.4 starting
+/// EXACTLY at the v2.3's declared end, before the MPEG frames).
+/// Anything after the last header (audio, or a tag format the caller can
+/// handle) is preserved byte-for-byte; a file that does not start with
+/// ID3 is untouched. Returns the number of bytes removed.
+fn cut_leading_tags(path: &Path) -> Result<usize, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{path:?}: cut: {e}"))?;
+    let mut off = 0usize;
+    while bytes[off..].starts_with(b"ID3") && off + 10 <= bytes.len() {
+        let ver = bytes[off + 3];
+        let size = match ver {
+            2 => u32::from_be_bytes([0, bytes[off + 6], bytes[off + 7], bytes[off + 8]]) as usize,
+            3 | 4 => {
+                ((bytes[off + 6] as usize) << 21)
+                    | ((bytes[off + 7] as usize) << 14)
+                    | ((bytes[off + 8] as usize) << 7)
+                    | bytes[off + 9] as usize
+            }
+            // Unknown version: trust nothing, cut nothing further.
+            _ => break,
+        };
+        let next = off + 10 + size;
+        if next > bytes.len() {
+            // A header claiming more than the file holds is noise, not a
+            // tag worth cutting; stop rather than eat the audio.
+            break;
+        }
+        off = next;
+    }
+    if off == 0 {
+        return Ok(0);
+    }
+    std::fs::write(path, &bytes[off..]).map_err(|e| format!("{path:?}: cut write: {e}"))?;
+    Ok(off)
+}
+
 /// Strip every on-disk tag of `expected`'s type, then write `expected` back
 /// as the single tag. Lossless for stacked-ID3v2 files: the merged view the
 /// reader produced already contains the union of all stacked blocks.
+///
+/// The copy is first run through `cut_leading_tags` — raw arithmetic, no
+/// lofty — because a fat stacked-ID3v2 file makes lofty's WRITE probe
+/// blind ("No format could be determined", measured 2026-09-05), and the
+/// repair may therefore be reaching a file lofty cannot even look at;
+/// the strip loop below needs the probe to work.
 fn repair_stacked_tags(path: &Path, expected: &Tag) -> Result<(), String> {
     let tt = expected.tag_type();
     // Same armor as write_file, one notch stronger: lofty's writer panics
@@ -979,6 +1042,7 @@ fn repair_stacked_tags(path: &Path, expected: &Tag) -> Result<(), String> {
     let tmp = path.with_file_name(format!(".songstress-repair-{name}"));
     let res = (|| -> Result<(), String> {
         std::fs::copy(path, &tmp).map_err(|e| format!("{path:?}: temp: {e}"))?;
+        cut_leading_tags(&tmp)?;
         for attempt in 1..=16 {
             let present = lofty::read_from_path(&tmp)
                 .map_err(|e| format!("{path:?}: {e}"))?
@@ -1914,5 +1978,88 @@ mod tests {
         let cover_gone = cover.is_none() || cover.as_deref() == Some("");
         assert!(cover_gone, "no source left: cover = {cover:?}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cut_leading_tags_cuts_headers_and_keeps_audio() {
+        // The arithmetic of the repair, independent of any lofty view:
+        // two adjacent ID3v2 blocks of DIFFERENT versions, then a byte
+        // blob that must survive untouched. (v2.2 counts too: 3-byte
+        // big-endian size, no flags byte.)
+        let dir = temp_dir("cut");
+        let f = dir.join("cutme.mp3");
+        let ss = |n: usize| -> [u8; 4] {
+            [
+                ((n >> 21) & 0x7f) as u8,
+                ((n >> 14) & 0x7f) as u8,
+                ((n >> 7) & 0x7f) as u8,
+                (n & 0x7f) as u8,
+            ]
+        };
+        let mut bytes: Vec<u8> = b"ID3".to_vec();
+        bytes.extend([3, 0, 0]);
+        bytes.extend(ss(6));
+        bytes.extend(b"ABCDEF");
+        bytes.extend(b"ID3");
+        bytes.extend([4, 0, 0]);
+        bytes.extend(ss(4));
+        bytes.extend(b"GGGG");
+        let audio: Vec<u8> = vec![0xff, 0xfb, b'1', b'2', b'3'];
+        bytes.extend(&audio);
+        std::fs::write(&f, &bytes).unwrap();
+
+        assert_eq!(cut_leading_tags(&f).expect("cut"), 10 + 6 + 10 + 4);
+        assert_eq!(std::fs::read(&f).unwrap(), audio);
+
+        // A file that does not start with ID3 is left byte-identical.
+        let g = dir.join("plain.mp3");
+        std::fs::write(&g, &audio).unwrap();
+        assert_eq!(cut_leading_tags(&g).expect("no-op cut"), 0);
+        assert_eq!(std::fs::read(&g).unwrap(), audio);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repair_stacked_tags_leaves_one_tag_with_expected() {
+        // The repair's contract, run directly on a stacked file: every
+        // leading block gone, `expected` the single winner. write_file's
+        // probe-blindness branch ("No format could be determined" — the
+        // owner's "19 Flash.mp3", 2026-09-05: a fat ID3v2.3 whose
+        // DECLARED end is a second ID3v2.4, not a frame) reaches exactly
+        // this function. The exact probe refusal itself is a lofty
+        // property measured on a /tmp copy of the incident file; several
+        // synthetic layouts were probed and none re-summoned it, so the
+        // mechanism is pinned here instead.
+        let dir = temp_dir("repair-direct");
+        let f = dir.join("stack.mp3");
+        let mut bytes: Vec<u8> = b"ID3".to_vec();
+        bytes.extend([3, 0, 0, 0, 0, 0, 6]);
+        bytes.extend(b"ABCDEF");
+        bytes.extend(b"ID3");
+        bytes.extend([4, 0, 0, 0, 0, 0, 4]);
+        bytes.extend(b"GGGG");
+        let fx = walkdir::WalkDir::new(fixtures_src())
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .find(|e| e.path().extension().and_then(|x| x.to_str()) == Some("mp3"))
+            .expect("a fixture mp3")
+            .path()
+            .to_path_buf();
+        bytes.extend(std::fs::read(&fx).unwrap());
+        std::fs::write(&f, &bytes).unwrap();
+
+        let mut want = Tag::new(lofty::tag::TagType::Id3v2);
+        want.set_title("Repaired".to_string());
+        repair_stacked_tags(&f, &want).expect("repair");
+        let re = lofty::read_from_path(&f).expect("readable after repair");
+        assert_eq!(
+            re.primary_tag()
+                .or_else(|| re.first_tag())
+                .and_then(|t| t.get_string(&ItemKey::TrackTitle))
+                .map(str::to_string)
+                .as_deref(),
+            Some("Repaired")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

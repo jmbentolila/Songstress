@@ -3911,3 +3911,31 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   balances from 9. The panel's column budget is TWO, always. (The album's
   skipped numbers 5/19 were innocent: its tags genuinely jump, the count
   label agreed.) Version 0.9.16.
+
+### "No format could be determined": lofty's probe vs a fat stacked tag (2026-09-05)
+
+  Owner joined a track into its album and the save died with
+  `"19 Flash.mp3": No format could be determined from the provided file`.
+  Diagnosis on a /tmp copy (owner-path rule honored): the file carries an
+  ID3v2.3 whose declared region is 399 KB (a 387 KB APIC inside), an
+  ID3v2.4 starting EXACTLY at that region's end, MPEG frames only after
+  it, and a v1 at EOF. lofty READS this fine (the .mp3 extension is the
+  hint) but its WRITE probe goes blind — it cannot place the audio
+  past the first block — so `save_to_path` fails on EVERY path (temp,
+  original, any extension), and write_file's chain never reaches the
+  verify/repair step, which only exists behind a successful save.
+  Mutants measured: removing EITHER v2 block heals the probe; removing
+  only the v1 does not; synthetic small-stacks do NOT reproduce it (the
+  fat declared region matters) — so no synthetic re-summons the exact
+  refusal, and the tests pin the mechanism instead of the ghost.
+  Fix: (a) new `cut_leading_tags` — strips leading ID3v2 blocks by the
+  headers' own size fields (v2.2/v2.3/v2.4 arithmetic, refuses to eat
+  more than the file holds), zero lofty involvement; (b)
+  repair_stacked_tags runs its copy through it first, so the strip loop
+  has a probeable file; (c) write_file's `Ok(Err(..))` branch routes
+  "No format could be determined" into repair_stacked_tags (error string
+  carries both halves if the repair also fails). Losslessness unchanged:
+  `expected` is the merged view (union of the blocks) plus the user's
+  edit, and it becomes the file's single tag. New tests 97–98:
+  cut_leading_tags arithmetic (incl. the no-ID3 no-op) and the repair's
+  contract. The owner's file self-heals on the next save. Version 0.9.17.
