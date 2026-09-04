@@ -1,58 +1,57 @@
+<div align="center">
+
+<img src="assets/app-icon.svg" alt="Songstress" width="128" />
+
 # Songstress
 
-> Agent instructions: [AGENTS.md](AGENTS.md) · roadmap + implementation record: [PLAN.md](PLAN.md)
+**A local-first music player for Linux desktops.**
+Album-grid centric, MusicBee-style browsing, glassmorphism chrome —
+built for Fedora KDE Plasma (Wayland), shaped by one very deafeningly opinionated listener.
 
-Album-grid music player for Fedora KDE (Wayland). Tauri 2 + Svelte 5 frontend, Rust backend,
-MPV (JSON IPC) as audio engine, SQLite library, lofty tags.
+*Tauri 2 · Svelte 5 · Rust · MPV · SQLite · lofty*
+
+</div>
+
+---
+
+## What it looks like from the inside
+
+- **Album grid first** — artists in a sidebar, albums as covers, an expanded
+  panel under the selected album with its full track list
+- **Real audio engine** — MPV over JSON IPC: gapless playback, 4-band EQ,
+  shuffle pools that stay fast at thousands of tracks
+- **A tag editor that respects you** — album + track editors, art picker,
+  disputed-tag awareness, and an import flow that *moves* your files where
+  they belong and shows you the receipt
+- **KDE-native integration** — Global Menu over DBus (with live transport
+  glyphs), MPRIS, inotify library watching, blur via KWin, dialogs via kdialog
+- **Glass, not frameworks** — hand-rolled CSS with theme tokens; two-tier
+  translucency tuned to the compositor, zero CSS dependencies
 
 ## Development
 
 ```sh
 npm install
-npm run tauri dev      # full app
+npm run tauri dev      # the full app (needs mpv + kdialog)
 npm run check          # svelte-check
-npm test               # vitest (row model, sorting)
+npm test               # vitest
+cd src-tauri && cargo test --lib
 ```
 
-First Rust build takes a few minutes. Requires the Tauri Linux prerequisites:
-`webkit2gtk4.1-devel gtk3-devel librsvg2-devel patchelf` plus `nodejs npm` and rustup.
+Rust ≥ 1.8x (lofty), Node ≥ 20, WebKitGTK (Tauri 2 defaults), `mpv` on PATH.
 
-## Wallpaper blur (KWin)
+## The docs triangle
 
-Wayland clients cannot request compositor blur-behind, and stock KWin blur only
-honors client-requested blur regions. The frosted-wallpaper look therefore needs the
-community force-blur effect **Better Blur DX** (actively maintained successor of Better
-Blur, supports Plasma 6.7):
+| Doc | What it is |
+|---|---|
+| **[AGENTS.md](AGENTS.md)** | The working contract: gotchas learned the hard way, verification gates, versioning rules |
+| **[PLAN.md](PLAN.md)** | The entire roadmap *and* implementation log — every decision, every dead end, dated |
+| **[DESIGN.md](DESIGN.md) / [PRODUCT.md](PRODUCT.md)** | The design brief: tuned alphas, motion tokens, the No-Lift Rule |
 
-```sh
-sudo dnf copr enable infinality/kwin-effects-better-blur-dx
-sudo dnf install --refresh kwin-effects-better-blur-dx
-```
+## Built with a machine
 
-`~/.config/kwinrc` is already configured for it:
-
-- `[Plugins] betterBlurDxEnabled=true`, `[Plugins] blurEnabled=false` (DX replaces stock blur)
-- `[Effect-better-blur-dx]` (dashes!) — `WindowClasses=songstress` (single line only; multi-entry lists break matching in this build), `BlurMatching=true`, `CornerRadius=14`
-
-After installing, run `qdbus-qt6 org.kde.KWin /KWin reconfigure` (no relogin needed on
-first install). The effect must match the exact installed KWin version — if a Plasma
-upgrade breaks it, reinstall the package.
-
-**Auto-load on boot**: KWin occasionally boots without loading the effect despite
-`betterBlurDxEnabled=true` (silent failure, seen twice: 2026-08-22 and 2026-08-23).
-The `kwin-blur-load.service` user unit (`~/.config/systemd/user/`, script in
-`~/.local/bin/kwin-blur-load.sh`) runs after `plasma-kwin_wayland.service`, checks
-`isEffectLoaded` and force-loads over DBus with a 2-minute retry. Enabled and tested;
-no manual step needed after reboots anymore.
-
-Without the effect the app degrades gracefully: panels keep their in-app
-`backdrop-filter` (frosting content scrolled beneath them) and the tuned surface
-alphas keep everything legible over unblurred wallpaper.
-
-## Notes
-
-- The in-app `backdrop-filter` on sidebar/playbar/expanded panel works unconditionally;
-  it only frosts page content, never the wallpaper.
-- `decorations: false` — custom traffic lights + drag regions; resize edges come from
-  GTK CSD.
-- mpv is spawned with `--no-config`; the user's `~/.config/mpv/mpv.conf` is not read.
+**This app was vibecoded** — designed, written, reviewed, and relentlessly
+refactored by a human and an AI agent working the same keyboard. The taste is
+human's; a lot of the typing is the machine's; the arguments about both are
+recorded, dated, in [PLAN.md](PLAN.md). If you're an agent reading this:
+read AGENTS.md first, it is scarred so you don't have to be.
