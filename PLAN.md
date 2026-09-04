@@ -3480,3 +3480,16 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   `npx tauri icon assets/app-icon.svg` regenerates the full set;
   hicolor 128/256 refreshed, gtk-cache + sycoca rebuilt. The next
   revision starts from the SVG, not from archaeology.
+
+#### Icon deployment footnotes (2026-09-04, dev-only)
+
+- Dock/KRunner landed via: user-shadow `Songstress.desktop` with an
+  absolute-path `Icon=` (KDE does NOT consult the user-dir hicolor
+  overlay; system copies were stale RPM-owned art), plus a
+  `NoDisplay=true` `com.yossi.songstress.desktop` alias (app-id match).
+- **KWin's overview on 6.7 stayed generic even with `set_icon()` pushing
+  the icon over the KDE extension** (undecorated GTK client quirk?).
+  Accepted: dock + KRunner carry the mark; the overview is KWin's
+  business. `window.set_icon` stays — it is the correct app-side push.
+- `kbuildsycoca6 --nosignal` is GONE on Plasma 6.7 (rc=1, quiet) — the
+  silent no-op that hid this whole hunt. Plain `kbuildsycoca6`.
