@@ -151,20 +151,13 @@ pub fn build() -> Vec<Menu> {
     };
     // Glyphs that track state, not just the verb (owner asked for the play
     // CONTROLS: the row already says Play/Pause — the icon must not lie).
+    // Checkable rows deliberately carry NO icon: the checkbox is their glyph
+    // (owner ruling 2026-09-04 — a checkmark and a mode icon on one row say
+    // the same sentence twice).
     let pp_icon = if s.playing == Some(true) {
         "media-playback-pause"
     } else {
         "media-playback-start"
-    };
-    let repeat_icon = match s.repeat.as_str() {
-        "album" => "media-playlist-repeat",
-        "track" => "media-playlist-repeat-song",
-        _ => "media-repeat-none",
-    };
-    let shuffle_icon = if s.shuffle == "off" {
-        "media-playlist-no-shuffle"
-    } else {
-        "media-playlist-shuffle"
     };
     vec![
         Menu {
@@ -202,8 +195,7 @@ pub fn build() -> Vec<Menu> {
                     ),
                     true,
                     Some(s.repeat != "off"),
-                )
-                .with_icon(repeat_icon),
+                ),
                 item(
                     "playback.shuffle",
                     &format!(
@@ -217,8 +209,7 @@ pub fn build() -> Vec<Menu> {
                     ),
                     true,
                     Some(s.shuffle != "off"),
-                )
-                .with_icon(shuffle_icon),
+                ),
                 sep(),
                 // Equalizer: enable toggle, cycling preset picker, and an
                 // item that opens the playbar popover (frontend) — the
@@ -229,8 +220,7 @@ pub fn build() -> Vec<Menu> {
                     &format!("Equalizer: {}", if s.eq_enabled { "On" } else { "Off" }),
                     true,
                     Some(s.eq_enabled),
-                )
-                .with_icon("view-media-equalizer"),
+                ),
                 item(
                     "playback.eq-preset",
                     &format!("EQ Preset: {}", s.eq_preset),
@@ -538,19 +528,17 @@ mod tests {
             find(&menus, "playback", "playback.play-pause").icon.as_deref(),
             Some("media-playback-pause")
         );
+        // Checkable rows wear the checkmark, never a second glyph (owner
+        // ruling 2026-09-04, one day after the glyphs shipped).
         set_state(MenuState {
             repeat: "track".into(),
             shuffle: "all".into(),
+            eq_enabled: true,
             ..Default::default()
         });
         let menus = build();
-        assert_eq!(
-            find(&menus, "playback", "playback.repeat").icon.as_deref(),
-            Some("media-playlist-repeat-song")
-        );
-        assert_eq!(
-            find(&menus, "playback", "playback.shuffle").icon.as_deref(),
-            Some("media-playlist-shuffle")
-        );
+        assert_eq!(find(&menus, "playback", "playback.repeat").icon, None);
+        assert_eq!(find(&menus, "playback", "playback.shuffle").icon, None);
+        assert_eq!(find(&menus, "playback", "playback.eq").icon, None);
     }
 }
