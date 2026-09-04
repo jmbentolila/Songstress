@@ -289,7 +289,7 @@ the upstream report.
 - MPRIS-initiated volume changes do NOT write through to the settings DB
   (the frontend owns persistence and doesn't hear about them) — acceptable
   for now; revisit if it annoys.
-- Visual pass on the import flow on the real library (user) — ⬜.
+- Visual pass on the import flow on the real library (user) — ✅ 2026-09-04 — full flow run for real (see log entry below 0.9.5).
 - Menu label ambiguity: "Add music folder…" (import staging, Step 2a) vs
   "Music folders…" (library roots, Step 7c) sit in the same Library menu
   and are easily confused — **resolved 2026-08-31 (pass A)**: the staging pair
@@ -779,7 +779,7 @@ tag issues (wrong albumartist, wrong year, split albums).
   Play failures on vanished files (pre-rescan) flag the row missing
   immediately and open the locate dialog directly — no silent no-op.
   USER-VERIFIED 2026-08-24 (import/save/discard/relink/missing flows).
-- ⬜ Visual pass on the real library (user) — still open, see *Deferred*.
+- ✅ 2026-09-04 (badge-modal Save, 12 files) Visual pass on the real library (user) — still open, see *Deferred*.
 
 ---
 
@@ -3432,3 +3432,19 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   folding on close. Rejections logged with their gate: play/pause glyph,
   seek, stepper (100+/day), hold-to-confirm on discard/remove
   (recoverable, tens/day), tile hover, search re-stagger.
+
+### The real-flow rehearsal happened, 2026-09-04
+
+  The owner imported Ghost's Infestissumam (12 files) through the album
+  badge modal with a real Save — the first end-to-end run of staging →
+  saveImports → relink_track → album_destination against his library.
+  Verified after: staged=0, import cache empty, all 12 files MOVED (birth
+  mtimes intact) into `~/Music/Music Files/Ghost B.C./Infestissumam/`,
+  folder created by the save itself, 12 rows re-pointed (play history
+  kept), the following scan skipped 4464/added 0 — exactly what a clean
+  relink looks like from the outside. Destination note: the files carry
+  ALBUM ARTIST "Ghost B.C." (the 2011 release), so the layout rule put
+  them under Ghost B.C., next door to the Ghost catalog — the split is
+  the files' truth, not the app's. Every deferred verification item is
+  now closed; nothing in the plan remains open.
+
