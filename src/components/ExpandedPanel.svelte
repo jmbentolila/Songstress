@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { fade } from "svelte/transition";
+  import { MediaQuery } from "svelte/reactivity";
   import type { Album, Track } from "../lib/types";
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
@@ -433,6 +435,19 @@
     return `${m}:${String(s).padStart(2, "0")}`;
   }
 
+  // A row that leaves (discard, remove, rescan re-group) FADES out over
+  // 160 ms inside its own cell, and the list closes the gap when it's
+  // gone — two legible beats instead of a blink. A row that ARRIVES
+  // (watcher adopts a new file) fades in the same 160 ms: mirror, owner
+  // rule. The transition sits on the row BUTTON, not the <li>: the list
+  // is a grid-auto-flow:column, so an in-flow outro cell is the one thing
+  // that must not move — the fading button holds its <li>'s size, the
+  // grid does not reflow mid-fade, and the collapse is the deliberate
+  // second beat. `local:` — no intro on first mount (the grid entrance
+  // owns boot); only store-driven adds and removes animate.
+  const prefersReducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
+  const ROW_FADE = $derived({ duration: prefersReducedMotion.current ? 0 : 160 });
+
   // Two-column tracklists are an explicit grid (NOT CSS multicol): WebKit's
   // multicol hit-testing maps points below column 1's last item into column
   // 2, so hovering the dead zone highlighted the wrong track.
@@ -509,6 +524,7 @@
                       <li>
                         <button
                           class="track"
+                          transition:fade|local={ROW_FADE}
                           class:current={isCurrent(track.id)}
                           class:selected={selectedId === track.id}
                           title={
@@ -551,6 +567,7 @@
                 <li>
                   <button
                     class="track"
+                    transition:fade|local={ROW_FADE}
                     class:current={isCurrent(track.id)}
                     class:selected={selectedId === track.id}
                     title={

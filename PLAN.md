@@ -3395,3 +3395,40 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   live, cold reload) — CSS opacity cannot be skipped. Live traces: mount
   0.62→0.95→1; switch saw old 100→0 and new 0→100 SIMULTANEOUSLY with both
   gradients present in the DOM.
+
+### find-animation-opportunities sweep + mirrored connective tissue, 2026-09-04
+
+  The sweep's honest headline: most seams were already animated (panel
+  contract, accordion, drawers, playbar dissolve, even the boot grid's
+  .grid.enter row ladder — 320ms, 90ms/row, 540 cap, first 8 rows). What
+  shipped is the leftover connective tissue, all of it MIRRORS (owner
+  rule: every entrance owes its exit along the same path, same length):
+
+  - ContextMenu: local transition, 125ms cubicOut, opacity + scale(0.97),
+    transform-origin pinned by the clamp effect to the corner the click
+    actually anchors (flip decides: left top / right bottom / …). Grows
+    out of the click point, shrinks back into it.
+  - EQ + queue popovers: the pop-in KEYFRAME becomes the popUp
+    TRANSITION — 150ms cubicOut, opacity + 6px rise + 0.97 scale, origin
+    bottom-right at the anchor button. Unfolds up from the button, folds
+    back down. One dialect with the menu (same scale, same easing).
+  - ExpandedPanel rows: transition:fade|local 160ms on the row BUTTON
+    (not the <li> — the list is grid-auto-flow:column and an in-flow
+    outro cell must not move; the fading button holds its slot, the gap
+    closes as the deliberate second beat). Rows discarded/removed fade
+    out in place; watcher-adopted rows fade in the same beat; `local:`
+    keeps boot silent (the grid entrance owns it).
+  - Lightbox: as-lb-in keyframe replaced by fade|local 140ms — entered
+    on a fade, now LEAVES on one (it used to vanish).
+  - Skeleton exit: the tiles rise in on library arrival; the shimmer now
+    fades out over 200ms instead of blinking (wrapper div — transitions
+    may not sit on component tags; grid-column: 1/-1 keeps its measure).
+
+  Syntax tax paid: Svelte 5 modifiers are `fade|local`, not the old
+  `local:fade`; JS-driven transitions read matchMedia/MediaQuery at fire
+  time (the stylesheet kill switch cannot reach them). Live-verified:
+  menu mid-flight opacity .71 / scale .991 / origin pinned to the click
+  corner, outro in flight at +60ms; popover rising at .76, still mounted
+  folding on close. Rejections logged with their gate: play/pause glyph,
+  seek, stepper (100+/day), hold-to-confirm on discard/remove
+  (recoverable, tens/day), tile hover, search re-stagger.

@@ -1,18 +1,47 @@
 <script lang="ts">
+  import { cubicOut } from "svelte/easing";
   import { contextMenu, closeContextMenu, type MenuItem } from "../lib/stores/contextMenu.svelte";
 
   let el = $state<HTMLDivElement>();
 
-  // Keep the menu inside the window once its size is known.
+  /**
+   * The menu grows out of the point you clicked and shrinks back into it
+   * — owner rule: every entrance wears its mirror exit. 125 ms, cubicOut
+   * (the accordion's easing), opacity + a 0.97 scale; the transform-origin
+   * is pinned to the anchoring corner by the clamp effect below, so the
+   * corner nearest the cursor is the one that does not travel. Svelte
+   * runs the SAME generator backwards for the outro: same path, same
+   * duration, free symmetry. JS-driven, so reduced-motion is honored in
+   * JS (the stylesheet's kill switch cannot reach these).
+   */
+  function ctxPop(_node: Element, _params = {}) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return {
+      duration: reduce ? 0 : 125,
+      easing: cubicOut,
+      css: (t: number) =>
+        `opacity: ${t}; transform: scale(${(0.97 + 0.03 * t).toFixed(4)}); will-change: transform, opacity`,
+    };
+  }
+
+  // Keep the menu inside the window once its size is known — and pin the
+  // entrance's transform-origin to the corner the click actually anchors
+  // (the flip decides which corner that is: a menu pushed left off the
+  // right edge grows back to the RIGHT from its top-right corner).
   $effect(() => {
     if (!contextMenu.open || !el) return;
     const r = el.getBoundingClientRect();
+    let ox = "left";
+    let oy = "top";
     if (contextMenu.x + r.width > window.innerWidth - 4) {
       contextMenu.x = window.innerWidth - r.width - 4;
+      ox = "right";
     }
     if (contextMenu.y + r.height > window.innerHeight - 4) {
       contextMenu.y = Math.max(4, contextMenu.y - r.height);
+      oy = "bottom";
     }
+    el.style.transformOrigin = `${oy} ${ox}`;
   });
 
   // The menu is an overlay anchored to screen coordinates — the moment the
@@ -66,7 +95,14 @@
 />
 
 {#if contextMenu.open}
-  <div class="ctx glass" bind:this={el} style:top="{contextMenu.y}px" style:left="{contextMenu.x}px" role="menu">
+  <div
+    class="ctx glass"
+    bind:this={el}
+    style:top="{contextMenu.y}px"
+    style:left="{contextMenu.x}px"
+    role="menu"
+    transition:ctxPop
+  >
     <!-- Keyed by index ON PURPOSE: SEP is one shared object, and a menu with
          two breaks would collide under Svelte's default identity keys. -->
     {#each contextMenu.items as item, i (i)}

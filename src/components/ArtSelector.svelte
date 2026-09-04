@@ -8,6 +8,8 @@
    * same accent language as the sliders and focus rings.
    */
   import { invoke } from "@tauri-apps/api/core";
+  import { fade } from "svelte/transition";
+  import { MediaQuery } from "svelte/reactivity";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type { ArtChange, ArtInventory } from "../lib/artChange";
   import { sniffMime, toBase64 } from "../lib/artChange";
@@ -64,6 +66,12 @@
 
   /** Lightbox subject: { src, label, hash? } — hash absent for arrivals. */
   let view = $state<{ src: string; label: string; hash?: string } | null>(null);
+  // The lightbox entered on a 140 ms ease-out fade; the mirror exit is
+  // now the SAME transition played backwards (owner rule: entrances owe a
+  // mirror), which a keyframe could never do. 140 ms, reduced-motion to
+  // zero — JS-driven, so the stylesheet switch can't reach it.
+  const prefersReducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
+  const LB_FADE = $derived({ duration: prefersReducedMotion.current ? 0 : 140 });
   let viewHash = $state<string | null>(null);
   function expand(v: { src: string; label: string; hash?: string }) {
     view = v;
@@ -270,7 +278,7 @@
 
   {#if view}
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="as-lb" role="presentation" onclick={closeLb}>
+    <div class="as-lb" role="presentation" onclick={closeLb} transition:fade|local={LB_FADE}>
       <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
       <figure class="as-lbfig" role="dialog" aria-modal="true" aria-label={view.label} onclick={(e) => e.stopPropagation()}>
         <img src={view.src} alt={view.label} />
@@ -507,12 +515,6 @@
     display: grid;
     place-items: center;
     background: rgba(0, 0, 0, 0.7);
-    animation: as-lb-in 140ms var(--ease-out, ease-out);
-  }
-  @keyframes as-lb-in {
-    from {
-      opacity: 0;
-    }
   }
   /* The lightbox is a SIBLING of the dialog it belongs to: same radius
      token, same border, same panel material — a card, not a floating

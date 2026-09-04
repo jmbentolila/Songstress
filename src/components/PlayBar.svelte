@@ -12,6 +12,23 @@
     albumSkip,
   } from "../lib/stores/playback.svelte";
   import { library } from "../lib/stores/library.svelte";
+  import { cubicOut } from "svelte/easing";
+
+  /** The popovers unfold UP from their anchor button and fold back down
+   *  into it — the mirror exit is the point (owner rule: entrances owe a
+   *  mirror). 150 ms, cubicOut (the accordion's easing), opacity + rise +
+   *  the same 0.97 scale the context menu uses: one entrance dialect for
+   *  everything that unfolds from a trigger. Svelte replays this
+   *  generator backwards on outro — same path, same duration. */
+  function popUp(_node: Element, _params = {}) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return {
+      duration: reduce ? 0 : 150,
+      easing: cubicOut,
+      css: (t: number) =>
+        `opacity: ${t}; transform: translateY(${(6 * (1 - t)).toFixed(2)}px) scale(${(0.97 + 0.03 * t).toFixed(4)}); will-change: transform, opacity`,
+    };
+  }
   import Toggle from "./Toggle.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
   import { ui, resolvedTheme } from "../lib/stores/ui.svelte";
@@ -409,7 +426,7 @@
   </div>
 
   {#if ui.eqOpen}
-    <div class="eq-pop glass" bind:this={eqEl} role="dialog" aria-label="Equalizer">
+    <div class="eq-pop glass" bind:this={eqEl} role="dialog" aria-label="Equalizer" transition:popUp>
       <!-- Trimmed (2026-08-31): the Playback pane owns enable + preset, so the
            popover shows the preset NAME read-only and hands the rest over. Its
            native checkbox and <select> were the last two widgets outside the
@@ -488,7 +505,7 @@
     </div>
   {/if}
   {#if ui.queueOpen}
-    <div class="q-pop glass" bind:this={qEl} role="dialog" aria-label="Queue">
+    <div class="q-pop glass" bind:this={qEl} role="dialog" aria-label="Queue" transition:popUp>
       <header>
         <span class="q-title">Queue</span>
         {#if playback.queue.length}
@@ -853,19 +870,13 @@
 
   /* Step 8c: materialize on entry — the popovers sit above their trigger
    * buttons, so they grow from the bottom-right corner (transform-origin on
-   * the shared edge). Transform+opacity only = compositor-friendly; the
-   * global prefers-reduced-motion switch collapses the duration. */
+   * the shared edge). The entrance used to be this keyframe; it is now the
+   * popUp transition so the exit replays the same path at the same length
+   * (owner rule: entrances owe a mirror). Transform+opacity only =
+   * compositor-friendly; reduced-motion is honored in the generator. */
   .eq-pop,
   .q-pop {
     transform-origin: 100% 100%;
-    animation: pop-in 140ms var(--ease-out);
-  }
-
-  @keyframes pop-in {
-    from {
-      opacity: 0;
-      transform: scale(0.98);
-    }
   }
 
   .eq-pop {

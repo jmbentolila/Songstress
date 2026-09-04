@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { fade } from "svelte/transition";
   import { ui } from "../lib/stores/ui.svelte";
   import { library } from "../lib/stores/library.svelte";
   import { currentTrack } from "../lib/stores/playback.svelte";
@@ -23,6 +24,13 @@
    * The facts are spelled out (rather than read from the stores inside a helper)
    * so this and the sidebar's identical list cannot drift silently: the type
    * forces both to answer for every fact. */
+  // The skeleton's exit is the mirror half of the tiles' entrance: the
+  // grid already rises in on library arrival (.grid.enter, 320 ms row
+  // ladder), so the shimmer has to LEAVE on a bridge too, not a blink —
+  // 200 ms fade both ways (boot in, full-rescan round trip back).
+  const SK_FADE = {
+    duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200,
+  };
   const loading = $derived(
     library.live &&
       libraryLoading({
@@ -478,7 +486,9 @@
 <main class="content" bind:clientHeight={stageHeight} aria-busy={loading}>
   <div class="grid" class:enter={library.entering} bind:clientWidth={gridWidth}>
     {#if loading}
-      <GridSkeleton {cols} rows={skRows} />
+      <div class="sk-holder" transition:fade={SK_FADE}>
+        <GridSkeleton {cols} rows={skRows} />
+      </div>
     {:else if library.live && library.ready && library.albums.length === 0}
       <EmptyState />
     {:else if searchActive && sections.length === 0}
@@ -632,6 +642,13 @@
 
   .content::-webkit-scrollbar {
     display: none;
+  }
+
+  /* The skeleton gets a real box so its exit can fade (transitions may not
+     sit on component tags); it spans the grid so its own inner layout
+     measures exactly as it did when it was a bare branch child. */
+  .sk-holder {
+    grid-column: 1 / -1;
   }
 
   .grid {
