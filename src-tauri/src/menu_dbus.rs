@@ -139,9 +139,12 @@ fn item_props(item: &MenuItem) -> HashMap<String, OwnedValue> {
     }
     props.insert("label".into(), owned(item.label.clone()));
     if let Some(icon) = &item.icon {
-        // dbusmenu's "icon" is a themed icon name; Plasma renders it from
-        // the user's own icon theme (Breeze's media-* set for ours).
+        // dbusmenu's spec key is "icon" — but Plasma 6.7's Global Menu
+        // applet imports "icon-name"/"icon-data" (verified in its own
+        // binary: _dbusmenu_icon_name + QIcon::fromTheme). Send both;
+        // spec-strict consumers and KDE each find what they look for.
         props.insert("icon".into(), owned(icon.clone()));
+        props.insert("icon-name".into(), owned(icon.clone()));
     }
     props.insert("enabled".into(), owned(item.enabled));
     props.insert("visible".into(), owned(true));
