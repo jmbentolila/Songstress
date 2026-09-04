@@ -3939,3 +3939,25 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   edit, and it becomes the file's single tag. New tests 97–98:
   cut_leading_tags arithmetic (incl. the no-ID3 no-op) and the repair's
   contract. The owner's file self-heals on the next save. Version 0.9.17.
+
+### The modal "glitches its dimensions and returns": one skeleton per track (2026-09-05)
+
+  Owner: stepping the tag editor (or saving) made the modal briefly
+  distort and snap back. Reproduced live via the devtools bridge: every
+  step and every save fired the ArtSelector skeleton (3 pulsing `as-sk`
+  tiles swapped in over the candidate column, then out). Cause: the
+  component's load $effect transitively READ `trackId` (it is an invoke
+  argument), and Svelte 5 registers every signal an effect's synchronous
+  run touches — so the per-FILE signal re-ran the per-ALBUM fetch, and
+  `loading=true` traded real tiles for the skeleton. The census itself
+  never changes while stepping (it is the album's picture pile); a save
+  CAN change it (new embedded art), but that wants a SILENT refresh, not
+  a skeleton over content mid-dialog.
+  Fix (ArtSelector): the effect now keys on `loadAlbum` ($state) and only
+  fetches when albumId actually changes; a new `refreshSeq` prop, bumped
+  by both hosts after a successful save, re-fetches quietly (tiles stay;
+  no `loading` flip); trackId remains request context, never a trigger.
+  Verified live: animationstart probe across a step and a save = zero
+  skeleton activations, dialog geometry unmeasurable-flat (98 rAF frames
+  at 680×525 through the earlier step). Owner's track title touched by
+  the drive-in tests was restored through the app's own save. 0.9.18.

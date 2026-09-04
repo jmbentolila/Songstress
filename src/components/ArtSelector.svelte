@@ -17,6 +17,7 @@
   let {
     albumId,
     trackId = undefined,
+    refreshSeq = 0,
     stack = false,
     open = $bindable(false),
     change = $bindable("keep" as ArtChange),
@@ -24,6 +25,11 @@
   }: {
     albumId: string;
     trackId?: string;
+    /** The host bumps this after a write that can change the census
+     *  (saving this album's artwork): the picker refreshes SILENTLY —
+     *  tiles never trade places with the skeleton over content the user
+     *  is looking at. */
+    refreshSeq?: number;
     /** Vertical column (two-column modal layout) instead of a strip. */
     stack?: boolean;
     /** Lightbox visibility, shared with the host modal so Escape closes the
@@ -40,22 +46,44 @@
   let dropOver = $state(false);
   let busy = $state(false);
 
-  async function load() {
-    loading = true;
+  async function load(quiet = false) {
+    // A refresh keeps the tiles standing (no skeleton over content that is
+    // still true); the skeleton is ONLY for the first load of an album.
+    if (!quiet) loading = true;
     error = "";
     try {
-      inventory = await invoke<ArtInventory>("get_art_candidates", {
+      const next = await invoke<ArtInventory>("get_art_candidates", {
         albumId,
         trackId: trackId ?? null,
       });
+      inventory = next;
     } catch (e) {
       error = String(e);
     } finally {
       loading = false;
     }
   }
+  // The inventory is the ALBUM'S picture census; trackId is request
+  // context only. Read the signals OUTSIDE the effect so stepping the
+  // stepper does not register trackId as a dependency: it used to, and
+  // every step / save re-fetched and swapped the candidate tiles for
+  // skeletons — the "modal glitches its dimensions and returns" the
+  // owner reports (2026-09-05), one shimmer per track.
+  let loadAlbum = $state(""); // albumId this inventory was fetched for
+  let reloadSeq = $state(0); // last refreshSeq consumed
   $effect(() => {
-    if (albumId) void load();
+    const a = albumId;
+    if (!a) return;
+    if (a !== loadAlbum) {
+      loadAlbum = a;
+      void load();
+    }
+  });
+  $effect(() => {
+    const s = refreshSeq;
+    if (!s || s === reloadSeq) return;
+    reloadSeq = s;
+    void load(true);
   });
 
   const selectedHash = $derived(

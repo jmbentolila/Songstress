@@ -47,6 +47,9 @@
   let inv = $state<ArtInventory | null>(null);
   let art = $state<ArtChange>("keep");
   let artLb = $state(false);
+  /** Bumped after a write lands: the artwork picker refreshes its census
+   *  silently (a save can replace the embedded art). See TrackTagsEditor. */
+  let artSeq = $state(0);
   /** Set after a successful save: the footer becomes the receipt. */
   let receipt = $state<{ written: number; total: number; lines: string[] } | null>(null);
 
@@ -256,6 +259,7 @@
         },
       );
       receipt = { written: rep.written, total: rep.total, lines: rep.receipt };
+      artSeq++;
       // The receipt, heard verbatim (WCAG 4.1.3).
       announcer.say(
         `Wrote ${rep.written} of ${rep.total} ${rep.total === 1 ? "file" : "files"}`,
@@ -336,6 +340,7 @@
   <div class="te-cols">
     <ArtSelector
       {albumId}
+      refreshSeq={artSeq}
       stack
       bind:open={artLb}
       bind:change={art}

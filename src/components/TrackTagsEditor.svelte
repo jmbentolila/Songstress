@@ -46,6 +46,12 @@
   let inv = $state<ArtInventory | null>(null);
   let art = $state<ArtChange>("keep");
   let artLb = $state(false);
+  /** Bumped after a write lands: the artwork picker refreshes its census
+   *  SILENTLY (a save can replace the embedded art). Steps do NOT bump
+   *  it — the census is the album's, and re-fetching it per step made the
+   *  candidate column trade places with the skeleton: the dimension
+   *  "glitch then return" of owner report 2026-09-05. */
+  let artSeq = $state(0);
 
   /** "More tag fields": the rarely-touched four live behind this fold
      (owner ruling — the surgical modal leads with the everyday fields).
@@ -309,6 +315,7 @@
       // so the fields show disk truth again and the next step starts clean.
       await load();
       written = true;
+      artSeq++;
       // "Written ✓" in the footer, heard (WCAG 4.1.3).
       announcer.say(`Written to ${meta?.file ?? "the file"}`);
     } catch (e) {
@@ -407,6 +414,7 @@
       <ArtSelector
         albumId={meta.albumId}
         {trackId}
+        refreshSeq={artSeq}
         stack
         bind:open={artLb}
         bind:change={art}
