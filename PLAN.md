@@ -3518,3 +3518,54 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   "no cover" reads as the app's own quiet room. The stencil now lives
   in three materializations: the icon (master SVG), the window push
   (set_icon), and the UI placeholder (component); one geometry.
+
+### Wide-window panel fixes: row spacing + switch "sort glitch" (2026-09-05, dev report)
+
+  Two sightings only visible once the window left its bottom-left tile:
+
+  1. **Air between tracklist rows** (Dead Ringer screenshot). `.tracklist`
+     carries `flex: 1`, and the panel is as tall as its cover art (the
+     `clamp(170px, 24%, 300px)` width grows with the window → 300px square).
+     A short two-column list in that box leaves the grid's `auto` row tracks
+     to absorb the slack — 8 tracks stretched over 300px. Fix:
+     `align-content: start` on `.tracklist.two`; the slack belongs below the
+     list, not between its rows.
+  2. **Tracklist "sort glitch" when switching albums on the same row**
+     (notably → Welcome To The Neighborhood). The same-row host flip swaps
+     `tracks`, and the keyed each sees remove-all + add-all: every outgoing
+     row plays its 160 ms outro fade IN THE SAME `grid-auto-flow: column`
+     grid, so both albums' rows occupy cells for 160 ms — phantom extra
+     columns, scrambled order — then settle. Fix: `{#key displayAlbum.id}`
+     around the tracklist block → the swap is atomic (the outro of a
+     `|local` transition does not play on ancestor-block destruction), while
+     store-driven row adds/removes **within** one album still fade, because
+     the key doesn't change and those stay local each-block deltas.
+
+  Frontend-only — hot-reloaded, no restart, window untouched. Gates:
+  svelte-check 0, vitest 84 green, build green.
+
+  Follow-up the same session (owner evidence: Bat Out of Hell 7-track single
+  vs Dead Ringer 8-track 4+4, side by side on one line): the 8/5 thresholds
+  put the SHAPE CHANGE between adjacent albums — one extra track and a full
+  list became two half-width stumps in the art-tall panel. An unbalanced
+  band (6+2) was considered and rejected: it keeps the flip exactly where
+  the eye compares. New rule: SPLIT_MIN = 11, single column through 10,
+  balanced halves from 11, ONE threshold for the main list and per-disc
+  blocks (old disc threshold was 5). 11+ splits read as "big album"; the
+  10→11 cliff is the least-traveled spot in the library.
+
+  Amended after living with it: SPLIT_MIN settled at 9 (single column
+  through 8 — the Bat-Out-of-Hell shape he endorsed — balanced halves from
+  9; 9 splits 5+4). One constant, main list + disc blocks, unchanged.
+
+  Final shape of the rule (owner, same session): split from 9, BALANCED
+  halves only from 11. 9 and 10 render a dominant column with the last two
+  tracks carved to a short tail — 7+2 / 8+2 — so the band reads as a full
+  list with overflow instead of two stumps. splitRows(n): n>=11 ? ceil(n/2)
+  : n-2; single constant pair, main list + disc blocks.
+
+  Rule as settled (owner): >8 splits; below the balance minimum (11) the
+  head column caps at 7 and the rest spills — 9 → 7+2, 10 → 7+3; 11+
+  balanced halves. The 7-cap makes 9s and 10s the same panel height, gives
+  column 2 enough mass to read as a forming column, and keeps the closer
+  company in the tail. splitRows(n) = n>=11 ? ceil(n/2) : min(7, n).

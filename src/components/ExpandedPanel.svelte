@@ -452,8 +452,32 @@
   // Two-column tracklists are an explicit grid (NOT CSS multicol): WebKit's
   // multicol hit-testing maps points below column 1's last item into column
   // 2, so hovering the dead zone highlighted the wrong track.
+  //
+  // Split threshold (owner call, 2026-09-05, from the Bat Out of Hell (7,
+  // single) vs Dead Ringer (8, split 4+4) comparison): the old 8/5 pair put
+  // the shape CHANGE between adjacent albums — one track longer and a full
+  // list became two half-width stumps floating in the art-tall panel.
+  // Short albums don't need the split (the panel is tall anyway — the cover
+  // square pins its height), so the two-column shape is reserved for lists
+  // that are genuinely long: single column through 8; from 9 the list
+  // splits. The BALANCED halves shape is reserved for 11+ — below that,
+  // column 1 hosts 7 tracks at most and the rest spills into a short
+  // second column: 9 → 7+2, 10 → 7+3 (owner-set, 2026-09-05, after living
+  // with flat thresholds and a fixed 2-track tail — the 7-cap makes 9 and
+  // 10 the same height, gives the tail enough mass to read as a column
+  // forming rather than an appendix, and shares the album closer with
+  // column 2 instead of orphaning it). ONE rule for the main list and
+  // per-disc blocks alike (the old disc threshold was 5).
+  const SPLIT_MIN = 9;
+  const BALANCE_MIN = 11;
+  const PRE_BALANCE_HEAD = 7;
+  // Column 1's row count; grid-auto-flow: column fills it before spilling
+  // the remainder into column 2.
+  function splitRows(n: number): number {
+    return n >= BALANCE_MIN ? Math.ceil(n / 2) : Math.min(PRE_BALANCE_HEAD, n);
+  }
   function halfRows(n: number): string {
-    return `repeat(${Math.ceil(n / 2)}, auto)`;
+    return `repeat(${splitRows(n)}, auto)`;
   }
 
 </script>
@@ -511,6 +535,15 @@
             </p>
           </header>
 
+          {#key displayAlbum.id}
+          <!-- Album switch (same-row host flip) swaps the whole tracklist
+             block atomically. Without the key, the keyed each treats it as
+             remove-all + add-all: every outgoing row plays its 160 ms fade
+             IN THE SAME column grid, so for 160 ms the list shows both
+             albums' rows — extra phantom columns, scrambled order — before
+             settling (the "sort glitch"). Store-driven row adds/removes
+             within one album still animate: the key doesn't change, so
+             those stay local each-block deltas. -->
           {#if hasMultipleDiscs}
             <div class="discs">
               {#each discGroups as group (group.disc)}
@@ -518,8 +551,8 @@
                   <h3 class="disc-title">Disc {group.disc}</h3>
                   <ol
                     class="tracklist"
-                    class:two={group.tracks.length >= 5}
-                    style:grid-template-rows={group.tracks.length >= 5
+                    class:two={group.tracks.length >= SPLIT_MIN}
+                    style:grid-template-rows={group.tracks.length >= SPLIT_MIN
                       ? halfRows(group.tracks.length)
                       : undefined}
                   >
@@ -561,8 +594,8 @@
           {:else}
             <ol
               class="tracklist"
-              class:two={tracks.length >= 8}
-              style:grid-template-rows={tracks.length >= 8
+              class:two={tracks.length >= SPLIT_MIN}
+              style:grid-template-rows={tracks.length >= SPLIT_MIN
                 ? halfRows(tracks.length)
                 : undefined}
             >
@@ -599,6 +632,7 @@
               {/each}
             </ol>
           {/if}
+          {/key}
 
           <footer class="album-meta"
             >{filtering ? `${tracks.length} of ${allTracks.length} tracks` : `${tracks.length} tracks`} · {fmt(totalSec)}</footer
@@ -836,6 +870,13 @@
     grid-auto-flow: column;
     grid-template-columns: 1fr 1fr;
     column-gap: 24px;
+    /* The list GROWS to fill .right (flex: 1) — the panel is as tall as its
+     * cover art (clamp width → 300px square in a wide window), so a short
+     * two-column list sits in a box taller than its content. Grid auto tracks
+     * STRETCH to absorb that slack: 8 tracks rowed out over a 300px panel
+     * with 40px air between the rows. Pin the rows to the top; the slack
+     * belongs below the list, not between the rows. */
+    align-content: start;
   }
 
   .tracklist li {
