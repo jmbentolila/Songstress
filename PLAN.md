@@ -3348,3 +3348,50 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   thumb — 5px wide, it was always a pill), and cover-overlay white is now
   var(--on-cover) (3 sites). Detector residue: only the two intentional
   warnings.
+
+### Critique run — ExpandedPanel, 2026-09-04 (30/40 Good, first for this slug)
+
+  The last unreviewed surface (sidebar/playbar/grid/import/tag-modals all had
+  runs). One systemic finding, all four items fixed the same evening:
+  **P1** the app's keyboard-focus family (accent outline — sidebar `.mrow`,
+  import `.mi-disc`, tag inputs) stopped at this door: `.track`,
+  `.staged-badge`, `.edit-album`, `.play-all` fell back to the UA's generic
+  ring (observed live — two focus dialects on one screen); one four-selector
+  rule joins the family, ring follows each control's own rounding.
+  **P2** the Imported badge became a door in 0.7 but kept label geometry —
+  padding-block 3→7px lands it at exactly 28.0px measured (PRODUCT.md bar),
+  and per the cluster ruling it is now a QUIET sibling: transparent fill,
+  text-dim, accent only on hover — Play is the header's only accent thing.
+  **P2** missing-file alert `#f2a33c` → `var(--caution)` (token existed,
+  value identical). **P2** state collision: `.track.selected` and `:active`
+  shared the wash exactly, so press-on-selected showed nothing and a
+  mid-press read as selection — selection is now wash + 1px inset `--border`
+  ring (measured live: `inset 0 0 0 1px rgba(255,255,255,.1)`), the wash
+  stays the press moment. Dev-only P3: header comment still promised the
+  0.9.3-deleted arrival "flash". Detector: 0 findings. Snapshot:
+  `.impeccable/critique/2026-09-04T00-05-34Z__src-components-expandedpanel-svelte.md`
+  (scored BEFORE the fixes; the P1–P2s above are why it says 30).
+
+### Playbar gradient crossfades, 2026-09-04
+
+  The artwork backdrop teleported: one linear-gradient cannot interpolate
+  into another (the old `transition: background 280ms` on .playbar could
+  only ever lie). The gradient now lives in stacked `.pb-bg-l` opacity
+  layers, one per gradient in flight: an album switch fades the NEW layer
+  IN while the OLD fades OUT — both stacked fills, so the opacity
+  crossfade IS the gradient morph (owner ruling after a first attempt that
+  faded through chrome: reading it as off/on, and it was). Fade IN alone
+  at first play / toggle-on, fade OUT alone at stop / toggle-off, old
+  layers removed at the floor (300ms TTL, invisible-duplicate guard for
+  skip-back-mid-crossfade, which also revives a layer whose gradient comes
+  back). 700ms symmetric ease (cubic-bezier(0.4,0,0.2,1)) — the owner ruled the
+  first cut (200ms) "much slower"; a slow dissolve is scenery, not
+  feedback, and deliberately spends itself outside the 300ms state-response
+  budget; a front-loaded curve would undo the slowness the duration buys.
+  Reduced-motion killed by the stylesheet. State
+  traps paid: mutate layers only through the $state proxy (raw-object
+  writes notify nobody and the class never flips); `transition:fade`
+  inside {#key} compiles with intro|outro flags and NEVER RUNS (verified
+  live, cold reload) — CSS opacity cannot be skipped. Live traces: mount
+  0.62→0.95→1; switch saw old 100→0 and new 0→100 SIMULTANEOUSLY with both
+  gradients present in the DOM.

@@ -458,11 +458,12 @@
               <h2>{displayAlbum.title}</h2>
               {#if displayAlbum.staged}
                 <!-- Not a label any more, a door: it opens the import modal AT
-                     this album (expand, scroll, flash) — the same decision home
-                     the sidebar's manage row points at, because the destination
-                     is what the decision is about and only the modal states it.
-                     The grid tile's corner badge stays a label: it lives inside
-                     the tile's own button. -->
+                     this album (expand + scroll; the arrival ring was removed
+                     0.9.3 — the expanded card is announcement enough) — the
+                     same decision home the sidebar's manage row points at,
+                     because the destination is what the decision is about and
+                     only the modal states it. The grid tile's corner badge
+                     stays a label: it lives inside the tile's own button. -->
                 <button
                   class="staged-badge"
                   title="Not saved to the library folder yet — open the import list"
@@ -687,17 +688,22 @@
     text-overflow: ellipsis;
   }
 
-  /* "Imported" marker for albums with staged (not yet saved) files. */
+  /* "Imported" marker for albums with staged (not yet saved) files — a
+     DOOR (it opens the import manager at this album), so it earns control
+     geometry: the 28px bar PRODUCT.md sets for clickable things, paid
+     vertically so the pill stays a pill. Deliberately a quiet sibling of
+     Play: text-dim until touched — in this header only the play circle
+     wears the accent (critique P2 + cluster ruling, 2026-09-04). */
   .staged-badge {
     flex: none;
     /* A button now (it opens the modal): reset the UA chrome, keep the pill. */
     font: inherit;
     cursor: pointer;
-    padding: 3px 9px;
+    padding: 7px 9px;
     border: 1px solid var(--border);
     border-radius: 999px;
-    background: var(--active);
-    color: var(--accent);
+    background: transparent;
+    color: var(--text-dim);
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.07em;
@@ -708,6 +714,7 @@
      because it does something now. */
   .staged-badge:hover {
     border-color: var(--accent);
+    color: var(--text);
   }
 
   .staged-badge:active {
@@ -841,10 +848,27 @@
     background: var(--hover);
   }
 
-  /* Single-click selection — neutral highlight, distinct from the accent
-     styling of the currently playing track. */
+  /* The focus family joins at the door (critique P1): the sidebar, the
+     import window and the tag modals all ring keyboard focus in accent;
+     the panel's own controls were falling back to the UA's generic
+     outline — two dialects on one screen. The ring follows each control's
+     own rounding, so one rule fits all four shapes. */
+  .track:focus-visible,
+  .staged-badge:focus-visible,
+  .edit-album:focus-visible,
+  .play-all:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Single-click selection — the wash PLUS an inset border ring: the wash
+     alone collided with :active (pressing a selected row showed nothing,
+     and a mid-press on any other row read as "selected" in a still frame).
+     The ring makes selection a state, the wash stays the moment. Still
+     neutral, still distinct from the accent of the playing row. */
   .track.selected {
     background: var(--active);
+    box-shadow: inset 0 0 0 1px var(--border);
   }
 
   .track.current {
@@ -865,7 +889,7 @@
   .num .alert {
     width: 13px;
     height: 13px;
-    color: #f2a33c;
+    color: var(--caution);
     display: inline-block;
     vertical-align: -2px;
   }

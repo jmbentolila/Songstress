@@ -43,6 +43,60 @@
     return artGradientContrast(album.colorC1, album.colorC2, resolvedTheme(), 0.7);
   });
 
+  // The gradient cannot crossfade itself — CSS does not interpolate one
+  // linear-gradient into another, so a bare background swap teleports (the
+  // old `transition: background` rule here could only ever teleport too).
+  // The backdrop therefore lives in stacked opacity layers, one per
+  // gradient the playbar is transitioning between (owner ruling: an
+  // album switch must FADE from one gradient into the other — a
+  // fade-through-chrome reads as off/on):
+  //   none -> value   one layer fades IN
+  //   value -> null   layers fade OUT, removed at the floor
+  //   value -> value  the new layer fades IN while the old fades OUT —
+  //                   both are stacked fills, so the opacity crossfade IS
+  //                   the gradient morph. Old layers are removed after.
+  // CSS opacity transitions, not svelte/transition: {#key} recreation was
+  // verified live to skip JS intro/outro entirely; CSS cannot be skipped.
+  // Reduced-motion degrades in the stylesheet, with the rest of the app.
+  type BgLayer = { id: number; g: string; on: boolean };
+  let layers = $state<BgLayer[]>([]);
+  let bgUid = 0;
+  let lastRequested: string | null | undefined;
+  const LAYER_TTL = 800; // outlasts the 700ms fade; reduced-motion safe
+  $effect(() => {
+    const b = backdrop;
+    if (b === lastRequested) return;
+    lastRequested = b;
+    if (b === null) {
+      for (const l of layers) l.on = false;
+      setTimeout(() => (layers = layers.filter((l) => l.on)), LAYER_TTL);
+      return;
+    }
+    // Already showing exactly this gradient (mid-fade or settled): the
+    // skip landed back on the album we're crossfading to/from — nothing
+    // to add, just pull whatever else is visible back up.
+    const mine = layers.find((l) => l.g === b);
+    for (const l of layers) if (l !== mine) l.on = false;
+    if (mine) {
+      mine.on = true; // could be mid-fade-out — pull it back
+    } else {
+      const fresh: BgLayer = { id: ++bgUid, g: b, on: false };
+      layers = [...layers, fresh];
+      // Mutate through the STATE proxy (last read of the array), never the
+      // raw object — a raw write changes the target but notifies nobody,
+      // and the fade would never start.
+      const added = layers[layers.length - 1];
+      requestAnimationFrame(() => requestAnimationFrame(() => (added.on = true)));
+    }
+    setTimeout(() => {
+      // Drop faded-out layers; keep the one matching what's current (it
+      // may have just been revived) — only the FIRST such layer, so a
+      // skip back mid-crossfade cannot stack invisible duplicates.
+      const keeper = layers.find((l) => l.g === lastRequested);
+      layers = layers.filter((l) => l.on || l === keeper);
+    }, LAYER_TTL);
+  });
+
   function fmt(sec: number): string {
     if (!Number.isFinite(sec)) return "0:00";
     const m = Math.floor(sec / 60);
@@ -160,7 +214,16 @@
 
 <svelte:window onpointerdown={onDocPointerDown} onkeydown={onDocKeydown} />
 
-<footer class="playbar glass" style:background={backdrop ?? undefined}>
+<footer class="playbar glass">
+  <!-- The gradient layer, behind every control, above the chrome fill
+       (.playbar's z-index makes it a stacking context, so z-index:-1
+       lands exactly between the two). Keyed so a value change runs the
+       old layer out and the new one in — see BG_FADE above. -->
+  <div class="pb-bg" aria-hidden="true">
+    {#each layers as l (l.id)}
+      <div class="pb-bg-l" class:on={l.on} style:background={l.g}></div>
+    {/each}
+  </div>
   <div class="now">
     {#if album?.cover}
       <img class="art" src={album.cover} alt="" draggable="false" />
@@ -497,9 +560,42 @@
     padding: 0 18px;
     border-top: 1px solid var(--border);
     user-select: none;
-    /* The artwork-gradient swap is a state response, not a scene change:
-       inside the 300ms UI budget, strong ease-out. */
-    transition: background 280ms var(--ease-out);
+    /* The gradient swap is animated by the keyed .pb-bg layer (a CSS
+       background transition cannot interpolate gradients — the old rule
+       here could only ever teleport). */
+  }
+
+  /* Negative-z fill: .playbar is a stacking context (positioned, z-index),
+     so this sits above the footer's own glass fill and below all content
+     without touching a single control's stacking. */
+  .pb-bg {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .pb-bg-l {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    /* The owner ruled the fade "much slower" — a slow dissolve, deliberately
+       outside the 300ms state-response budget because it is scenery,
+       not feedback. Symmetric ease (not --ease-out): a front-loaded curve
+       spends its first 100ms doing most of the work, which would undo the
+       slowness the duration just bought. */
+    transition: opacity 700ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .pb-bg-l.on {
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pb-bg-l {
+      transition: none;
+    }
   }
 
   .now {
