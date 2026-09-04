@@ -32,8 +32,12 @@ journalctl --user -u songstress-dev -f      # logs
 
 Closing the app window kills `tauri dev` by design — restart the unit.
 
-**Restart protocol (owner-set, 2026-09-01).** A restart brings the window back
-CENTERED, which is not where he keeps it — his tile is the **bottom-left quarter**
+**Restart protocol (owner-set, 2026-09-01; size-restored 2026-09-05).** A restart brings
+the window back AT THE REMEMBERED SIZE (see below) at a KWin-picked position — measured
+2026-09-05: center-ish, biased down-right (~150 logical px off true center; the spawn is
+anchored as if still 1280×800 because KWin places from the client's early commit and the
+xdg protocol cannot reposition after map — the builder's `.center()` is a hint, not a
+placement). Not where he keeps it — his tile is the **bottom-left quarter**
 (last measured: `x=0 y=690`, 1200×660 logical, in a 3-part grid: terminal + app in
 the left column, browser in the right). Nothing can put it back programmatically:
 a Wayland client cannot see its own position (measured — Tauri's `outer_position()`
@@ -44,15 +48,16 @@ or measuring anything in it. Do NOT add a KWin window rule, seed
 `.window-state.json`, or call `set_position` to work around this — he declined all
 three; the manual move IS the protocol.
 
-Nothing persists the geometry, on purpose (2026-09-01): `tauri-plugin-window-state` was added,
+Nothing persists the POSITION, on purpose (2026-09-01): `tauri-plugin-window-state` was added,
 measured and **reverted**. A Wayland client cannot see where the compositor put it — Tauri's
 `outer_position()` returns `(0,0)` while KWin reports the real `x/y` — so a client-side
 "remember position" is not just unavailable, saving `(0,0)` and restoring it would shove the
-window into the corner. Size *could* be remembered, but the plugin writes only on a clean exit
-(a `systemctl restart` / `tauri dev` rebuild kills the process, nothing is saved), and his
-tiling clips **and resizes** on drop — one drag fixes both axes. So: no dependency, no KWin
-rule, no seeded state file (all three offered, all three declined). Do not re-add one without a
-case where the size is not already free.
+window into the corner. The plugin also writes only on a clean exit (a `systemctl restart` /
+`tauri dev` rebuild kills the process, nothing is saved). No KWin rule, no seeded state file
+(both offered, both declined; they still are for position). SIZE, however, the owner asked for
+(2026-09-05) — that ships as `window_state.rs`: the last size is saved on every `Resized` event
+(tempfile+rename, survives the kill) and restored at startup. Do not save position, and do not
+swap the module back to the plugin.
 
 Frontend work needs no restart at all: `tauri dev` hot-reloads Svelte components, stores and
 CSS. Restart only for Rust changes (cargo rebuilds anyway) or `contain:`/containing-block

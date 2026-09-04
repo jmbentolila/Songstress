@@ -20,7 +20,7 @@ use super::{sort_key, stable_id};
 pub const VARIOUS_ARTISTS_ID: &str = "ar-various";
 const VARIOUS_ARTISTS_NAME: &str = "Various Artists";
 
-const EXTENSIONS: &[&str] = &[
+pub const EXTENSIONS: &[&str] = &[
     "mp3", "flac", "m4a", "aiff", "aif", "ogg", "oga", "opus", "wav",
 ];
 

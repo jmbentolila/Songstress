@@ -460,24 +460,24 @@
   // Short albums don't need the split (the panel is tall anyway — the cover
   // square pins its height), so the two-column shape is reserved for lists
   // that are genuinely long: single column through 8; from 9 the list
-  // splits. The BALANCED halves shape is reserved for 11+ — below that,
-  // column 1 hosts 7 tracks at most and the rest spills into a short
-  // second column: 9 → 7+2, 10 → 7+3 (owner-set, 2026-09-05, after living
-  // with flat thresholds and a fixed 2-track tail — the 7-cap makes 9 and
-  // 10 the same height, gives the tail enough mass to read as a column
-  // forming rather than an appendix, and shares the album closer with
-  // column 2 instead of orphaning it). ONE rule for the main list and
-  // per-disc blocks alike (the old disc threshold was 5).
+  // splits. Above the threshold the SHAPE depends on the album (owner
+  // ruling, 2026-09-05): a MULTI-DISC album splits into BALANCED halves —
+  // it is a genuinely big record, and two even columns match its weight.
+  // SINGLE-disc albums keep the dominant-column form: column 1 caps at 7
+  // and the rest spills into a short second column (9 → 7+2, 10 → 7+3) —
+  // the tail reads as a forming column, not an appendix, and a lone long
+  // disc never sprouts two stumps. Per-disc blocks are part of a
+  // multi-disc album, so they take the balanced shape too (the old disc
+  // threshold was 5).
   const SPLIT_MIN = 9;
-  const BALANCE_MIN = 11;
   const PRE_BALANCE_HEAD = 7;
   // Column 1's row count; grid-auto-flow: column fills it before spilling
   // the remainder into column 2.
-  function splitRows(n: number): number {
-    return n >= BALANCE_MIN ? Math.ceil(n / 2) : Math.min(PRE_BALANCE_HEAD, n);
+  function splitRows(n: number, multiDisc: boolean): number {
+    return multiDisc ? Math.ceil(n / 2) : Math.min(PRE_BALANCE_HEAD, n);
   }
-  function halfRows(n: number): string {
-    return `repeat(${splitRows(n)}, auto)`;
+  function halfRows(n: number, multiDisc: boolean): string {
+    return `repeat(${splitRows(n, multiDisc)}, auto)`;
   }
 
 </script>
@@ -569,7 +569,7 @@
                     class="tracklist"
                     class:two={group.tracks.length >= SPLIT_MIN}
                     style:grid-template-rows={group.tracks.length >= SPLIT_MIN
-                      ? halfRows(group.tracks.length)
+                      ? halfRows(group.tracks.length, true)
                       : undefined}
                   >
                     {#each group.tracks as track (track.id)}
@@ -612,7 +612,7 @@
               class="tracklist"
               class:two={tracks.length >= SPLIT_MIN}
               style:grid-template-rows={tracks.length >= SPLIT_MIN
-                ? halfRows(tracks.length)
+                ? halfRows(tracks.length, hasMultipleDiscs)
                 : undefined}
             >
               {#each tracks as track (track.id)}

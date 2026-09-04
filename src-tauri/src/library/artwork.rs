@@ -79,7 +79,9 @@ pub(crate) fn folder_art_all(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Largest embedded picture among the given track files (lofty Picture data).
-fn embedded_art(paths: &[PathBuf]) -> Option<Vec<u8>> {
+/// Public: the artwork picker calls it with ONE audio file the user chose,
+/// so "pick the cover from the album's own mp3" needs no second extractor.
+pub fn embedded_art(paths: &[PathBuf]) -> Option<Vec<u8>> {
     let mut best: Option<(usize, Vec<u8>)> = None;
     for path in paths {
         let Ok(tagged) = lofty::read_from_path(path) else {

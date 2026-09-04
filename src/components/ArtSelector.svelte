@@ -127,7 +127,12 @@
   }
 
   async function fromPaths(paths: string[]) {
-    const img = paths.find((p) => /\.(png|jpe?g|webp|gif|tiff?)$/i.test(p));
+    // Audio extensions join the accepted set (owner ask 2026-09-05): the
+    // command reads an AUDIO pick's largest EMBEDDED picture, so "use the
+    // cover this mp3 already carries" is one click — no detour through a
+    // tag editor. Audio without embedded art says so plainly (the error
+    // line is the surface for it).
+    const img = paths.find((p) => /\.(png|jpe?g|webp|gif|tiff?|mp3|flac|m4a|aiff?|ogg|oga|opus|wav)$/i.test(p));
     if (!img) return;
     busy = true;
     error = "";
@@ -298,7 +303,7 @@
           <span class="as-cap" class:as-cap-rm={willRm}>{willRm ? "removing on Save" : c.count > 0 ? `in ${c.count} ${c.count === 1 ? "file" : "files"}` : c.label}</span>
         </button>
       {/each}
-      <button class="as-tile as-add" onclick={() => void browse()} disabled={busy} title="Choose an image from disk">
+      <button class="as-tile as-add" onclick={() => void browse()} disabled={busy} title="Choose an image — or an audio file whose embedded cover to take">
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
         </svg>

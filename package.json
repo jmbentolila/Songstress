@@ -1,6 +1,6 @@
 {
   "name": "songstress",
-  "version": "0.9.14",
+  "version": "0.9.15",
   "description": "Album-grid music player",
   "type": "module",
   "scripts": {

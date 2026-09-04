@@ -51,7 +51,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Surface template: boxed ✕ top-right for every modal AND popover | ✅ 2026-09-01 |
 | Escape: one press, one verb (the surface owns it) | ✅ 2026-09-01 |
 | Stack: a layer holds its own content while it animates out | ✅ 2026-09-01 |
-| Window geometry across restarts: `window-state` tried, **reverted** (Wayland can't, and the tiling does it) | ❌ 2026-09-01 |
+| Window geometry across restarts: `window-state` plugin tried, **reverted** (Wayland can't see position; plugin can't survive a kill) — hand-rolled SIZE-ONLY memory shipped instead (owner ask) | ✅ 2026-09-01 · re-done ✅ 2026-09-05 · **0.9.15** |
 | First-scan repro harness (park + sandbox data dir) + EmptyState bar fix | ✅ 2026-09-02 |
 | Loading skeletons: grid + artist list, no scan bar in the stage | ✅ 2026-09-02 · **0.8.0** |
 | Failed scans always emit their reason + the empty state renders it | ✅ 2026-09-02 · **0.8.0** |
@@ -3570,6 +3570,17 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   column 2 enough mass to read as a forming column, and keeps the closer
   company in the tail. splitRows(n) = n>=11 ? ceil(n/2) : min(7, n).
 
+  Amended (owner ruling, 2026-09-05, same day): the BALANCED shape is now
+  keyed on the ALBUM, not the count — any MULTI-DISC album with >8 tracks
+  splits balanced (ceil(n/2)), because a multi-disc record is genuinely
+  big and two even columns match its weight. The dominant-column rule
+  (7-cap, spill) is reserved for SINGLE-disc albums: 9 → 7+2, 10 → 7+3,
+  12 → 7+5 (a lone disc's long list stays "full list with overflow",
+  never two stumps). BALANCE_MIN (11) is gone — replaced by a multiDisc
+  flag threaded from `hasMultipleDiscs` into splitRows; per-disc blocks
+  live only in the multi-disc branch, so they take the balanced shape.
+  splitRows(n, multiDisc) = multiDisc ? ceil(n/2) : min(7, n).
+
 ### Selection is chrome's no: the prefixed user-select (2026-09-05)
 
   Owner: dragging across grid/sidebar/playbar painted selections. The
@@ -3826,3 +3837,64 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   `npx tauri icon assets/app-icon.svg -o src-tauri/icons`, installed to
   every hicolor size the desktop files reference (48/512 rasterized
   from the SVG with ImageMagick), icon cache refreshed. Version 0.9.14.
+
+### Tracklist split: the balanced shape is a multi-disc thing (2026-09-05)
+
+  Owner ruling: balanced halves for ANY album over 8 tracks that has
+  multiple discs; the 7-cap dominant-column form (9 → 7+2, 10 → 7+3) is
+  reserved for SINGLE-disc albums. The count-keyed BALANCE_MIN (11) is
+  gone — splitRows(n, multiDisc) = multiDisc ? ceil(n/2) : min(7, n),
+  the flag threaded from the panel's existing `hasMultipleDiscs`. The
+  visible change vs yesterday's rule: single-disc 11+ no longer halves
+  (12 → 7+5 now), multi-disc 9–10 no longer caps (→ 5+4 / 5+5), and a
+  fat disc block always halves. Rationale on the record: a multi-disc
+  record is genuinely big, two even columns match its weight; a lone
+  disc's long list stays "full list with overflow", never two stumps.
+
+### Window size memory: hand-rolled, size-only (2026-09-05, owner ask)
+
+  Owner: "bothersome to resize it every time i open the app". The
+  2026-09-01 revert note said do-not-re-add the plugin without a case
+  where size is not already free — this is that case, asked for in his
+  own words. NOT the plugin again: it writes only on RunEvent::Exit,
+  which the dev unit's SIGTERM and every `tauri dev` rebuild-kill never
+  reach (measured then: three kills, no state file). New `window_state`
+  module instead: save on EVERY `WindowEvent::Resized` (plus
+  CloseRequested) as logical px — a few-hundred-byte tempfile+rename
+  into the app CONFIG dir, which always holds the size the compositor
+  last agreed to, so a kill before close loses at most an ongoing drag;
+  restore in setup with a 600×400 sanity floor (any bad/missing file is
+  simply "no memory"). POSITION is still never saved or restored — the
+  Wayland client can't see it (AGENTS.md protocol: he places the window
+  himself), and the restart protocol is unchanged except that now ONLY
+  position is his job. Window-state file:
+  <config dir>/window-size.json. Version 0.9.15 with the split-rule
+  change. Gates: cargo 96, vitest 84, svelte-check 0, build green.
+  Post-shots the same day (owner: "it spawned closer to the bottom right",
+  twice): the config-declared window maps at its baked 1280×800 and KWin
+  places on FIRST MAP; a later client resize grows from the TOP-LEFT, so
+  the remembered size visibly walked off-center. `visible:false` + resize
+  + `show()` did NOT heal it (measured: KWin still placed for 1280×800),
+  so the window is now BUILT in setup (`WebviewWindowBuilder`, label
+  "main", title/min-size/decorations/transparent carried from the deleted
+  config `windows` block — do not re-declare it there) with the restored
+  size. Measured after: spawns AT the remembered size, position still
+  KWin's call (~center, biased down-right; xdg cannot reposition after
+  map and `.center()` is a hint). AGENTS.md's restart protocol reworded:
+  restart = remembered size, misplaced position, manual place as ever.
+
+### "From disk…" now eats audio files: extract the cover from the mp3 (2026-09-05)
+
+  Owner ask: choose a MUSIC file as the artwork source and take the
+  picture embedded in it. One verb, not a new surface: the picker tile's
+  kdialog gained an Audio filter, and `read_image` grew a branch — an
+  AUDIO path yields its LARGEST embedded picture (the scan's own
+  `artwork::embedded_art`, now public, called with one file), anything
+  else keeps the raw read. The 25 MB cap moved onto the RETURNED bytes,
+  so a 60 MB FLAC whose picture is 300 KB passes while a 400 MB "image"
+  still never crosses IPC; audio carrying no picture errors plainly into
+  the picker's error line. Drag-drop picks up the behavior for free
+  (same `fromPaths`, regex widened to scan::EXTENSIONS — now public so
+  the picker cannot drift from what the scanner indexes). Save rides the
+  existing ArtChange::Upload wire: extract → arrive as a tile → Save
+  writes it like any brought-in image. Version 0.9.15.

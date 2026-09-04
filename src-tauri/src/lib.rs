@@ -12,6 +12,7 @@ mod mpris;
 mod mpv;
 mod wayland_appmenu;
 mod watcher;
+mod window_state;
 
 // Shared DB connection. Commands run on the async runtime pool and take the
 // mutex briefly — SQLite work here is microseconds (settings/lookups); the
@@ -1315,7 +1316,10 @@ async fn pick_directory(start: PathBuf, title: &str) -> Result<Option<String>, S
 
 /// Native KDE image picker (the artwork strip's "from disk" door). Same
 /// kdialog rule as every other picker in this app; starts in ~/Pictures,
-/// which is where a downloaded cover realistically waits.
+/// which is where a downloaded cover realistically waits. AUDIO files are
+/// pickable too (owner ask 2026-09-05): the picker's own mp3/flac is often
+/// the only carrier of the artwork — `read_image` extracts the embedded
+/// picture from such a path.
 #[tauri::command]
 async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
     let pictures = std::env::var("HOME")
@@ -1329,9 +1333,9 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
             .args([
                 "--getopenfilename",
                 &start_str,
-                "Images (*.png *.jpg *.jpeg *.webp *.gif *.tiff);;All files (*)",
+                "Images (*.png *.jpg *.jpeg *.webp *.gif *.tiff);;Audio files (*.mp3 *.flac *.m4a *.aiff *.aif *.ogg *.oga *.opus *.wav);;All files (*)",
                 "--title",
-                "Choose Cover Image",
+                "Choose Cover Image or Audio File",
             ])
             .output()
             .map_err(|e| format!("kdialog: {e}"))?;
@@ -1345,22 +1349,44 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
     .map_err(|e| e.to_string())?
 }
 
-/// Read a picked image into base64 for `ArtChange.upload`. The 25 MB cap is
-/// enforced HERE too so a 400 MB "image" never traverses IPC; format truth is
-/// sniffed Rust-side at save time regardless of what this returned.
+/// Read a picked image into base64 for `ArtChange.upload`. An AUDIO path
+/// (the picker also accepts a track file — owner ask 2026-09-05) yields
+/// its LARGEST embedded picture instead, so "take the cover from this
+/// mp3" is one click, not a detour through some tag editor. The 25 MB cap
+/// is enforced HERE too, on the bytes actually returned — so a 400 MB
+/// "image" never traverses IPC, while a 60 MB FLAC (whose PICTURE is what
+/// is measured) still passes; format truth is sniffed Rust-side at save
+/// time regardless of what this returned.
 #[tauri::command]
 async fn read_image(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use base64::Engine as _;
-        let meta = std::fs::metadata(&path).map_err(|e| format!("{path}: {e}"))?;
-        if meta.len() > 25 * 1024 * 1024 {
+        let p = PathBuf::from(&path);
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        let bytes: Vec<u8> = if library::scan::EXTENSIONS.contains(&ext.as_str()) {
+            library::artwork::embedded_art(&[p])
+                .ok_or_else(|| format!("{path} carries no embedded artwork"))?
+        } else {
+            let meta = std::fs::metadata(&path).map_err(|e| format!("{path}: {e}"))?;
+            if meta.len() > 25 * 1024 * 1024 {
+                return Err(format!(
+                    "image is {} MB — 25 MB is the cap",
+                    meta.len() / (1024 * 1024)
+                ));
+            }
+            std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?
+        };
+        if bytes.len() > 25 * 1024 * 1024 {
             return Err(format!(
                 "image is {} MB — 25 MB is the cap",
-                meta.len() / (1024 * 1024)
+                bytes.len() / (1024 * 1024)
             ));
         }
-        Ok(base64::engine::general_purpose::STANDARD
-            .encode(std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?))
+        Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2269,7 +2295,29 @@ pub fn run() {
             // correctly-sized GTK window (playbar mid-screen, dead glass
             // below); activation doesn't heal it. A 1px shrink+restore forces
             // a reconfigure that does. Harmless if sizing already succeeded.
-            let win = app.get_webview_window("main").expect("main window");
+            // The window is BUILT here, not declared in tauri.conf.json:
+            // a config window maps at its baked size (1280×800) and a
+            // Wayland client that resizes afterwards grows from its
+            // TOP-LEFT anchor, so the remembered size visibly spawned
+            // down-right of center (owner observation 2026-09-05, twice).
+            // Built with the restored size, the FIRST map — the only
+            // moment KWin places — already sees the final size and
+            // centers it for real. Position itself is never restored:
+            // a Wayland client can't see where the compositor put it
+            // (see window_state.rs).
+            let (w, h) = window_state::load(app.handle()).unwrap_or((1280, 800));
+            let win = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("Songstress")
+            .inner_size(w as f64, h as f64)
+            .min_inner_size(960.0, 600.0)
+            .center()
+            .decorations(false)
+            .transparent(true)
+            .build()?;
             // A Wayland GTK window must PUSH its icon or KWin shows the
             // generic Wayland mark in the overview (desktop-file matching
             // covers dock and KRunner only). The bundle icon is embedded so
@@ -2511,6 +2559,23 @@ pub fn run() {
             pick_image,
             read_image
         ])
+        .on_window_event(|window, event| {
+            // Size memory: write on every resize, not just on a clean
+            // exit — the dev unit's SIGTERM (and any rebuild-kill) never
+            // reaches an exit handler, and the window-close path does.
+            // See window_state.rs for why size only, never position.
+            match event {
+                tauri::WindowEvent::Resized(size) => {
+                    window_state::save(window.app_handle(), *size);
+                }
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    if let Ok(size) = window.inner_size() {
+                        window_state::save(window.app_handle(), size);
+                    }
+                }
+                _ => {}
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| {
