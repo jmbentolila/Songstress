@@ -59,7 +59,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Playbar volume slider: glass styling, native chrome gone | ✅ 2026-09-03 · **0.9.0** |
 | Global Menu rebuild: the broadcast mirrors the panes | ✅ 2026-09-03 · **0.9.0** |
 | Context-menu pass: one album-menu builder, `reveal_container`, artist pending dot | ✅ 2026-09-03 · **0.9.0** |
-| Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D ✅ **0.9.2*** · E ⬜ |
+| Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D ✅ **0.9.2** · E ✅ **0.9.3** |
 | Audit pass: aria-live announcer (WCAG 4.1.3) + radii on-scale + --on-cover | ✅ 2026-09-03 · **0.9.1** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
@@ -3087,7 +3087,30 @@ number" / "Year, Track # must be numbers" — one `badMsg` derived per
 editor), and the 0.9.1 accelerators got their affordances in tooltips —
 Save says "Write this file (Enter)" / "Write the changed files (Enter)" /
 "Nothing to write", Cancel "Close without writing (Esc)", the stepper
-"Next track (→)". Phase E (pending-track picker) remains.
+"Next track (→)". Phase E (pending-track picker) remains — and executed
+the same evening:
+
+**Phase E executed 2026-09-03** (the redesign's last door, `TrackTagsEditor`
+carries it alone): "Add to existing album…" renders ONLY for staged files
+(`meta.staged`). It opens a fixed-position searchable popover (fixed, not
+absolute — the body scrolls and clips, and a field-anchored popover must
+not fight the clipper; no svelte:window either — the whole template lives
+inside the children snippet and window tags may not sit in a block, so
+click-outside runs from an $effect bound to the open state). Candidates:
+the file's artist's albums first, then the rest by the grid's own order
+(article-stripping sortKey, artist then title); the album the file already
+points at is excluded; each row wears its CONSEQUENCE — "track N of M"
+(next free = max trackNo + 1, gaps respected; total = files + 1). Applying
+is a RETAG only — album, album artist, adopted target year (cosmetic
+hygiene: the adopt pass matches on title alone), next free number
+prefilled into the editable Track # — plus the promise line ("will join X
+as track 12 of 12 — Save writes it; Import moves the file") and its
+announcer sentence. No new Rust: scan.rs's adopt pass does the append on
+the post-save rescan, and Import's album_destination does the move.
+Escape belongs to the picker while it is open (innermost-first, the
+lightbox's law). Live-probed against the owner's 12 real pending Ghost
+files: open → apply "Land of Light" → fields 12/12/2017 → promise line +
+announcement → Escape abandoned unsaved, staged count unchanged.
 
 ## Tag Editor Redesign — Phase B: the album modal executes the spec (2026-09-03)
 

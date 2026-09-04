@@ -13,6 +13,7 @@
   import { cubicOut } from "svelte/easing";
   import { prefersReducedMotion } from "svelte/motion";
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
+  import { sortKey } from "../lib/sort";
   import { ui } from "../lib/stores/ui.svelte";
   import { rescan } from "../lib/stores/scanner.svelte";
   import { announcer } from "../lib/stores/announcer.svelte";
@@ -92,10 +93,107 @@
     void id;
   });
 
+  /** "Add to existing album…" — the pending-only door (Phase E). A staged
+   *  file may JOIN an album that already exists: this is a RETAG, not a
+   *  mover (scan.rs truth: same artist + normalized title ⇒ the next scan
+   *  APPENDS the row even across folders), and the later Import moves the
+   *  file into that album's own folder via album_destination. Library
+   *  tracks never see this door — merging their folders is a bigger verb
+   *  than a tag edit can promise, which is why the datalist warns instead. */
+  let pickerOpen = $state(false);
+  let pickerFilter = $state("");
+  let picked = $state<{ album: string; n: number; total: number } | null>(null);
+
+  /** Targets with the file's own artist first, then the rest alphabetically
+   *  (article-stripping sortKey, same order the grid uses); the album the
+   *  file already points at is not a target. `n` is the next free number
+   *  (max+1, gaps respected — a 12-track album with a hole at 7 joins at
+   *  12, not 13); `total` is what "of" will read. */
+  let pickerOptions = $derived.by(() => {
+    const q = pickerFilter.trim().toLowerCase();
+    const who = (edit.albumArtist || edit.artist).trim().toLowerCase();
+    const here = edit.album.trim().toLowerCase();
+    const out: {
+      id: string;
+      title: string;
+      year: number | null;
+      artist: string;
+      n: number;
+      total: number;
+      mine: boolean;
+    }[] = [];
+    for (const a of library.albums) {
+      if (a.title.trim().toLowerCase() === here) continue;
+      const artist = library.artistOf(a)?.name ?? "";
+      if (
+        q &&
+        !(a.title.toLowerCase().includes(q) || artist.toLowerCase().includes(q))
+      )
+        continue;
+      const ts = library.tracksOf(a.id);
+      const max = ts.reduce((m, t) => Math.max(m, t.track ?? 0), 0);
+      out.push({
+        id: a.id,
+        title: a.title,
+        year: a.year,
+        artist,
+        n: max + 1,
+        total: Math.max(ts.length + 1, max + 1),
+        mine: artist.trim().toLowerCase() === who,
+      });
+    }
+    out.sort(
+      (a, b) =>
+        Number(b.mine) - Number(a.mine) ||
+        sortKey(a.artist).localeCompare(sortKey(b.artist)) ||
+        sortKey(a.title).localeCompare(sortKey(b.title)),
+    );
+    return out.slice(0, 40);
+  });
+
+  function applyTarget(o: (typeof pickerOptions)[number]) {
+    edit.album = o.title;
+    edit.albumArtist = o.artist;
+    // Cosmetic hygiene (spec): year cannot split a row — the adopt pass
+    // matches on title alone — but agreeing with the target keeps the
+    // album line reading as one record.
+    if (o.year !== null) edit.year = String(o.year);
+    edit.trackNo = String(o.n);
+    edit.trackTotal = String(o.total);
+    picked = { album: o.title, n: o.n, total: o.total };
+    pickerOpen = false;
+    announcer.say(
+      `Will join ${o.title} as track ${o.n} of ${o.total}. Save writes it; Import moves the file.`,
+    );
+  }
+
   let dirty = $derived(
     (JSON.stringify(edit) !== snapshotJson && snapshotJson !== "") || art !== "keep",
   );
   const bad = $derived(badFieldKeys(edit));
+
+  /** The picker's field-actions: open lands focused (search is the point
+   *  of the popup), Enter commits the first candidate — the keyboard path
+   *  the rest of the modal already honors. */
+  function autofocus(el: HTMLInputElement) {
+    el.focus();
+    // The fold may open partly below the body's scroll line; the search
+    // box — the point of the fold — earns its own scroll-into-view once
+    // the slide has a frame of geometry to measure.
+    requestAnimationFrame(() => el.scrollIntoView({ block: "nearest" }));
+  }
+  function enterFirst(el: HTMLInputElement) {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const first = pickerOptions[0];
+      if (first) applyTarget(first);
+    };
+    el.addEventListener("keydown", onKey);
+    return {
+      destroy: () => el.removeEventListener("keydown", onKey),
+    };
+  }
 
   /* Phase D copy: one sentence per failure set, grammatical for both
      sizes ("Year must be a number" / "Track #, Year must be numbers"). */
@@ -320,6 +418,71 @@
     <div class="te-right">
       <div class="te-col-title">Song tags</div>
       <FieldGrid {edit} layout="track-core" bad={bad} {albumOptions} />
+      {#if meta?.staged}
+        <!-- The pending-only door (Phase E). A staged file has no folder to
+             betray yet, so JOINING an existing album is a promise the retag
+             can actually keep. -->
+        <div class="te-join">
+          <button
+            class="te-more"
+            aria-expanded={pickerOpen}
+            onclick={() => {
+              pickerFilter = "";
+              pickerOpen = !pickerOpen;
+            }}
+          >
+            <svg class="te-more-chev" class:open={pickerOpen} viewBox="0 0 10 10" aria-hidden="true">
+              <path
+                d="M3 1.5 6.5 5 3 8.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            Add to existing album…
+          </button>
+          {#if pickerOpen}
+            <!-- It wears the fold's face, so it folds like the fold: inline
+                 slide, same wrap, same curve — not a floating layer the
+                 user must chase (owner ruling). -->
+            <div
+              class="te-more-wrap te-pick"
+              transition:slide={{
+                duration: prefersReducedMotion.current ? 0 : 220,
+                easing: cubicOut,
+              }}
+            >
+              <input
+                class="te-pop-q"
+                placeholder="Search albums…"
+                aria-label="Search albums"
+                bind:value={pickerFilter}
+                use:autofocus
+                use:enterFirst
+              />
+              <div class="te-pop-list">
+                {#each pickerOptions as o (o.id)}
+                  <button class="te-pop-row" onclick={() => applyTarget(o)}>
+                    <span class="te-pop-t">{o.title}</span>
+                    <span class="te-pop-m">{o.artist}{o.year ? " · " + o.year : ""}</span>
+                    <span class="te-pop-n">track {o.n} of {o.total}</span>
+                  </button>
+                {:else}
+                  <p class="te-pop-none">No album matches “{pickerFilter}”.</p>
+                {/each}
+              </div>
+            </div>
+          {/if}
+          {#if picked && edit.album === picked.album}
+            <span class="te-join-promise">
+              will join <b>{picked.album}</b> as track {picked.n} of {picked.total} —
+              Save writes it; Import moves the file
+            </span>
+          {/if}
+        </div>
+      {/if}
       <button class="te-more" aria-expanded={moreOpen} onclick={() => (moreOpen = !moreOpen)}>
         <svg class="te-more-chev" class:open={moreOpen} viewBox="0 0 10 10" aria-hidden="true">
           <path
@@ -509,5 +672,116 @@
 
   .te-stay b {
     font-weight: 600;
+  }
+  /* ── The pending-only join door (Phase E) ─────────────────────────── */
+  .te-join {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  /* The promise the picker made, in the sentence the spec promised: not
+     "album changed" but "you will be track 12 of 14". Shown while the
+     album field still says what the picker wrote (any later typing that
+     diverges retires it honestly). */
+  .te-join-promise {
+    flex: 1 1 100%;
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
+
+  .te-join-promise b {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .te-pick {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    padding: 8px;
+  }
+
+  .te-pop-q {
+    flex: none;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .te-pop-q:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .te-pop-list {
+    overflow-y: auto;
+    margin-top: 6px;
+    min-height: 0;
+    /* Inline means the fold owns its size: the list scrolls in place, it
+       does not stretch the modal across the screen. Sized to the modal's
+       real estate — open this and the first rows plus the promise are in
+       view without a chase. */
+    max-height: 160px;
+  }
+
+  /* One row per target: title, provenance, and the number it will wear —
+     the consequence is on the option, not after choosing it. */
+  .te-pop-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 0 10px;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 7px;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .te-pop-row:hover {
+    background: var(--hover);
+  }
+
+  .te-pop-t {
+    grid-row: 1;
+    grid-column: 1;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .te-pop-n {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+    align-self: center;
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .te-pop-m {
+    grid-row: 2;
+    grid-column: 1;
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .te-pop-none {
+    margin: 4px 8px;
+    font-size: 12px;
+    color: var(--text-dim);
   }
 </style>
