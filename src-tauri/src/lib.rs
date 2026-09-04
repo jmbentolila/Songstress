@@ -512,6 +512,10 @@ async fn scan_inner(
         library::artwork::refresh(&conn, &cache_dir, |done, total| {
             let _ = emitter.emit("scan-progress", serde_json::json!({ "phase": "artwork", "done": done, "total": total }));
         })?;
+        // Disk-side twin of the DB orphan cleanup: albums died during this
+        // scan (discards, retags to a new key), their thumbs dirs must not
+        // pile up forever (measured 50 orphans before this line existed).
+        library::artwork::prune_orphan_thumbs(&conn, &cache_dir);
         eprintln!(
             "[scan] files {:?} (added {} updated {} removed {} skipped {}) · artwork {:?}",
             files_elapsed, counts.added, counts.updated, counts.removed, counts.skipped,

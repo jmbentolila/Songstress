@@ -1,5 +1,6 @@
-//! Artwork pipeline (PHASE2.md §6, M3): per album with missing art/colors,
-//! resolve the cover source (folder art > largest embedded picture), decode
+//! Artwork pipeline (PHASE 2 implementation record in PLAN.md §6): per album
+//! with missing art/colors, resolve the cover source (folder art > largest
+//! embedded picture), decode
 //! ONCE, write 96/256/512 WebP thumbnails into the app cache dir and store
 //! panel colors in the albums row. Albums with neither source stay NULL and
 //! the UI shows its placeholder.
@@ -271,6 +272,32 @@ pub fn refresh_one(conn: &Connection, cache_dir: &Path, album_id: &str) -> Resul
     .map_err(|e| e.to_string())
 }
 
+/// Delete per-album thumbnail dirs that no longer belong to any album row.
+/// Albums die — tracks discarded, retags that resolve to a different key,
+/// dropped staged imports — and the scan's orphan cleanup handles the DB
+/// side; the dirs under `thumbs/` were the leak. The thumbs dir is OURS:
+/// every unknown child is a dead album or junk, so all of them go. Cheap
+/// enough to run at the end of every scan.
+pub fn prune_orphan_thumbs(conn: &Connection, cache_dir: &Path) {
+    let dir = thumbs_dir(cache_dir);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    let live: std::collections::HashSet<String> = conn
+        .prepare("SELECT id FROM albums")
+        .and_then(|mut s| {
+            s.query_map([], |r| r.get::<_, String>(0))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !live.contains(&name) {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,6 +451,58 @@ mod tests {
         let cache = temp_dir("upper-cache");
         let filled = refresh(&conn, &cache, |_, _| {}).expect("refresh");
         assert_eq!(filled, 2, "Cover.JPG counts as folder art");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn prune_removes_dirs_of_dead_albums_only() {
+        let root = temp_dir("prune-root");
+        for entry in walkdir::WalkDir::new("fixtures/library") {
+            let entry = entry.expect("walk");
+            let rel = entry.path().strip_prefix("fixtures/library").expect("prefix");
+            let target = root.join(rel);
+            if entry.file_type().is_dir() {
+                std::fs::create_dir_all(&target).expect("mkdir");
+            } else {
+                std::fs::copy(entry.path(), &target).expect("copy");
+            }
+        }
+        let dbp = root.join("t.db");
+        let mut conn = db::open(&dbp).expect("open");
+        scan::run_scan(&mut conn, &root, |_, _| {}).expect("scan");
+        let cache = temp_dir("prune-cache");
+        refresh(&conn, &cache, |_, _| {}).expect("refresh");
+
+        let live: String = conn
+            .query_row("SELECT id FROM albums WHERE cover IS NOT NULL", [], |r| {
+                r.get(0)
+            })
+            .expect("a thumb-bearing album");
+        let ghost = thumbs_dir(&cache).join("al-deadbeef");
+        std::fs::create_dir_all(&ghost).expect("ghost dir");
+        std::fs::write(ghost.join("512.webp"), b"x").expect("ghost file");
+        assert!(thumbs_dir(&cache).join(&live).exists(), "live thumbs on disk");
+
+        prune_orphan_thumbs(&conn, &cache);
+        assert!(
+            thumbs_dir(&cache).join(&live).exists(),
+            "live album thumbs survive"
+        );
+        assert!(!ghost.exists(), "dead album dir pruned");
+
+        // The leak itself: rows die (discards, retags to a new key), the
+        // dir must go with them on the next prune.
+        conn.execute("DELETE FROM tracks WHERE album_id = ?1", [&live])
+            .expect("drop tracks");
+        conn.execute("DELETE FROM albums WHERE id = ?1", [&live])
+            .expect("drop album");
+        prune_orphan_thumbs(&conn, &cache);
+        assert!(
+            !thumbs_dir(&cache).join(&live).exists(),
+            "pruned once the row dies"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&cache);
