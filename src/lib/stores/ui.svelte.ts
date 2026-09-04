@@ -1,3 +1,4 @@
+import { announcer } from "./announcer.svelte";
 import { invoke } from "@tauri-apps/api/core";
 import type { Theme } from "../types";
 import { isTauri } from "../window";
@@ -113,7 +114,15 @@ export function pushSetting(key: string, value: unknown) {
     key,
     setTimeout(() => {
       pendingWrites.delete(key);
-      void invoke("set_setting", { key, value: json }).catch(() => {});
+      // A failed persist used to be invisible forever — the UI believed
+      // the write, the pane read back the lie. The announcer is the
+      // cheapest honest surface: no visual syntax for a failure mode
+      // nobody should see, but nobody should be silently lied to either
+      // (critique re-run 2026-09-04; "who knows if someone else ends up
+      // using it").
+      void invoke("set_setting", { key, value: json }).catch(() =>
+        announcer.say("Could not save a setting — your change may not stick next launch."),
+      );
     }, 300),
   );
 }
@@ -152,6 +161,9 @@ export async function initSettings() {
     ui.musicFolders = parse<string[]>("musicDirs", ui.musicFolders);
     ui.lastScan = parse<number | null>("lastScan", ui.lastScan);
   } catch {
-    // No backend (browser dev) — localStorage keeps working.
+    // No backend (browser dev) — localStorage keeps working. On Tauri a
+    // failure here means the DB exists but said no: defaults are about to
+    // be presented as your settings, which deserves the same one sentence.
+    if (isTauri) announcer.say("Could not load your saved settings — using defaults.");
   }
 }

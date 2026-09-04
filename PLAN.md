@@ -3448,3 +3448,15 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   the files' truth, not the app's. Every deferred verification item is
   now closed; nothing in the plan remains open.
 
+### Settings persistence speaks when it fails, 2026-09-04
+
+  Critique re-run's single P2, wired (owner: "who knows if someone else
+  ends up using it"): pushSetting's `catch(() => {})` — the one place a
+  failure stayed invisible FOREVER — now hands the announcer one sentence
+  ("Could not save a setting — your change may not stick next launch."),
+  and initSettings' catch says its own on Tauri only (browser dev keeps
+  its silent localStorage fallback). No visual syntax for a failure mode
+  nobody should see; just no more silent lying. Announcer has zero
+  imports — no cycle. Re-runs persisted for all four surfaces (sidebar
+  24→32, modals 34→36, panel 30→34, imports 30→35; audit ≈18/20, residue
+  = the two intentional panel-slot warnings).
