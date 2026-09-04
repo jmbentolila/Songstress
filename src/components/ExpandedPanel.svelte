@@ -7,6 +7,7 @@
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
   import { extractArtColors } from "../lib/artColors";
   import { artGradient, gradientFromColors } from "../lib/gradient";
+  import StencilMark from "./StencilMark.svelte";
   import { resolvedTheme, ui } from "../lib/stores/ui.svelte";
   import {
     openContextMenu,
@@ -465,6 +466,8 @@
       <section class="panel" bind:this={panelEl} style:background={gradient ?? undefined}>
         {#if displayAlbum.cover}
           <img class="art" src={displayAlbum.cover} alt="" draggable="false" decoding="async" />
+        {:else}
+          <div class="art noart"><StencilMark /></div>
         {/if}
         <div class="right">
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -668,6 +671,21 @@
     object-fit: cover;
     border-radius: var(--radius-cover);
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  }
+
+  /* No cover: the stencil (see AlbumGrid — same quiet room, same tint). */
+  .art.noart {
+    display: grid;
+    place-items: center;
+    background: var(--panel-bg);
+    overflow: hidden;
+  }
+
+  .art.noart :global(.stencil-mark) {
+    width: 56%;
+    height: auto;
+    color: var(--text-dim);
+    opacity: 0.3;
   }
 
   .right {

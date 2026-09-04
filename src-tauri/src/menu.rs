@@ -25,6 +25,12 @@ pub struct MenuItem {
     /// Separators are never enabled, never carry a label that renders.
     #[serde(default)]
     pub separator: bool,
+    /// freedesktop icon name, rendered by the dbusmenu consumer (KDE's panel
+    /// resolves it against the Plasma icon theme — the Breeze media-* set).
+    /// The in-window sidebar menu ignores this; its rows are text by house
+    /// style. Optional: only the transport/mode rows carry glyphs.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 #[derive(Serialize, Clone, PartialEq, Debug)]
@@ -33,6 +39,13 @@ pub struct Menu {
     pub id: String,
     pub label: String,
     pub items: Vec<MenuItem>,
+}
+
+impl MenuItem {
+    fn with_icon(mut self, icon: &str) -> Self {
+        self.icon = Some(icon.to_string());
+        self
+    }
 }
 
 /// Dynamic bits the frontend owns; pushed up whenever they change so both
@@ -114,7 +127,10 @@ pub fn build() -> Vec<Menu> {
         checked,
         radio: false,
         separator: false,
+        icon: None,
     };
+    // Same as `item`, but wearing a glyph in the Global Menu (owner request
+    // 2026-09-04: transport rows speak with the desktop's own media icons).
     let radio = |id: &str, label: &str, checked: bool| MenuItem {
         id: id.to_string(),
         label: label.to_string(),
@@ -122,6 +138,7 @@ pub fn build() -> Vec<Menu> {
         checked: Some(checked),
         radio: true,
         separator: false,
+        icon: None,
     };
     let sep = || MenuItem {
         id: String::new(),
@@ -130,6 +147,24 @@ pub fn build() -> Vec<Menu> {
         checked: None,
         radio: false,
         separator: true,
+        icon: None,
+    };
+    // Glyphs that track state, not just the verb (owner asked for the play
+    // CONTROLS: the row already says Play/Pause — the icon must not lie).
+    let pp_icon = if s.playing == Some(true) {
+        "media-playback-pause"
+    } else {
+        "media-playback-start"
+    };
+    let repeat_icon = match s.repeat.as_str() {
+        "album" => "media-playlist-repeat",
+        "track" => "media-playlist-repeat-song",
+        _ => "media-repeat-none",
+    };
+    let shuffle_icon = if s.shuffle == "off" {
+        "media-playlist-no-shuffle"
+    } else {
+        "media-playlist-shuffle"
     };
     vec![
         Menu {
@@ -144,12 +179,13 @@ pub fn build() -> Vec<Menu> {
                     if s.playing == Some(true) { "Pause" } else { "Play" },
                     s.has_track,
                     None,
-                ),
-                item("playback.stop", "Stop", s.has_track, None),
-                item("playback.previous", "Previous", s.has_track, None),
-                item("playback.next", "Next", s.has_track, None),
-                item("playback.album-prev", "Previous album", s.has_track, None),
-                item("playback.album-next", "Next album", s.has_track, None),
+                )
+                .with_icon(pp_icon),
+                item("playback.stop", "Stop", s.has_track, None).with_icon("media-playback-stop"),
+                item("playback.previous", "Previous", s.has_track, None).with_icon("media-skip-backward"),
+                item("playback.next", "Next", s.has_track, None).with_icon("media-skip-forward"),
+                item("playback.album-prev", "Previous album", s.has_track, None).with_icon("go-previous-skip"),
+                item("playback.album-next", "Next album", s.has_track, None).with_icon("go-next-skip"),
                 sep(),
                 // Cycling stage items (click advances to the next stage);
                 // checkmark = stage active. Frontend owns the cycling. Order
@@ -166,7 +202,8 @@ pub fn build() -> Vec<Menu> {
                     ),
                     true,
                     Some(s.repeat != "off"),
-                ),
+                )
+                .with_icon(repeat_icon),
                 item(
                     "playback.shuffle",
                     &format!(
@@ -180,7 +217,8 @@ pub fn build() -> Vec<Menu> {
                     ),
                     true,
                     Some(s.shuffle != "off"),
-                ),
+                )
+                .with_icon(shuffle_icon),
                 sep(),
                 // Equalizer: enable toggle, cycling preset picker, and an
                 // item that opens the playbar popover (frontend) — the
@@ -191,7 +229,8 @@ pub fn build() -> Vec<Menu> {
                     &format!("Equalizer: {}", if s.eq_enabled { "On" } else { "Off" }),
                     true,
                     Some(s.eq_enabled),
-                ),
+                )
+                .with_icon("view-media-equalizer"),
                 item(
                     "playback.eq-preset",
                     &format!("EQ Preset: {}", s.eq_preset),
@@ -463,5 +502,55 @@ mod tests {
         assert_eq!(find(&menus, "playback", "playback.eq").checked, Some(true));
         assert_eq!(find(&menus, "playback", "playback.eq-preset").label, "EQ Preset: Rock");
         assert!(find(&menus, "playback", "playback.eq-preset").enabled);
+    }
+
+    #[test]
+    fn transport_rows_carry_glyphs_that_track_state() {
+        // The Global Menu's transport wears the desktop's own media icons
+        // (owner request 2026-09-04) — and they must not lie about what a
+        // click does: Play shows ▶, Pause shows ⏸, repeat/shuffle glyphs
+        // follow the stage.
+        set_state(MenuState::default());
+        let menus = build();
+        assert_eq!(
+            find(&menus, "playback", "playback.play-pause").icon.as_deref(),
+            Some("media-playback-start")
+        );
+        assert_eq!(
+            find(&menus, "playback", "playback.stop").icon.as_deref(),
+            Some("media-playback-stop")
+        );
+        assert_eq!(
+            find(&menus, "playback", "playback.previous").icon.as_deref(),
+            Some("media-skip-backward")
+        );
+        assert_eq!(
+            find(&menus, "playback", "playback.album-next").icon.as_deref(),
+            Some("go-next-skip")
+        );
+        set_state(MenuState {
+            playing: Some(true),
+            has_track: true,
+            ..Default::default()
+        });
+        let menus = build();
+        assert_eq!(
+            find(&menus, "playback", "playback.play-pause").icon.as_deref(),
+            Some("media-playback-pause")
+        );
+        set_state(MenuState {
+            repeat: "track".into(),
+            shuffle: "all".into(),
+            ..Default::default()
+        });
+        let menus = build();
+        assert_eq!(
+            find(&menus, "playback", "playback.repeat").icon.as_deref(),
+            Some("media-playlist-repeat-song")
+        );
+        assert_eq!(
+            find(&menus, "playback", "playback.shuffle").icon.as_deref(),
+            Some("media-playlist-shuffle")
+        );
     }
 }

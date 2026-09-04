@@ -3505,3 +3505,16 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   bundle-imported). Doc note: PHASE2.md deleted as dead weight — every
   root doc earns its place now (README/AGENTS/PLAN + the two impeccable
   briefs).
+
+### Global Menu glyphs + the stencil as the app's resting face — 0.9.9
+
+  Playback menu rows now carry freedesktop icon names rendered by
+  Plasma's own Breeze set (dbusmenu "icon" prop): transport, album-skip
+  (go-*-skip), and state-honest repeat/shuffle/EQ glyphs — the icons
+  track the stage the label describes (test asserts play-pause flips
+  with state). Missing artwork everywhere (grid tile, expanded panel,
+  playbar square when nothing is loaded) now shows StencilMark.svelte:
+  the app-icon microphone glyph-only, currentColor, ~30% opacity —
+  "no cover" reads as the app's own quiet room. The stencil now lives
+  in three materializations: the icon (master SVG), the window push
+  (set_icon), and the UI placeholder (component); one geometry.

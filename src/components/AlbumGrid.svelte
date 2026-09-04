@@ -14,6 +14,7 @@
   import ExpandedPanel from "./ExpandedPanel.svelte";
   import EmptyState from "./EmptyState.svelte";
   import GridSkeleton from "./GridSkeleton.svelte";
+  import StencilMark from "./StencilMark.svelte";
 
   const GAP = 20;
 
@@ -526,6 +527,8 @@
                            repaint and evicts decoded data when idle, flashing a
                            blank frame on hover/return; 246 thumbs are cheap -->
                       <img src={album.cover} alt="" draggable="false" />
+                    {:else}
+                      <span class="noart"><StencilMark /></span>
                     {/if}
                     {#if album.staged}
                       <span class="staged" title="Not saved to the library folder yet">Imported</span>
@@ -771,6 +774,23 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  /* No cover: the stencil keeps it — the app's own quiet room, not a dead
+     rectangle (owner request 2026-09-04). */
+  .cover .noart {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--hover);
+  }
+
+  .cover .noart :global(.stencil-mark) {
+    width: 52%;
+    height: auto;
+    color: var(--text-dim);
+    opacity: 0.3;
   }
 
   /* Artwork flash fix, final: ANY hover transform promotes a compositor

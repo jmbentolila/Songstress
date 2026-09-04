@@ -138,6 +138,11 @@ fn item_props(item: &MenuItem) -> HashMap<String, OwnedValue> {
         return props;
     }
     props.insert("label".into(), owned(item.label.clone()));
+    if let Some(icon) = &item.icon {
+        // dbusmenu's "icon" is a themed icon name; Plasma renders it from
+        // the user's own icon theme (Breeze's media-* set for ours).
+        props.insert("icon".into(), owned(icon.clone()));
+    }
     props.insert("enabled".into(), owned(item.enabled));
     props.insert("visible".into(), owned(true));
     props.insert("type".into(), owned("standard".to_string()));

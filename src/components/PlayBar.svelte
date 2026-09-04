@@ -31,6 +31,7 @@
   }
   import Toggle from "./Toggle.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
+  import StencilMark from "./StencilMark.svelte";
   import { ui, resolvedTheme } from "../lib/stores/ui.svelte";
   import {
     setEqEnabled,
@@ -245,7 +246,7 @@
     {#if album?.cover}
       <img class="art" src={album.cover} alt="" draggable="false" />
     {:else}
-      <div class="art placeholder"></div>
+      <div class="art placeholder"><StencilMark /></div>
     {/if}
     <div class="text">
       <span class="t">{track?.title ?? "Nothing playing"}</span>
@@ -633,6 +634,19 @@
 
   .art.placeholder {
     background: var(--hover);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+
+  /* Nothing loaded: the stencil holds the square (owner request
+     2026-09-04) — the mark says "the player is here, waiting", an empty
+     box said nothing. */
+  .art.placeholder :global(.stencil-mark) {
+    width: 58%;
+    height: auto;
+    color: var(--text-dim);
+    opacity: 0.34;
   }
 
   .text {
