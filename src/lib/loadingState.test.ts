@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   libraryLoading,
   COUNT_W,
+  MIN_SKELETON_MS,
   NAME_W,
   sidebarRows,
   skeletonRows,
@@ -10,7 +11,6 @@ import {
 
 const f = (over: Partial<LoadingFacts>): LoadingFacts => ({
   ready: true,
-  bootSlow: false,
   albums: 0,
   running: false,
   scanning: false,
@@ -34,11 +34,21 @@ describe("libraryLoading", () => {
     expect(libraryLoading(f({}))).toBe(false);
   });
 
-  it("waits out the boot grace before placeholdering a fast dump", () => {
-    expect(libraryLoading(f({ ready: false }))).toBe(false);
-    expect(libraryLoading(f({ ready: false, bootSlow: true }))).toBe(true);
-    // ...but a scan that starts before the dump lands is never "fast"
+  it("is loading for the whole of every boot, fast dump or not", () => {
+    // owner ruling 2026-09-06 (the RPM launch): the boot dump IS a load;
+    // hiding it made a warm launch a content pop. The store holds the first
+    // dump out for MIN_SKELETON_MS so "from the first frame" is no flicker.
+    expect(libraryLoading(f({ ready: false }))).toBe(true);
+    // ...and a scan that starts before the dump lands changes nothing.
     expect(libraryLoading(f({ ready: false, running: true }))).toBe(true);
+  });
+
+  it("has a floor so the boot placeholder is a hand-over, not a flicker", () => {
+    // Below ~2 frames a placeholder is a manufactured delay; 250 ms is
+    // "reads as intentional", and the measured 46–50 ms warm dump means
+    // every launch pays the floor and nothing more.
+    expect(MIN_SKELETON_MS).toBeGreaterThanOrEqual(200);
+    expect(MIN_SKELETON_MS).toBeLessThanOrEqual(300);
   });
 });
 

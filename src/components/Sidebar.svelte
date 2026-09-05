@@ -312,7 +312,6 @@
     library.live &&
       libraryLoading({
         ready: library.ready,
-        bootSlow: library.bootSlow,
         albums: library.albums.length,
         running: scanner.running,
         scanning: library.scanning,

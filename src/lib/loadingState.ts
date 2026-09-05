@@ -1,34 +1,34 @@
 import { columnCount } from "./buildRows";
 
 /**
- * The ONE definition of "this surface has nothing to show yet, and something is
- * in flight to fix it". Both the album grid and the sidebar's artist list read
- * it, because two placeholders that disagree about when they exist is the bug
- * report ("the grid is loading but the sidebar says no albums").
+ * The ONE definition of "this surface has nothing to show yet, and something
+ * is in flight to fix it". Both the album grid and the sidebar's artist list
+ * read it, because two placeholders that disagree about when they exist is
+ * the bug report ("the grid is loading but the sidebar says no albums").
  *
  * It takes plain facts rather than the stores themselves so the rule can be
  * stated — and tested — without a $state graph behind it.
  */
 /**
- * How long a wait must be proven before we render SOMETHING for it. Two
- * constants, one rule (the import manager's): a placeholder that appears and
- * disappears inside a couple of frames is a delay we manufactured, and a line
- * that lives for one frame is a flicker rather than feedback.
+ * How long the boot placeholder is PROUD to be on screen. A placeholder that
+ * appears and disappears inside a couple of frames is a delay we manufactured
+ * (the import manager's rule), and the measured warm dump is 46–50 ms — so
+ * "skeleton from the first frame" only holds together with a floor: the
+ * store holds the first dump out until this much time has passed, and the
+ * arrival then reads as intentional (owner ruling 2026-09-06: the loader
+ * belongs to every launch's first load — a silent content pop, even from a
+ * warm cache, reads as a glitch, which is what the RPM launch showed).
+ * The old design bet on the grace timer (`BOOT_GRACE_MS`, 150 ms) that a
+ * fast dump didn't deserve a placeholder at all; the RPM launch proved the
+ * loss reads worse than the flicker the timer bought against.
  *
- * `BOOT_GRACE_MS` gates the grid/list skeleton on the boot dump; `NOTE_GRACE_MS`
- * gates the sidebar's "Updating library…" on a rescan of a POPULATED library —
- * an incremental watcher pass over unchanged files is ~56ms end to end, so most
- * background rescans should never show it at all.
- *
- * Both are measured, not guessed (2026-09-02, on the real library): `get_library`
- * over 251 albums / 4464 tracks is **46–50ms**, so 150ms is ~3x the wait it hides
- * — the skeleton never flashes on a warm launch, and a cold-cache dump that does
- * take 150ms+ is exactly the case worth showing it for. A watcher rescan of that
- * same library measured 83ms (4464 files, all skipped), and across 357 sampled
- * frames of one the note never appeared: 400ms is above the whole class of
- * background pass, below anything the user would call long.
+ * `NOTE_GRACE_MS` gates the sidebar's "Updating library…" on a rescan of a
+ * POPULATED library — an incremental watcher pass over unchanged files is
+ * ~56ms end to end, so most background rescans should never show it at all
+ * (measured 2026-09-02: dump 46–50ms, watcher rescan 83ms; 400ms is above
+ * the whole class of background pass, below anything long enough to news).
  */
-export const BOOT_GRACE_MS = 150;
+export const MIN_SKELETON_MS = 250;
 export const NOTE_GRACE_MS = 400;
 
 /** How long the arrival entrance may stay armed: the grid's 320ms animation plus
@@ -41,10 +41,10 @@ export const NOTE_GRACE_MS = 400;
 export const ENTER_MS = 900;
 
 export interface LoadingFacts {
-  /** The boot `get_library` dump has landed. */
+  /** The boot `get_library` dump has landed (and been held out for
+   * `MIN_SKELETON_MS`, so this flipping is the same moment the skeleton
+   * retires — never a race the components must pace). */
   ready: boolean;
-  /** The boot dump has taken long enough to be worth a placeholder for. */
-  bootSlow: boolean;
   /** Albums currently indexed. Anything more than zero means the library is
    * NOT empty, and a skeleton must never cover content that exists. */
   albums: number;
@@ -60,16 +60,17 @@ export interface LoadingFacts {
 }
 
 /**
- * Boot is graceful on purpose: `get_library` over a full library is tens of
- * milliseconds, and a skeleton that mounts and unmounts inside two frames is a
- * delay we manufactured (the rule already written down for the import manager).
- * A scan in flight is never graceful — it is seconds to minutes by definition.
+ * Boot is a placeholder by right, on every launch (owner ruling 2026-09-06):
+ * the launch dump IS a load, and hiding it made a warm launch a content pop.
+ * The store holds the first dump until `MIN_SKELETON_MS` has been served, so
+ * "from the first frame" never means "a 50 ms flicker". A scan in flight over
+ * an EMPTY library is loading too — but never over content that exists.
  */
 export function libraryLoading(f: LoadingFacts): boolean {
   if (f.devLoading) return true;
+  if (!f.ready) return true;
   if (f.albums > 0) return false;
-  if (f.running || f.scanning) return true;
-  return !f.ready && f.bootSlow;
+  return f.running || f.scanning;
 }
 
 /** The non-cover height of a real `.tile` (AlbumGrid): 13px cover→caption gap +

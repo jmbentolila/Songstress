@@ -7,6 +7,7 @@
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
   import { extractArtColors } from "../lib/artColors";
   import { artGradient, gradientFromColors } from "../lib/gradient";
+  import { SPLIT_MIN, discSplitPlan } from "../lib/discSplit";
   import StencilMark from "./StencilMark.svelte";
   import { resolvedTheme, ui } from "../lib/stores/ui.svelte";
   import {
@@ -413,9 +414,10 @@
   const isCurrent = (id: string) =>
     currentTrack()?.albumId === displayAlbum.id && currentTrack()?.id === id;
 
-  // Multi-disc albums render one block per disc (each with its own 2-column
-  // threshold) instead of one continuous list where a disc's tail shares a
-  // column with the next disc's head.
+  // Multi-disc albums render one block per disc instead of one continuous
+  // list where a disc's tail shares a column with the next disc's head.
+  // Each block carries `rows` — column 1's row count under the album-wide
+  // split contract (discSplitPlan), or null to render single-column.
   let discGroups = $derived.by(() => {
     if (!hasMultipleDiscs) return [];
     const order: number[] = [];
@@ -427,7 +429,11 @@
       }
       map.get(t.disc)!.push(t);
     }
-    return order.sort((a, b) => a - b).map((disc) => ({ disc, tracks: map.get(disc)! }));
+    const groups = order
+      .sort((a, b) => a - b)
+      .map((disc) => ({ disc, tracks: map.get(disc)! }));
+    const plan = discSplitPlan(groups.map((g) => g.tracks.length));
+    return groups.map((g, i) => ({ ...g, rows: plan[i] }));
   });
 
   function fmt(sec: number): string {
@@ -460,31 +466,27 @@
   // Short albums don't need the split (the panel is tall anyway — the cover
   // square pins its height), so the two-column shape is reserved for lists
   // that are genuinely long: single column through 8; from 9 the list
-  // splits. Above the threshold the SHAPE depends on the album (owner
-  // ruling, 2026-09-05): a MULTI-DISC album splits into BALANCED halves —
-  // it is a genuinely big record, and two even columns match its weight.
-  // The 7-cap dominant-column form (9 → 7+2, 10 → 7+3) is reserved for
+  // splits. The 7-cap dominant-column form (9 → 7+2, 10 → 7+3) exists for
   // SINGLE-disc albums AND for that band only: grid-auto-flow: column
   // spills EVERY cap-sized chunk into a new column, so a big single-disc
   // album capped at 7 grows columns (a 23-track "Forever" measured a
   // 7+7+7+2 four-column octopus the day the cap lost its balance
-  // fallback, same day). Single-disc from 11 therefore halves like the
-  // multi-disc branch — the panel's column budget is TWO, always. The
-  // flag comes from `hasMultipleDiscs` (a fat disc block, living in the
-  // multi-disc branch, takes the balanced shape too; the old disc
-  // threshold was 5).
-  const SPLIT_MIN = 9;
+  // fallback, same day). Single-disc from 11 halves — the panel's column
+  // budget is TWO, always. MULTI-disc albums do not consult these rows at
+  // all: their per-disc shape is the album-wide contract in
+  // `lib/discSplit.ts` (disc 1 leads with balanced halves, followers
+  // split at max(lead, own balance) — owner ruling 2026-09-06, after
+  // Ira Dei's 5+5-over-8 and Human.'s 5+4-over-8-over-5+4 read as three
+  // unrelated lists).
   const PRE_BALANCE_HEAD = 7;
   const BALANCE_MIN = 11;
-  // Column 1's row count; grid-auto-flow: column fills it before spilling
-  // the remainder into column 2.
-  function splitRows(n: number, multiDisc: boolean): number {
-    return multiDisc || n >= BALANCE_MIN
-      ? Math.ceil(n / 2)
-      : Math.min(PRE_BALANCE_HEAD, n);
+  // Column 1's row count (single-disc branch); grid-auto-flow: column
+  // fills it before spilling the remainder into column 2.
+  function splitRows(n: number): number {
+    return n >= BALANCE_MIN ? Math.ceil(n / 2) : Math.min(PRE_BALANCE_HEAD, n);
   }
-  function halfRows(n: number, multiDisc: boolean): string {
-    return `repeat(${splitRows(n, multiDisc)}, auto)`;
+  function halfRows(n: number): string {
+    return `repeat(${splitRows(n)}, auto)`;
   }
 
 </script>
@@ -574,9 +576,9 @@
                   <h3 class="disc-title">Disc {group.disc}</h3>
                   <ol
                     class="tracklist"
-                    class:two={group.tracks.length >= SPLIT_MIN}
-                    style:grid-template-rows={group.tracks.length >= SPLIT_MIN
-                      ? halfRows(group.tracks.length, true)
+                    class:two={group.rows !== null}
+                    style:grid-template-rows={group.rows !== null
+                      ? `repeat(${group.rows}, auto)`
                       : undefined}
                   >
                     {#each group.tracks as track (track.id)}
@@ -619,7 +621,7 @@
               class="tracklist"
               class:two={tracks.length >= SPLIT_MIN}
               style:grid-template-rows={tracks.length >= SPLIT_MIN
-                ? halfRows(tracks.length, hasMultipleDiscs)
+                ? halfRows(tracks.length)
                 : undefined}
             >
               {#each tracks as track (track.id)}

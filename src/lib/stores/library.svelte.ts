@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { Album, Artist, Track } from "../types";
 import { albums as fakeAlbums, artistOf as fakeArtistOf, artists as fakeArtists, tracksOf as fakeTracksOf } from "../fakeLibrary";
 import { sortKey } from "../sort";
-import { BOOT_GRACE_MS, ENTER_MS } from "../loadingState";
+import { MIN_SKELETON_MS, ENTER_MS } from "../loadingState";
 import { isTauri } from "../window";
 import { pushSetting, ui } from "./ui.svelte";
 import { announcer } from "./announcer.svelte";
@@ -36,9 +36,10 @@ class LibraryStore {
   /** False while a live library hasn't loaded yet (first launch = empty). */
   ready = $state(!LIVE_LIBRARY);
   scanning = $state(false);
-  /** True only once the boot dump has proven itself slow enough to be worth a
-   * placeholder for. See `BOOT_GRACE_MS`. */
-  bootSlow = $state(false);
+  /** When the store began — the boot skeleton's visible clock (see
+   * `MIN_SKELETON_MS`). Constructed at module import, i.e. before first paint,
+   * so the floor errs a hair generous, never short. */
+  #bootAt = Date.now();
   /** DEV-only: drive the loading state without a scan in flight (`__skel` in
    * main.ts). Read by `libraryLoading` — and it short-circuits the "never over
    * content" rule on purpose: forcing it ON a populated library is how you see
@@ -58,14 +59,11 @@ class LibraryStore {
   constructor() {
     if (LIVE_LIBRARY) {
       void this.load();
-      // The grace timer, not a delay: `get_library` is a single indexed dump and
-      // on a full library it lands in tens of ms, so a placeholder that mounts
-      // and unmounts inside two frames would be a wait we manufactured. If the
-      // dump is still out after this, the wait is real and the skeleton earns
-      // its place. (A scan in flight skips the grace entirely — see loadingState.)
-      setTimeout(() => {
-        if (!this.ready) this.bootSlow = true;
-      }, BOOT_GRACE_MS);
+      // No grace timer any more: the boot skeleton is on from the first frame
+      // on EVERY launch (owner ruling 2026-09-06 — hiding a warm launch's dump
+      // made content appear by pop), and `load()` holds the first dump out for
+      // `MIN_SKELETON_MS` so the placeholder reads as intentional instead of
+      // a 50 ms flicker.
       void listen("scan-finished", (e) => {
         // This event is the ONLY thing that clears `scanning`, so the backend
         // emits it on every path now (lib.rs::scan_inner) — including the failure
@@ -111,14 +109,22 @@ class LibraryStore {
   async load(fromScan = false) {
     try {
       const dump = await invoke<LibraryDump>("get_library");
+      const firstDump = !this.ready;
+      if (firstDump) {
+        // The floor, not a delay: the skeleton has been on screen since the
+        // first frame; releasing it into content 50 ms later is a flicker,
+        // not a hand-over. Slow (cold) dumps simply arrive past the floor.
+        const remain = MIN_SKELETON_MS - (Date.now() - this.#bootAt);
+        if (remain > 0) await new Promise((r) => setTimeout(r, remain));
+      }
       // The entrance belongs to the WAIT, not to the data: it fires when a
-      // placeholder is what is being replaced. A warm launch whose dump lands in
-      // 40ms showed no placeholder, so it must not animate — that is motion on a
-      // every-launch, keyboard-frequency action, which the animate gate rejects.
+      // placeholder is what is being replaced. Boot always showed one (and
+      // held the floor), so every launch arrives on the cascade now — warm
+      // launches included (owner ruling 2026-09-06); a mid-session refresh
+      // over visible content still swaps silently.
       const filledFromPlaceholder =
-        this.albums.length === 0 &&
         dump.albums.length > 0 &&
-        (fromScan || this.scanning || this.bootSlow);
+        (firstDump || (this.albums.length === 0 && (fromScan || this.scanning)));
       this.artists = dump.artists;
       this.albums = byYear(dump.albums);
       this.trackCount = dump.tracks.length;

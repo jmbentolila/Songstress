@@ -3981,3 +3981,76 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   678×523 → 680×525 — the 520→525 leg is the entrance scale itself; the
   LAYOUT box is 680×525 from its first frame. Many-candidate albums now
   can only expand, per the rule. 0.9.19.
+
+### Tracklist split: disc 1 leads the whole album (2026-09-06, owner ruling)
+
+  Owner disliked the mixed look of a multi-disc album whose disc 1 splits
+  5+5 while the disc below sits one-column-8 (Ira Dei) or splits at a
+  different row (Human. :II: Nature.: 5+4 / single-8 / 5+4). His rule:
+  the first disc's split point is the MINIMUM split point for every
+  subsequent disc; plus the corollary that if any disc splits, disc 1
+  splits too (balanced halves, even below the threshold) — a lone stump
+  beside a split neighbor reads out of place. Traced against all 64
+  multi-disc albums in the live DB first: no 1-item columns would appear,
+  no saws, max edge drift one row.
+  Contract now lives in `src/lib/discSplit.ts` (`discSplitPlan`, vitest-
+  covered with the real library shapes): nothing splits if no disc
+  reaches SPLIT_MIN; disc 1 halves (Electric Castle's 7-track disc 1
+  splits 4+3 and LEADS at 4, so disc 2 stays a proper 5+5); a follower
+  with more than the lead splits at max(lead, own balance) — the minimum,
+  not fixed: Legends 11/23 → 6+5 · 12+11, the only visible fallback in
+  the library; a follower ≤ lead stays single, its one column already
+  lead-wide (RotK's disc 4). ExpandedPanel: discGroups carries `rows`
+  per block (template no longer computes), splitRows/halfRows are the
+  single-disc branch only (7-cap band untouched). New shapes: Ira Dei
+  5+5 · 5+3, Human. 5+4 · 5+3 · 5+4. Frontend-only; hot-reloaded.
+  Amendment (owner eyes, same day — Legacy of the Dark Lands 24/12/12/20):
+  rule 4 over-shot. Discs 2/3 (12 tracks each, lead 12) rendered single
+  "because 12 ≤ lead" — a 12-row column, too long, and grammar-inconsistent
+  under a split disc 1. The minimum that governs a follower is not always
+  disc 1's: at or below the lead, a disc ≥ SPLIT_MIN splits at its OWN
+  balanced halves (Legacy → 12+12 · 6+6 · 6+6 · 12+8). Single-column now
+  requires n < SPLIT_MIN AND n ≤ lead (RotK's 8-track tail unchanged); the
+  whole 64-album census re-traced — Legacy is the only album the amendment
+  changes. 9 new/updated vitest cases green, check + build green.
+  Amendment 2 (same day — 01011001 8/7, Twilight Dementia 7/6): multi-disc
+  blocks get their own gate, MD_SPLIT_MIN = 7. The owner's reason for 9
+  ("the cover square pins the panel height") only anchors the FIRST
+  panel content; disc blocks after the first add pure incremental height
+  with a void right — so stacked discs split from 7. Contract shape
+  unchanged (lead / minimum / own-balance); only the two `SPLIT_MIN`
+  gates in discSplitPlan become MD_SPLIT_MIN; interlude discs ≤ 6 stay
+  single (Omega untouched). Smallest reachable split: 4+2. Whole-DB
+  re-trace: exactly 4 blocks change — 01011001 → 4+4 · 4+3, Twilight →
+  4+3 · 4+2, RotK d4 and Lion King d2 (8-track singles at/below lead) →
+  4+4 each; the other 60 albums bit-identical. 95 vitest green.
+  Simplification (owner-invited, same day): the "disc 1 always splits"
+  exception is gone. Rule 3's first branch hands disc 1 exactly the
+  lead on its own (n1 > lead for every n1 ≥ 2), and no owned album has
+  a disc 1 under the gate, so the clause only ever explained itself.
+  A hypothetical [2,9] now renders 1+1 · 5+4 (owner: a 2-track disc
+  splitting under a big one "would look fine"). The contract is now:
+  a gate (any disc ≥ 7), a definition (lead = half of disc 1), and ONE
+  per-disc formula with no positional exceptions — 5-line function,
+  every clause tied to a named album. 64-album re-trace: 0 outcome
+  diffs; 96 vitest green.
+
+### The boot skeleton is a right, not a bet (2026-09-06, owner ruling)
+
+  The owner opened the 0.9.19 RPM (installed 19:38 — same
+  com.yossi.songstress data dir as dev, so a WARM launch of the
+  populated library) and saw no loader at all: content in one silent
+  swap, "stuff just pops as it loads". Diagnosis: nothing broken —
+  BOOT_GRACE_MS (150ms) suppressed the placeholder on every dump as
+  fast as the measured 46–50ms, by design. Owner overturned the
+  design: a launch dump IS a load, repeated or cached or not, and
+  hiding it reads as a glitch. New rule: skeleton on from the first
+  frame of every boot; the STORE holds the first dump until
+  MIN_SKELETON_MS=250 has been served (flicker rule: a 50ms
+  placeholder is a manufactured delay), then hands over WITH the
+  entrance cascade (filledFromPlaceholder gains `firstDump`;
+  mid-session refreshes over visible content still swap silently,
+  the 400ms note unchanged). libraryLoading is now four lines, boot
+  branch = `!ready`; bootSlow/grace deleted everywhere. Verified
+  live by rAF-sampling a dev reload: pills for the floor's ~10
+  frames, hand-over mid-cascade. RPM must be rebuilt to carry this.
