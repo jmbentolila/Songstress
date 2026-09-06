@@ -43,20 +43,23 @@ fn pool_tracks(
 ) -> Result<Vec<PoolTrack>, String> {
     let mut out = Vec::new();
     for album_id in album_ids {
-        let rows: Vec<(String, String)> = {
+        let mut rows: Vec<(String, String, i64, Option<i64>, String)> = {
             let mut stmt = conn
-                .prepare(
-                    "SELECT id, path FROM tracks WHERE album_id = ?1
-                     ORDER BY disc, (track IS NOT NULL), track, title",
-                )
+                .prepare("SELECT id, path, disc, track, title FROM tracks WHERE album_id = ?1")
                 .map_err(|e| e.to_string())?;
-            let mapped = stmt.query_map([album_id], |r| Ok((r.get(0)?, r.get(1)?)));
+            let mapped = stmt.query_map([album_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            });
             match mapped {
                 Ok(rows) => rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
                 Err(e) => return Err(e.to_string()),
             }
         };
-        for (album_index, (track_id, path)) in rows.into_iter().enumerate() {
+        // Unnumbered-track alphabetical order folds case/accents via
+        // `sort_key` — SQLite's binary collation can't, so the tiebreak
+        // happens here instead of in ORDER BY.
+        rows.sort_by_key(|r| library::track_order_key(r.2, r.3, &r.4));
+        for (album_index, (track_id, path, _, _, _)) in rows.into_iter().enumerate() {
             out.push(PoolTrack {
                 track_id,
                 path,
@@ -2042,14 +2045,16 @@ fn get_library(state: tauri::State<AppState>) -> Result<LibraryDump, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, album_id, disc, track, title, duration_sec, path, staged
-                  FROM tracks
-                  ORDER BY album_id, disc, (track IS NOT NULL), track, title",
+                  FROM tracks",
             )
             .map_err(|e| e.to_string())?;
-        let rows = stmt
+        let mut rows: Vec<(String, i64, Option<i64>, String, serde_json::Value)> = stmt
             .query_map([], |r| {
                 let id: String = r.get(0)?;
                 let album_id: String = r.get(1)?;
+                let disc: i64 = r.get(2)?;
+                let track: Option<i64> = r.get(3)?;
+                let title: String = r.get(4)?;
                 let path: String = r.get(6)?;
                 // The column, not a path prefix: staging moved out of the cache
                 // directory and into the row, so the badge and the door follow
@@ -2059,20 +2064,26 @@ fn get_library(state: tauri::State<AppState>) -> Result<LibraryDump, String> {
                     staged_albums.insert(album_id.clone());
                 }
                 let missing = !Path::new(&path).exists();
-                Ok(serde_json::json!({
+                let json = serde_json::json!({
                     "id": id,
                     "albumId": album_id,
-                    "disc": r.get::<_, i64>(2)?,
-                    "track": r.get::<_, Option<i64>>(3)?,
-                    "title": r.get::<_, String>(4)?,
+                    "disc": disc,
+                    "track": track,
+                    "title": title,
                     "durationSec": r.get::<_, f64>(5)?,
                     "staged": staged,
                     "missing": missing,
-                }))
+                });
+                Ok((album_id.clone(), disc, track, title.clone(), json))
             })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
-        for row in rows {
-            tracks.push(row.map_err(|e| e.to_string())?);
+        // Display order: unnumbered tracks alphabetically (sort_key-folded)
+        // before numbered ones — SQLite can't collate that, so sort here.
+        rows.sort_by_key(|r| (r.0.clone(), library::track_order_key(r.1, r.2, &r.3)));
+        for (_, _, _, _, json) in rows {
+            tracks.push(json);
         }
     }
     for album in &mut albums {

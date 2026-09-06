@@ -659,19 +659,29 @@ fn thumbs_preview_dir(cache_dir: &Path, hash8: &str) -> PathBuf {
 
 fn album_rows(conn: &Connection, album_id: &str) -> Result<RowPaths, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, path FROM tracks WHERE album_id = ?1
-             ORDER BY disc, (track IS NOT NULL), track, title",
-        )
+        .prepare("SELECT id, path, disc, track, title FROM tracks WHERE album_id = ?1")
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([album_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .query_map([album_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })
         .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
+    let mut ordered: Vec<(i64, Option<i64>, String, String, PathBuf)> = Vec::new();
     for row in rows {
-        let (id, p) = row.map_err(|e| e.to_string())?;
-        out.push((id, PathBuf::from(p)));
+        let (id, p, disc, track, title) = row.map_err(|e| e.to_string())?;
+        ordered.push((disc, track, title, id, PathBuf::from(p)));
     }
+    // Same rule as every serving path: unnumbered tracks alphabetically
+    // (sort_key-folded) before numbered ones — SQLite would split case.
+    ordered.sort_by_key(|r| super::track_order_key(r.0, r.1, &r.2));
+    let out: Vec<(String, PathBuf)> =
+        ordered.into_iter().map(|(_, _, _, id, p)| (id, p)).collect();
     if out.is_empty() {
         return Err("unknown or empty album".into());
     }

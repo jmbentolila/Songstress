@@ -1084,6 +1084,8 @@ mod tests {
 
     /// Display/playback order: within an album disc, tracks with NO track
     /// number sort alphabetically BEFORE numbered tracks (user decision).
+    /// The alphabetical tiebreak is `sort_key`-folded (case/accents), so
+    /// production sorts in Rust — this test does the same via the helper.
     #[test]
     fn unnumbered_tracks_sort_alphabetically_first() {
         let root = temp_dir("order");
@@ -1111,16 +1113,19 @@ mod tests {
 
         let mut stmt = conn
             .prepare(
-                "SELECT title FROM tracks WHERE album_id = (
-                    SELECT id FROM albums WHERE title = 'Order Test')
-                 ORDER BY disc, (track IS NOT NULL), track, title",
+                "SELECT disc, track, title FROM tracks WHERE album_id = (
+                    SELECT id FROM albums WHERE title = 'Order Test')",
             )
             .expect("stmt");
-        let titles: Vec<String> = stmt
-            .query_map([], |r| r.get(0))
+        let mut rows: Vec<(i64, Option<i64>, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .expect("q")
             .collect::<Result<_, _>>()
             .expect("rows");
+        rows.sort_by_key(|(disc, track, title)| {
+            crate::library::track_order_key(*disc, *track, title)
+        });
+        let titles: Vec<String> = rows.into_iter().map(|(_, _, t)| t).collect();
         assert_eq!(
             titles,
             vec!["Apple", "Banana", "Zebra", "Mango"],

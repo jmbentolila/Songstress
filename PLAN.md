@@ -61,6 +61,15 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Context-menu pass: one album-menu builder, `reveal_container`, artist pending dot | ✅ 2026-09-03 · **0.9.0** |
 | Tag Editor redesign Phase A (Rust) + B (album modal + picker) + C (track modal, split, stepper) | ✅ 2026-09-03 · **0.9.0** · D ✅ **0.9.2** · E ✅ **0.9.3** |
 | Audit pass: aria-live announcer (WCAG 4.1.3) + radii on-scale + --on-cover | ✅ 2026-09-03 · **0.9.1** |
+| Repeat-wrap duplicate top-up (track #32 replayed + UI +1 ahead on >32-track albums) + end-file advance diagnostics | ✅ 2026-09-06 |
+| Single-disc split band: balanced halves start at 13 (11–12 stay 7-capped so column one never deals a 6) | ✅ 2026-09-06 |
+| Track tag stepper: stepping writes the file first (MusicBee), failed writes keep you put | ✅ 2026-09-06 |
+| Tag editor primary button: Save when dirty, Done when clean (never a disabled Save); stepper saves-then-steps | ✅ 2026-09-06 |
+| Perf audit: steady-state healthy (~10% CPU playing, debug build); tile covers now lazy+async decode | ✅ 2026-09-06 |
+| Expand/modal jank: offscreen rows skip layout via content-visibility (track rows + tile rows), verified by frame probes | ✅ 2026-09-06 |
+| Expand/modal jank audit: content-visibility tried and REVERTED (clips outset rings; owner confirmed rings whole again); worst cases are single mount-burst frames on 200+ row content — accepted as known characteristic, standard sizes hold 60fps | ✅ 2026-09-06 |
+| Perf: 53-track 4-disc ROTK expands at locked 60fps (zero dropped frames); worst-case single mount bursts only on 200+ row compilations | ✅ 2026-09-06 |
+| EQ + 32 kHz sources: Nyquist-unstable 16 kHz band railed output (silence + pops) → `aresample=48000` pinned in chain + `gapless-audio=weak` | ✅ 2026-09-06 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -4054,3 +4063,67 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   branch = `!ready`; bootSlow/grace deleted everywhere. Verified
   live by rAF-sampling a dev reload: pills for the floor's ~10
   frames, hand-over mid-cascade. RPM must be rebuilt to carry this.
+
+### EQ silenced every 32 kHz track: Nyquist-unstable 16 kHz band (2026-09-06)
+
+  Owner report: tracks like My Dearest / Break up! / Butter-Fly (Anison no
+  Kokoro) played as silence with a moving progress bar, plus a pop on every
+  switch-to, switch-from, and pause/resume — but ONLY with the EQ on.
+  Diagnosis, in order: (1) all affected files probed at 32000 Hz while the
+  rest of the library is 44.1/48 kHz — files themselves decode perfectly
+  (ffmpeg volumedetect −10 dB mean), so engine-side; (2) no ReplayGain tags,
+  bare mpv plays them fine natively at 32 kHz; (3) owner proved the EQ is
+  the trigger by toggling it off; (4) `gapless-audio=weak` (was `yes`)
+  changed nothing — owner retested, same behavior, so the hidden-resampler
+  theory died; (5) NUMERIC PROOF: the Rock preset's `equalizer=f=16000`
+  band sits exactly on Nyquist at 32 kHz, goes unstable, and rails ALL
+  output samples to 0 dBFS (measured: mean/max 0.0 dB, 64000/64000 clipped;
+  same chain at 48 kHz or without the band: −22.7 dB healthy). A railed/DC
+  stream reads as silence downstream with a transient on every graph
+  start/stop — the entire symptom set. First fix attempt (rate-aware chain
+  + `audio-params/samplerate` observer rebuilding per track) cured the
+  silence but left 2 thumps on first entry — the observer only learns the
+  rate AFTER the file loads, so it can never win that race. Final fix, in
+  `eq.rs` only: the chain opens with `aresample=48000`, pinning the EQ's
+  working rate for every track — no band is ever near Nyquist, the graph
+  never rebuilds between files, the AO never reconfigures. Observer
+  machinery reverted; `mpv.rs` diff is just the `weak` flag (kept: still
+  the honest setting for format changes). Library-wide ffprobe sweep
+  (4,527 files): exactly 23 at 32 kHz — 14 Anison no Kokoro (incl. Beat
+  Hit!, missed in the first sweep) + 9 Kingdom Hearts orchestral (Of Time
+  And Parallels); owner listened through the list, all clean. Gates:
+  svelte-check 0, vitest 97, cargo 99 (incl. new pinned-rate test), build
+  ok. NOT version-bumped / committed / RPM-built — owner deferred.
+
+### UI showed track 1–2 while audio played tracks N-1–N at the album-repeat wrap (2026-09-06, owner report, unreproduced)
+
+  Owner, passive listening, repeat=album, "Avalon – The Land of New Hope"
+  (10 tracks, all numbered, all present, all plain 44.1 kHz MP3 — data
+  ruled out first): at the wrap the UI indicated track 1 while track 9
+  played, then track 2 while track 10 played — a stable +2 UI-ahead-of-audio
+  offset. Audit trail: (1) UI shows Rust's st.index, audio is mpv's real
+  playlist position — any extra Rust advance desyncs them; (2) live IPC
+  probe proved all programmatic commands benign: loadfile-replace emits
+  end-file reason "stop" (ignored), playlist-clear emits nothing,
+  appending a missing path emits nothing eagerly — so clicks, Reload wraps
+  and bad appends cannot self-corrupt; (3) N=10 excludes the >32-track
+  duplicate bug below. Remaining explanation: duplicate natural end-file
+  events for real boundaries (mpv-side quirk), unproven without a repro.
+  Mitigations shipped: every eof/error decision now logs one journal line
+  (`[mpv] end-file reason=… idx=A->B action=…`) so a recurrence is provable
+  from `journalctl --user -u songstress-dev`; if it recurs, grab the log
+  around the wrap before touching anything. Deliberately NOT shipped: a
+  ground-truth resync off observed `path` — behavior risk with no repro to
+  validate against; revisit with logs in hand.
+
+### Repeat-wrap appended track #32 twice on >32-track albums (2026-09-06, found during the above audit)
+
+  At every gapless/queue-drained wrap promote, eof_advance appended
+  order[31] as top-up — but the pre-armed pass (32 entries) already fills
+  mpv's window behind the new current, so track #32 played twice and the UI
+  ran +1 ahead of the audio for the rest of the pass (self-healed at the
+  next wrap). Hit every repeat listen of big compilations (Anison no Kokoro:
+  219 tracks). Fix: top_up=None at all three promote sites; the existing
+  unit test enshrined the duplicate (`/t31.mp3` "fresh pass top-up") and now
+  asserts None. Same family as the Avalon report, different mechanism —
+  and excluded as its cause (N=10 < 32).

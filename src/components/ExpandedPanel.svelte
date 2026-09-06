@@ -202,7 +202,7 @@
   // flips to the destination (token flip → fresh mount → grow) while the
   // outgoing panel is re-mounted as a GHOST row at its own row — a fresh
   // instance at the measured height (initialPx) that plays the plain
-  // 280ms CSS close. No pin, no prediction, no frame counting: a close
+  // closeDur(H) CSS close. No pin, no prediction, no frame counting: a close
   // never moves the row ON the line (it plays below that row, in the
   // row's own panel slot), so the one thing that conflicts with a close
   // above the line is the VIEW'S TRAVEL — and the grid defers it behind
@@ -211,8 +211,8 @@
   // phase, so a click mid-motion retargets the in-flight transition from
   // its current value — nothing restarts (a mid-collapse click on the
   // host album turns the close straight back into a grow).
-  //   open grow        0 -> H   360ms cubic-bezier(0.22,1,0.36,1)
-  //   plain collapse   H -> 0   280ms, content visible; displayId survives
+  //   open grow        0 -> H   growDur(H): 200–500ms, cubic-bezier(0.22,1,0.36,1)
+  //   plain collapse   H -> 0   closeDur(H): 200–400ms, content visible;
   //                      (per-section memory — the next open re-shows it);
   //                      onClosed fires at 0 (the grid consumes a
   //                      pending cross-row open, if any)
@@ -224,8 +224,18 @@
   // Token (app.css): the user-verified panel-choreography curve. var()
   // resolves fine in inline styles — .inner lives in the document.
   const CURVE = "var(--ease-out)";
-  const GROW_MS = 360;
-  const CLOSE_MS = 280;
+  // Accordion durations scale with measured travel (px): a fixed duration
+  // whips tall panels unreadably fast and dawdles on short ones. Bounds
+  // come from the motion tables — 200ms accordion floor (recipe), 500ms
+  // drawer ceiling; collapse uses a snappier multiplier AND a lower
+  // ceiling (slow deliberate phase, snappy system response). Curve stays
+  // var(--ease-out): the user-verified panel token, not a fork.
+  function growDur(h: number): number {
+    return Math.min(500, Math.max(200, Math.round(h * 0.6)));
+  }
+  function closeDur(h: number): number {
+    return Math.min(400, Math.max(200, Math.round(h * 0.5)));
+  }
   // The content the box currently shows — deliberately NOT tracking
   // album (the host): only the state machine below changes it. Captured
   // at mount so $state sees a plain value, not a prop reference.
@@ -281,11 +291,15 @@
       settleToAuto();
       return;
     }
-    move(to, GROW_MS);
+    // Duration scales with the REMAINING travel (fresh mount = full `to`,
+    // mid-close retarget = what's left) so tall panels stay legible and
+    // short ones stay crisp — see growDur.
+    const dur = growDur(to - innerEl.offsetHeight);
+    move(to, dur);
     settleTimer = setTimeout(() => {
       if (gen !== generation) return;
       settleToAuto();
-    }, GROW_MS + 20);
+    }, dur + 20);
   }
 
   $effect(() => {
@@ -335,12 +349,13 @@
       entering = false;
       if (innerEl && innerEl.offsetHeight > 2) {
         phase = "closing"; // the slot's margin collapse starts now too
-        move(0, CLOSE_MS);
+        const dur = closeDur(innerEl.offsetHeight);
+        move(0, dur);
         closeTimer = setTimeout(() => {
           if (gen !== generation) return;
           phase = "closed";
           onClosed?.();
-        }, CLOSE_MS + 10);
+        }, dur + 10);
       } else {
         phase = "closed";
         onClosed?.();
@@ -466,20 +481,21 @@
   // Short albums don't need the split (the panel is tall anyway — the cover
   // square pins its height), so the two-column shape is reserved for lists
   // that are genuinely long: single column through 8; from 9 the list
-  // splits. The 7-cap dominant-column form (9 → 7+2, 10 → 7+3) exists for
+  // splits. The 7-cap dominant-column form (9 → 7+2 … 12 → 7+5) exists for
   // SINGLE-disc albums AND for that band only: grid-auto-flow: column
   // spills EVERY cap-sized chunk into a new column, so a big single-disc
   // album capped at 7 grows columns (a 23-track "Forever" measured a
   // 7+7+7+2 four-column octopus the day the cap lost its balance
-  // fallback, same day). Single-disc from 11 halves — the panel's column
-  // budget is TWO, always. MULTI-disc albums do not consult these rows at
+  // fallback, same day). Single-disc from 13 halves (11–12 stay in the
+  // cap band so column one never deals a 6: 11 → 7+4, 12 → 7+5,
+  // 13 → 7+6) — the panel's column budget is TWO, always. MULTI-disc albums do not consult these rows at
   // all: their per-disc shape is the album-wide contract in
   // `lib/discSplit.ts` (disc 1 leads with balanced halves, followers
   // split at max(lead, own balance) — owner ruling 2026-09-06, after
   // Ira Dei's 5+5-over-8 and Human.'s 5+4-over-8-over-5+4 read as three
   // unrelated lists).
   const PRE_BALANCE_HEAD = 7;
-  const BALANCE_MIN = 11;
+  const BALANCE_MIN = 13;
   // Column 1's row count (single-disc branch); grid-auto-flow: column
   // fills it before spilling the remainder into column 2.
   function splitRows(n: number): number {

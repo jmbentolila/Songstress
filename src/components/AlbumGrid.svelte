@@ -525,7 +525,7 @@
                       <!-- no loading="lazy": WebKit re-evaluates lazy images on
                            repaint and evicts decoded data when idle, flashing a
                            blank frame on hover/return; 246 thumbs are cheap -->
-                      <img src={album.cover} alt="" draggable="false" />
+                      <img src={album.cover} alt="" draggable="false" loading="lazy" decoding="async" />
                     {:else}
                       <span class="noart"><StencilMark /></span>
                     {/if}

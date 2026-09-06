@@ -215,13 +215,17 @@
   let siblings = $derived(meta ? library.tracksOf(meta.albumId) : []);
   let idx = $derived(siblings.findIndex((t) => t.id === trackId));
 
-  function step(d: number) {
+  /** MusicBee behavior: stepping away writes the file first, then moves.
+   *  The write is never silent — footer receipt and announcer both fire —
+   *  and a failed write (validation or disk) keeps you on the track with
+   *  the reason already showing. Untouched tracks step with no write. */
+  async function step(d: number) {
     const next = siblings[idx + d];
-    if (!next || saving) return;
-    // Unsaved edits gate the stepper (the buttons say so): the promise is
-    // "fields you did not touch are never written", and silently dropping
-    // fields you DID touch would break it in the other direction.
-    if (dirty) return;
+    if (!next || saving || loading) return;
+    if (dirty) {
+      if (bad.size) return; // footer names the fields; leaving would strand them
+      if (!(await save())) return;
+    }
     // A track change dismisses the lightbox: it is a layer about the file
     // you WERE looking at, and its captions would go stale one step behind
     // (probe 0.9.0: the stepper left it standing over a moved context).
@@ -264,14 +268,20 @@
      *  file you are looking at, ←/→ walk the album. Typing rules decide the
      *  split: Enter inside a text field means "submit" (form convention),
      *  but arrows inside a field belong to the caret; on a button, Enter is
-     *  the button's own native activation. step() itself gates on dirty. */
-  function quickKey(e: KeyboardEvent) {
+     *  the button's own native activation. step() writes the file first
+     *  when dirty (MusicBee), so arrows never strand edits. */
+  function quickKey(e: KeyboardEvent, close: () => void) {
     const t = e.target as HTMLElement | null;
     if (e.key === "Enter") {
       if (t && t.tagName === "BUTTON") return;
-      if (!loading && dirty && !saving && !bad.size) {
+      if (saving || loading) return;
+      if (dirty && !bad.size) {
         e.preventDefault();
         void save();
+      } else if (!dirty) {
+        // Clean form: the primary button reads Done — Enter takes it.
+        e.preventDefault();
+        close();
       }
       return;
     }
@@ -282,12 +292,14 @@
       )
         return;
       e.preventDefault();
-      step(e.key === "ArrowLeft" ? -1 : 1);
+      void step(e.key === "ArrowLeft" ? -1 : 1);
     }
   }
 
-  async function save() {
-    if (!dirty || saving || bad.size) return;
+  /** Writes the file; true when it landed. Step-away calls this first —
+   *  a false return keeps the stepper on the track (the footer says why). */
+  async function save(): Promise<boolean> {
+    if (!dirty || saving || bad.size) return false;
     saving = true;
     error = "";
     try {
@@ -321,12 +333,14 @@
     } catch (e) {
       error = String(e);
       announcer.say(`Writing failed: ${error}`);
+      return false;
     } finally {
       saving = false;
     }
     // The re-tag may regroup the row; scan-finished refreshes the frontend
     // under the open window. Fire-and-forget, same as the album modal.
     void rescan();
+    return true;
   }
 </script>
 
@@ -346,18 +360,26 @@
       <div class="te-step" role="group" aria-label="Track in album">
         <button
           class="te-step-btn"
-          disabled={idx <= 0 || dirty}
-          title={dirty ? "Save or cancel first" : "Previous track (←)"}
+          disabled={idx <= 0 || saving || loading || (dirty && bad.size > 0)}
+          title={dirty
+            ? bad.size > 0
+              ? "Fix the highlighted fields first"
+              : "Save this track and go to previous (←)"
+            : "Previous track (←)"}
           aria-label="Previous track"
-          onclick={() => step(-1)}
+          onclick={() => void step(-1)}
         >◂</button>
         <span class="te-step-pos">{idx + 1} / {siblings.length}</span>
         <button
           class="te-step-btn"
-          disabled={idx < 0 || idx >= siblings.length - 1 || dirty}
-          title={dirty ? "Save or cancel first" : "Next track (→)"}
+          disabled={idx < 0 || idx >= siblings.length - 1 || saving || loading || (dirty && bad.size > 0)}
+          title={dirty
+            ? bad.size > 0
+              ? "Fix the highlighted fields first"
+              : "Save this track and go to next (→)"
+            : "Next track (→)"}
           aria-label="Next track"
-          onclick={() => step(1)}
+          onclick={() => void step(1)}
         >▸</button>
       </div>
     {/if}
@@ -397,11 +419,15 @@
       <button class="te-btn" onclick={close} title="Close without writing (Esc)">Cancel</button>
       <button
         class="te-btn primary"
-        disabled={!dirty || saving || loading || bad.size > 0}
-        title={saving ? "Writing…" : dirty ? "Write this file (Enter)" : "Nothing to write"}
-        onclick={save}
+        disabled={saving || (dirty && bad.size > 0)}
+        title={saving ? "Writing…" : dirty ? "Write this file (Enter)" : "Nothing to write (Enter)"}
+        onclick={() => {
+          // Clean form: the primary button reads Done — it closes.
+          if (dirty) void save();
+          else close();
+        }}
       >
-        {saving ? "Saving…" : "Save"}
+        {saving ? "Saving…" : dirty ? "Save" : "Done"}
       </button>
     </footer>
   {/snippet}

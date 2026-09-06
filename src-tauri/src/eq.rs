@@ -54,11 +54,20 @@ pub fn is_flat(eq: &Eq) -> bool {
 /// (clearing `af` entirely = zero per-sample cost, exactly the old sound).
 /// Only non-flat bands get a filter; octave-width peaking (`width_type=o`
 /// `w=1`) per PLAN.md.
+///
+/// The chain opens with `aresample=48000`, pinning the EQ's working rate
+/// regardless of source. Without it, a peaking biquad centered at/above
+/// ~Nyquist goes UNSTABLE — measured with the f=16000 band over 32 kHz
+/// anime-rip sources: output rails to constant full scale (silence + pops
+/// on every graph start/stop/pause). A fixed working rate keeps every band
+/// valid for every track, so the chain never needs rebuilding mid-session
+/// and the AO never reconfigures between differently-sampled files.
 pub fn af_chain(eq: &Eq) -> Option<String> {
     if !eq.enabled || is_flat(eq) {
         return None;
     }
     let mut parts: Vec<String> = Vec::new();
+    parts.push("aresample=48000".to_string());
     let preamp = clamp_db(eq.preamp_db);
     if significant(preamp) {
         parts.push(format!("volume={preamp:.1}dB"));
@@ -95,6 +104,17 @@ mod tests {
     }
 
     #[test]
+    fn working_rate_pinned_so_top_band_survives_any_source() {
+        let mut gains = [0.0; 10];
+        gains[0] = 4.0; // 31 Hz
+        gains[9] = 5.5; // 16 kHz — unstable at native 32 kHz, safe at 48 k
+        let out = af_chain(&eq(true, 0.0, gains)).expect("chain");
+        assert!(out.starts_with("lavfi=[aresample=48000,"), "got {out}");
+        assert!(out.contains("f=16000"), "got {out}");
+        assert!(out.contains("f=31:"), "got {out}");
+    }
+
+    #[test]
     fn band_mapping_is_frequency_ordered_peaking_filters() {
         let mut gains = [0.0; 10];
         gains[0] = 4.0; // 31 Hz
@@ -102,7 +122,7 @@ mod tests {
         let out = af_chain(&eq(true, 0.0, gains)).expect("chain");
         assert_eq!(
             out,
-            "lavfi=[equalizer=f=31:width_type=o:w=1:g=4.0,equalizer=f=16000:width_type=o:w=1:g=-6.5]"
+            "lavfi=[aresample=48000,equalizer=f=31:width_type=o:w=1:g=4.0,equalizer=f=16000:width_type=o:w=1:g=-6.5]"
                 .to_string()
         );
     }
@@ -112,9 +132,9 @@ mod tests {
         let mut gains = [0.0; 10];
         gains[2] = 2.0;
         let with = af_chain(&eq(true, -3.0, gains)).expect("chain");
-        assert!(with.starts_with("lavfi=[volume=-3.0dB,"), "got {with}");
+        assert!(with.starts_with("lavfi=[aresample=48000,volume=-3.0dB,"), "got {with}");
         let without = af_chain(&eq(true, 0.0, gains)).expect("chain");
-        assert!(without.starts_with("lavfi=[equalizer="), "got {without}");
+        assert!(without.starts_with("lavfi=[aresample=48000,equalizer="), "got {without}");
     }
 
     #[test]
@@ -133,7 +153,7 @@ mod tests {
     #[test]
     fn enabled_preamp_only_still_builds_a_chain() {
         let out = af_chain(&eq(true, -6.0, [0.0; 10])).expect("chain");
-        assert_eq!(out, "lavfi=[volume=-6.0dB]");
+        assert_eq!(out, "lavfi=[aresample=48000,volume=-6.0dB]");
     }
 
     #[test]

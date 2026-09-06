@@ -36,10 +36,11 @@
     /** The innermost layer (the artwork lightbox) gets the first Escape.
      *  Return true to consume it. */
     escapeFirst?: () => boolean;
-    /** The editors' accelerators (Enter = Save, ←/→ = the track stepper).
-     *  Called for every key except the Tab the trap eats and the Escape
-     *  this shell owns. */
-    quickKey?: (e: KeyboardEvent) => void;
+    /** The editors' accelerators (Enter = the primary action — Save when
+     *  dirty, Done when clean; ←/→ = the track stepper). Called for every
+     *  key except the Tab the trap eats and the Escape this shell owns.
+     *  Receives the same close the footer snippet gets. */
+    quickKey?: (e: KeyboardEvent, close: () => void) => void;
     /** Between the title and the ✕ — the track modal's stepper. */
     headerExtra?: Snippet;
     /** Receives `close`, the same door the ✕ and the scrim use. */
@@ -113,7 +114,7 @@
       close();
       return;
     }
-    quickKey?.(e);
+    quickKey?.(e, close);
   }}
 />
 
@@ -324,6 +325,9 @@
     color: var(--accent);
     border-color: transparent;
     font-weight: 600;
+    /* Save ↔ Done swaps the label by state; pin the width (fits
+       "Saving…") so the footer never jitters on the first keystroke. */
+    min-width: 7ch;
   }
 
   :global(.te-btn.primary:hover:not(:disabled)) {

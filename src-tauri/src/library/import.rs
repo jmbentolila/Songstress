@@ -312,10 +312,10 @@ pub fn staged_plan(
         let mut stmt = conn
             .prepare(
                 "SELECT id, title, duration_sec, disc, track FROM tracks
-                 WHERE album_id = ?1 AND staged = 1 ORDER BY disc, track, title",
+                 WHERE album_id = ?1 AND staged = 1",
             )
             .map_err(|e| e.to_string())?;
-        let tracks = stmt
+        let mut tracks: Vec<StagedTrack> = stmt
             .query_map([album_id.clone()], |r| {
                 Ok(StagedTrack {
                     id: r.get(0)?,
@@ -328,6 +328,9 @@ pub fn staged_plan(
             .map_err(|e| e.to_string())?
             .flatten()
             .collect();
+        // Staged lists follow the same display rule (this one never even
+        // had the unnumbered-first ORDER BY); SQLite can't fold case.
+        tracks.sort_by_key(|t| super::track_order_key(t.disc, t.track, &t.title));
         out.push(StagedAlbum {
             destination: album_destination(conn, roots, music_dir, &album_id)?,
             tracks,

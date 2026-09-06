@@ -359,7 +359,11 @@ impl Mpv {
                 "--no-config",
                 "--idle=yes",
                 "--no-video",
-                "--gapless-audio=yes",
+                // "weak" (not strict "yes"): lets mpv reconfigure/reopen the AO
+                // when sample rate changes between tracks. Strict pinning wedges
+                // a hidden resampler into the filter chain, which pops/clicks
+                // and can stall silence when a live lavfi EQ renegotiates.
+                "--gapless-audio=weak",
                 "--replaygain=album",
                 "--really-quiet",
                 &format!("--volume={initial_volume}"),
@@ -486,7 +490,18 @@ impl Mpv {
                         // in the reader task).
                         let reason = msg.get("reason").and_then(|v| v.as_str());
                         if matches!(reason, Some("eof") | Some("error")) {
+                            // One journal line per advance decision: if the UI
+                            // ever disagrees with the audio again, this shows
+                            // whether mpv sent phantom events (index moving
+                            // with no real boundary) — see the 2026-09-06
+                            // Avalon +2 report in PLAN.md.
+                            let before = this.state.lock().unwrap().index;
                             let action = eof_advance(&mut this.state.lock().unwrap());
+                            let after = this.state.lock().unwrap().index;
+                            eprintln!(
+                                "[mpv] end-file reason={} idx={before}->{after} action={action:?}",
+                                reason.unwrap_or("?")
+                            );
                             match action {
                                 Some(EofAction::Advance { top_up, pre }) => {
                                     for p in pre {
@@ -1091,8 +1106,12 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
                 if let Some(wrapped) = st.wrapped.take() {
                     st.order = wrapped;
                     st.index = 0;
-                    let top_up = st.order.get(PLAYLIST_WINDOW - 1).map(|i| i.path.clone());
-                    return Some(EofAction::Advance { top_up, pre: Vec::new() });
+                    // No top-up: the pre-armed pass was appended whole (up
+                    // to 32 entries) while the last track played, so mpv's
+                    // window behind the new current is already full —
+                    // appending order[31] again would DUPLICATE it in mpv's
+                    // playlist (audible repeat + UI running +1 ahead).
+                    return Some(EofAction::Advance { top_up: None, pre: Vec::new() });
                 }
             }
             *st = PlayState {
@@ -1106,10 +1125,11 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
         if st.index + 1 == st.order.len() && st.repeat == RepeatStage::Album {
             if let Some(wrapped) = st.wrapped.take() {
                 // mpv advanced into the pre-armed pass: promote it wholesale.
+                // Same no-top-up rationale as above: the armed 32 already
+                // fill mpv's window behind the new current.
                 st.order = wrapped;
                 st.index = 0;
-                let top_up = st.order.get(PLAYLIST_WINDOW - 1).map(|i| i.path.clone());
-                return Some(EofAction::Advance { top_up, pre: Vec::new() });
+                return Some(EofAction::Advance { top_up: None, pre: Vec::new() });
             }
         }
         let top_up = st.order.get(st.index + PLAYLIST_WINDOW - 1).map(|i| i.path.clone());
@@ -1123,10 +1143,10 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
         Some(EofAction::Advance { top_up, pre })
     } else if let Some(wrapped) = st.wrapped.take() {
         // Gapless wrap: mpv already advanced into the pre-appended next pass.
+        // No top-up (see above): the armed entries already fill the window.
         st.order = wrapped;
         st.index = 0;
-        let top_up = st.order.get(PLAYLIST_WINDOW - 1).map(|i| i.path.clone());
-        Some(EofAction::Advance { top_up, pre: Vec::new() })
+        Some(EofAction::Advance { top_up: None, pre: Vec::new() })
     } else if st.repeat == RepeatStage::Album {
         // No pre-arm (repeat set during the last track): idle mpv — reload.
         if st.shuffle != ShuffleStage::Off {
@@ -1368,7 +1388,8 @@ mod tests {
 
     #[test]
     fn eof_consuming_the_last_queue_entry_promotes_the_wrapped_pass() {
-        // 40-entry pass so the fresh-pass top-up (order[31]) exists.
+        // 40-entry pass: exercises the promote path with a full window —
+        // the top-up must be None (see the no-duplicate rationale above).
         let ids: Vec<String> = (0..40).map(|i| format!("t{i}")).collect();
         let refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
         let mut st = PlayState {
@@ -1381,7 +1402,10 @@ mod tests {
         };
         match eof_advance(&mut st) {
             Some(EofAction::Advance { top_up, .. }) => {
-                assert_eq!(top_up.as_deref(), Some("/t31.mp3"), "fresh pass top-up");
+                // The 32 pre-appended entries already fill mpv's window
+                // behind the promoted current — a top-up here would play
+                // one track twice and push the UI +1 ahead of the audio.
+                assert_eq!(top_up, None);
             }
             other => panic!("expected Advance, got {other:?}"),
         }

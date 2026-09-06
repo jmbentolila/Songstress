@@ -209,7 +209,7 @@
      *  from any text field it reads as "submit", which is exactly the
      *  intent here; on a button it stays the button's own activation.
      *  After a save the footer is the receipt — Enter then presses Done. */
-  function quickKey(e: KeyboardEvent) {
+  function quickKey(e: KeyboardEvent, close: () => void) {
     if (e.key !== "Enter") return;
     const t = e.target as HTMLElement | null;
     if (t && t.tagName === "BUTTON") return;
@@ -218,9 +218,14 @@
       ui.tagEditor.open = false;
       return;
     }
-    if (!loading && dirty && !saving && !bad.size) {
+    if (saving || loading) return;
+    if (dirty && !bad.size) {
       e.preventDefault();
       void save();
+    } else if (!dirty) {
+      // Clean form: the primary button reads Done — Enter takes it.
+      e.preventDefault();
+      close();
     }
   }
 
@@ -321,11 +326,15 @@
         <button class="te-btn" onclick={close} title="Close without writing (Esc)">Cancel</button>
         <button
           class="te-btn primary"
-          disabled={!dirty || saving || loading || bad.size > 0}
-          title={saving ? "Writing…" : dirty ? "Write the changed files (Enter)" : "Nothing to write"}
-          onclick={save}
+          disabled={saving || (dirty && bad.size > 0)}
+          title={saving ? "Writing…" : dirty ? "Write the changed files (Enter)" : "Nothing to write (Enter)"}
+          onclick={() => {
+            // Clean form: the primary button reads Done — it closes.
+            if (dirty) void save();
+            else close();
+          }}
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : dirty ? "Save" : "Done"}
         </button>
       </footer>
     {/if}
