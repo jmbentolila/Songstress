@@ -144,6 +144,48 @@ button {
   position: relative;
 }
 
+/* ── Shared tooltip ─────────────────────────────────────────────────────────
+   ONE tooltip language: the singleton pill `tooltip.ts` serves every anchor,
+   defined once here as a global (like .glass) so the 49 sites cannot drift.
+   Same material as the volume readout: 11px pill, hairline border, --active
+   fill. Above everything incl. modals (150) and menus (200). Opacity-only
+   entrance; reduced-motion collapses it to instant. */
+.app-tip {
+  position: fixed;
+  z-index: 400;
+  max-width: 260px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--active);
+  /* Frost, best-effort first: this WebKitGTK does not blur in-window
+     content (measured 2026-08 — all visible frost is KWin on wallpaper),
+     so the blur below only bites where the compositor honors it. What
+     carries legibility EVERYWHERE is the shadow + the denser fill behind
+     it: the pill must survive busy track rows even with zero blur. */
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.app-tip.show {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-tip {
+    transition: none;
+  }
+}
+
 /* ── Skeleton material ───────────────────────────────────────────────────────
    ONE loading language: the album grid's tiles and the sidebar's artist rows
    are the same material, defined once here as a global (like .glass) rather

@@ -14,6 +14,7 @@
   import { prefersReducedMotion } from "svelte/motion";
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { sortKey } from "../lib/sort";
+  import { tooltip } from "../lib/tooltip";
   import { ui } from "../lib/stores/ui.svelte";
   import { rescan } from "../lib/stores/scanner.svelte";
   import { announcer } from "../lib/stores/announcer.svelte";
@@ -214,6 +215,21 @@
   // --- the stepper: the listless way to walk an album ----------------------
   let siblings = $derived(meta ? library.tracksOf(meta.albumId) : []);
   let idx = $derived(siblings.findIndex((t) => t.id === trackId));
+  // Stepper hints double as tooltips (shared pill, not native title).
+  let prevHint = $derived(
+    dirty
+      ? bad.size > 0
+        ? "Fix the highlighted fields first"
+        : "Save this track and go to previous (←)"
+      : "Previous track (←)",
+  );
+  let nextHint = $derived(
+    dirty
+      ? bad.size > 0
+        ? "Fix the highlighted fields first"
+        : "Save this track and go to next (→)"
+      : "Next track (→)",
+  );
 
   /** MusicBee behavior: stepping away writes the file first, then moves.
    *  The write is never silent — footer receipt and announcer both fire —
@@ -361,11 +377,7 @@
         <button
           class="te-step-btn"
           disabled={idx <= 0 || saving || loading || (dirty && bad.size > 0)}
-          title={dirty
-            ? bad.size > 0
-              ? "Fix the highlighted fields first"
-              : "Save this track and go to previous (←)"
-            : "Previous track (←)"}
+          use:tooltip={prevHint}
           aria-label="Previous track"
           onclick={() => void step(-1)}
         >◂</button>
@@ -373,11 +385,7 @@
         <button
           class="te-step-btn"
           disabled={idx < 0 || idx >= siblings.length - 1 || saving || loading || (dirty && bad.size > 0)}
-          title={dirty
-            ? bad.size > 0
-              ? "Fix the highlighted fields first"
-              : "Save this track and go to next (→)"
-            : "Next track (→)"}
+          use:tooltip={nextHint}
           aria-label="Next track"
           onclick={() => void step(1)}
         >▸</button>
@@ -389,7 +397,7 @@
     <footer class="te-foot">
       {#if meta}
         {#if LIVE_LIBRARY}
-          <button class="te-file-reveal" title="Open containing folder" onclick={reveal}>
+          <button class="te-file-reveal" aria-label="Open containing folder" use:tooltip={"Open containing folder"} onclick={reveal}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path
                 d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.4 1.5H13a1.5 1.5 0 0 1 1.5 1.5v5.5A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5z"
@@ -401,11 +409,11 @@
             </svg>
           </button>
         {/if}
-        <span class="te-file-name" title={meta.path}>{meta.file}</span>
+        <span class="te-file-name" use:tooltip={meta.path}>{meta.file}</span>
       {/if}
       <!-- The path owns the slack: it clips its own head (rtl trick) and
            hides the excess before the buttons, which never move. -->
-      <span class="te-file-dir" title={meta?.path}>
+      <span class="te-file-dir" use:tooltip={meta?.path}>
         {#if error}
           <span class="te-dir-text te-dir-msg">{error}</span>
         {:else if bad.size}
@@ -416,11 +424,11 @@
           <span class="te-dir-text">{meta?.folder}</span>
         {/if}
       </span>
-      <button class="te-btn" onclick={close} title="Close without writing (Esc)">Cancel</button>
+      <button class="te-btn" onclick={close} use:tooltip={"Close without writing (Esc)"}>Cancel</button>
       <button
         class="te-btn primary"
         disabled={saving || (dirty && bad.size > 0)}
-        title={saving ? "Writing…" : dirty ? "Write this file (Enter)" : "Nothing to write (Enter)"}
+        use:tooltip={saving ? "Writing…" : dirty ? "Write this file (Enter)" : "Nothing to write (Enter)"}
         onclick={() => {
           // Clean form: the primary button reads Done — it closes.
           if (dirty) void save();

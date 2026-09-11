@@ -25,6 +25,9 @@ export interface Track {
   track: number | null;
   title: string;
   durationSec: number;
+  /** Per-track artist from the file's tags — null/empty means fall back to
+   * the album artist (pre-v3 rows, untagged files). */
+  artist?: string | null;
   /** Lives in the import staging area (Step 2a), not the library dir yet. */
   staged?: boolean;
   /** The file behind this row vanished from disk (kept for relink/removal). */

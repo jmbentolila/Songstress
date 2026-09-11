@@ -281,12 +281,22 @@ the upstream report.
   2. `.sk-cover` carries no cover-mass shadow. The real tile does. Call: whether a
      placeholder should already weigh 18px of shadow, or whether weight arrives
      with the artwork. One line either way.
+     ✅ CLOSED 2026-09-10 (owner call): weight arrives WITH the placeholder —
+     `.sk-cover` carries the tile's `0 4px 18px rgba(0,0,0,0.35)` so the artwork
+     fades in without the tile gaining mass. Scan note verified live by owner
+     the same night.
 - **Modal work (later, user-owned)**: TagEditor's entrance. The audit noted
   it mounts with zero entrance motion (TagEditor.svelte:251 `{#if open}`) —
   a ~180ms scale(0.97)+fade from center is the planned direction
   (transform+opacity only; center origin is correct for a centered modal).
   The first real modal of this round — the imported-music manager — shipped
   without entrance motion too, matching MusicFolders/About on purpose.
+  ✅ SUPERSEDED 2026-09-10 (found on audit, no work needed): the whole modal
+  family already animates — app.css carries the tier (scrim-in 200ms +
+  surface-in 240ms, 12px rise + 0.99 lean-in for every modal) with symmetric
+  outros (scrim-out 190ms / surface-out 150ms, each modal stays mounted
+  until animationend, Escape backstop included). Tag editor, import manager,
+  About, Music folders — all four, both directions.
 
 ### Explicitly deferred
 
@@ -4127,3 +4137,188 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   unit test enshrined the duplicate (`/t31.mp3` "fresh pass top-up") and now
   asserts None. Same family as the Avalon report, different mechanism —
   and excluded as its cause (N=10 < 32).
+
+### Playbar bottom line prefers the track artist (2026-09-10, owner ask)
+
+  Was always album artist + album title, so guest/feats read wrong. The scan
+  always parsed the per-track artist but never stored it — new `tracks.artist`
+  column (migration v3, nullable), written on insert + updated on conflict,
+  exposed as `artist` in `get_library`. Frontend: `Track.artist?`, playbar
+  shows `track.artist.trim() || albumArtist` — NULL/empty (pre-v3 rows,
+  untagged files) falls back to the old line, never blank. Existing rows need
+  a Full Rescan to backfill (incremental skips unchanged files). Fake library:
+  one guest spot on the Various Artists comp so the branch has data in fake
+  mode. Gates: svelte-check 0, vitest 97, cargo 100, build ok.
+
+### Playbar overlong lines marquee instead of truncating (2026-09-10, owner ask)
+
+  Long titles/subs ("Wake Up To The Moon" case) ellipsized with no way to read
+  them. Both playbar lines now run a seamless CSS marquee, ONLY on overflow:
+  a Svelte action measures single-copy vs viewport (ResizeObserver +
+  track/text key), appends one aria-hidden twin + 48px gap on overflow, and
+  loops the strip by exactly copy+gap so the wrap is invisible. transform-only,
+  linear, duration scaled to distance (~32px/s, clamped 4–18s) + 1.2s first-loop
+  delay to read the head. Pauses when the music pauses (cycling on a stopped
+  player is motion with no job) and on hover (reading); reduced-motion keeps
+  the old static ellipsis + native title tooltip. Same :global() hatch as
+  ArtSelector's as-load for the JS-added class. Gates: check 0/0, vitest 97,
+  build ok, detector clean; live probe showed the current short track correctly
+  staying static — the real overflow proof is his Ghostlights track.
+  Lag check (owner: "is it choppy?"): 4s rAF sample on the live marquee —
+  239 frames, mean 17.6ms, p95 24ms, ZERO frames over 34ms, steady -0.7px/frame
+  advance. No jank; the loop is healthy (very long lines hit the 18s clamp so
+  his Ghostlights sub runs ~40px/s, not 32). Speed bumped to ~56px/s on his
+  ask (near 1px/frame — live-confirmed 12.82s loop); he judges the feel.
+  Still steppy at 56 → ruled out restarts (getAnimations: same startTime,
+  currentTime advancing wall-clock) and drops (earlier 4s sample clean), so it
+  is raster-level, not scheduling. Now trying 37.5px/s = exactly 1 device px
+  per frame at 60Hz × scale 1.6 (live-confirmed 15.89s loop = true 37.5).
+  If that fails, next lever is fade-paging (no continuous motion at all).
+  Verdict (owner): smoother, maybe not 100% gone — good enough to ship;
+  37.5px/s + 24s clamp stay.
+
+### Seek bar gets the volume bar's glass treatment (2026-09-10, owner ask)
+
+  Same bug the volume slider just had: native accent-color range insets the
+  thumb's travel but not its track, so near 100% a sliver of unfilled bar sat
+  past the thumb. Same fix — appearance:none, the gradient IS the track
+  (accent to seekPct%, hover past it), 14px accent thumb, accent focus ring,
+  dimmed when nothing's loaded. Live-confirmed gradient + 4px + none;
+  detector clean.
+
+### Shared tooltip system, volume style everywhere (2026-09-11, owner ask)
+
+  All 49 native titles across 11 files converted to `use:tooltip` — one
+  singleton pill in the volume readout's material (11px, hairline, --active),
+  hover 350ms / focus 150ms, flips near viewport top, hides on leave/blur/
+  scroll/Escape/pointerdown, opacity-only, instant under reduced-motion.
+  A11y: title captured at mount and removed (no doubles), linked back via
+  aria-describedby while visible. Conversion exposed two icon-only controls
+  whose sole name was title (reveal button, cover badges) — now real
+  aria-labels. Live: Seek pill raises on focus with exact text + describedby.
+
+### Tracklist arrow-key navigation + Enter (2026-09-11, owner ask)
+
+  After selecting a track, Up/Down walk the highlight through the visible
+  tracklist (listbox behavior) instead of scrolling; Enter already played
+  and is untouched. Tight scope: body or track-row focus only (search,
+  sliders, other controls keep native keys), same panel-open/menu guards,
+  no wrap at edges, roving focus with preventScroll + nearest-scroll.
+
+### Volume % readout riding the thumb (2026-09-10, owner ask)
+
+  Pill above the volume thumb showing live `playback.volume`%, positioned
+  with the half-thumb correction and clamped inside the track. Pure CSS
+  show logic (:hover covers hover + drag, :focus-within covers keyboard),
+  opacity-only 150ms entrance, aria-hidden (native range announces itself).
+  Live: reads 33%, parked invisible at rest.
+  Refinements (owner): fixed 4ch centered pill (no reflow 7%↔100%),
+  unclamped thumb-true tracking edge to edge, 1s idle fade (timer on
+  pointermove/input, wins over hover/focus via .idle). Handlers live on
+  the input itself (span-level pointer handlers trip the a11y rule).
+  Width fix: global border-box made min-width cap padding INCLUDED, so
+  "100%" overflowed the floor — .vol-tip is content-box now, floor holds.
+  Stuck-tip fix: :focus-within kept the pill up forever on mouse-focus
+  residue after a drag (focus stays until window blur — exactly his symptom).
+  Focus now counts only when :focus-visible (keyboard) via volKey.
+
+### Exit-time WebKitWebProcess SEGV (2026-09-10, owner report — NOT our bug)
+
+  Crash dialog after closing: SEGV in WebKitWebProcess during exit() —
+  DRMDeviceManager teardown → _gbm_device_destroy → Mesa dri_destroy → heap
+  corruption in free(). Our binary nowhere in the stack; we never touch
+  GBM/EGL/DRM. coredumpctl shows the same renderer crashing since Sep 4
+  (SEGV + SIGABRT, plus a Brave SIGTRAP Sep 9) — systemic, predates tonight's
+  work. No data risk: it fires post-close in renderer teardown; DB/settings/
+  window-size all persist incrementally. Advice: ignore, or confirm upstream
+  via Epiphany-on-close. Do NOT set WEBKIT_DISABLE_DMABUF_RENDERER to dodge
+  it — software compositing would undo the marquee smoothness work above.
+
+### Ambient-blob prototype on the expanded panel (2026-09-10, owner idea)
+
+  Two art-color globs drifting behind the panel content (26s/31s alternate
+  loops, 8% opacity, colors = raw scan colors in the artwork's hue family).
+  Cheap-by-construction: softness is a baked radial-gradient, never
+  filter:blur (re-blurring per frame is the most expensive thing on this
+  engine) — the loop moves cached layers via transform only. Content pinned
+  above via z-index; reduced-motion freezes the drift. Live: both loops
+  running, 3s frame sample mean 16.66ms / p95 17ms / zero drops — costs
+  nothing measurable. Owner judges the LOOK; playbar port follows if it sings.
+  V1 (55%/8%/26-31s) read as static smudges, motion invisible — same-hue wash
+  + ultra-soft falloff. V2 (40%/16%/22-27s, 60% falloff, bigger travel):
+  owner sees it. Awaiting taste verdict.
+  V3: breathe removed (translation-only keyframes), travel ~45% of blob size
+  each way, 18s/23s loops — owner: movement still too subtle at V2.
+  Artifact report: diagonal lines = gradient banding (135° base + blob wash
+  pushed it over the visible threshold; the panel never had .glass's grain).
+  Fix: .panel::after feTurbulence dither at 0.035 (glass uses 0.02).
+  Owner redirect: stops ARE the globs — linear ramp deleted, two 90% washes
+  at the 135° corners (panel alpha) drifting ±12%, 20s/26s. One layer, less
+  banding by construction. Live: ramp gone, washes running, frames still
+  16.66/17/zero. Awaiting taste verdict v2.
+  V2 verdict: washes too faint + RADIAL banding (rings). Owner redirect #2:
+  ramp restored full-bleed on an oversized layer rocking ±9° via transform
+  (18s alternate) — source points swing, paint rasterizes once. Blobs gone.
+  Panel clips via overflow:hidden; grain stays.
+  V3 bug (owner screenshot): layer edge swept into view — -25% inset assumed
+  a square panel; at ~6:1 wide the ±9° rock needs ~45%-of-height margin.
+  Bled to -60% (live: 207px vertical margin vs ~128 needed).
+  Rock killed same night: barely readable. Owner spec v4: sources patrol —
+  two fading LINEAR washes (135° c1 top-left slides ±16% panel width,
+  315° c2 bottom-right mirrored), same 20s clock opposite phase. Live.
+  Rings screenshot: radial-blob era (linear can't ring) — predated hot-swap.
+  Fresh screenshot on linears: STILL banded (arcs — origin unclear, but
+  hiding washes => "smooth as can be", so washes implicated). Static
+  classic ramp test (via eval): mild diagonal banding too. Grain 0.035→0.07:
+  WORSE (finer, more noticeable) — dither path dead. Verdict: full revert to
+  shipped static ramp, grain experiment removed with it. Better Blur DX
+  exonerated (isolation test never touched it; bands tracked our art hues).
+  Open fork: keep classic ramp (mild banding, original identity) or go flat
+  base (perfectly smooth, loses art color). Playbar port shelved meanwhile.
+  PROTOTYPE DEAD (owner: "lost the fight"). Panel is byte-for-byte the
+  shipped static ramp again. Lessons banked: transform motion itself held
+  60fps clean all night — the killer was gradient QUANTIZATION on this
+  engine (any large wash bands; dither grain made it worse, not better).
+  Ambient motion on gradient surfaces: do not retry without a dither story.
+
+### Sidebar artist select resets the grid to top (2026-09-10, owner ask)
+
+  Re-clicking the active artist (or All Artists) collapsed the panel but kept
+  scrollTop, stranding the view mid-grid. select() now zeroes main.content's
+  scrollTop on every pick — instant, not smooth (rows are being replaced;
+  a glide would chase the collapsing layout).
+
+### Tracklist arrow-key navigation + Enter (2026-09-11, owner ask)
+
+  After selecting a track, Up/Down walk the highlight through the visible
+  tracklist (listbox behavior) instead of scrolling; Enter already played
+  and is untouched. Tight scope: body or track-row focus only (search,
+  sliders, other controls keep native keys), same panel-open/menu guards,
+  no wrap at edges, roving focus with preventScroll + nearest-scroll.
+  Follow-ups same night: Enter keeps the highlight (was clearing it, so
+  arrows restarted at the album head) — mouse second-click keeps its toggle
+  off-ramp via event.detail, keyboard Enter (detail 0) plays and holds.
+  Left/Right step ±one column-height within the containing list (rows-only
+  scope: body Left/Right stay PlayBar seek). Id-anchored focus (data-tid +
+  CSS.escape), group-local math, single-column falls through.
+  Bug fix same night: the detail-0 early return skipped playTrack — keyboard
+  Enter on a focused row played nothing (the "highlight gone" downstream
+  was the mouse toggle doing its job). Now detail 0 plays AND holds.
+
+### Shared tooltip system, volume style everywhere (2026-09-11, owner ask)
+
+  All 49 native titles across 11 files converted to `use:tooltip` — one
+  singleton pill in the volume readout's material, hover/focus delays,
+  viewport flip + clamp, hides on leave/blur/scroll/Escape/pointerdown,
+  aria-describedby while visible. Two icon-only controls gained real
+  aria-labels (their sole name was title).
+  Gap sweep same night: four icon-only controls never had tips — Prev/Next
+  track triangles, mute button (mirrors Unmute/Mute), search-clear ✕.
+  Text-labeled buttons and the deliberately-bare row ✕ left alone.
+  Flip fix: pill went ABOVE near top chrome (traffic-light overlap) — flip
+  threshold 8px → 80px. Frost ask: backdrop blur added as progressive
+  enhancement (engine can't blur in-window content — measured — so shadow +
+  denser fill carry legibility everywhere); mirrored onto vol-tip.
+  "Broken UI" same night: NOT the tooltips — global-sheet HMR rot (--gap
+  computed "", all theme tokens dead after the long hot-edit series).
+  Fixed with `touch src/app.css` (seconds, zero restarts); `--gap` back.

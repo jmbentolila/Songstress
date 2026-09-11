@@ -568,7 +568,7 @@ pub fn run_scan_files(
         )
         .map_err(|e| e.to_string())?;
 
-        let mut rows: Vec<(String, String, i64, Option<i64>, String, f64)> = Vec::new();
+        let mut rows: Vec<(String, String, i64, Option<i64>, String, f64, Option<String>)> = Vec::new();
         for (entry, p, fresh) in &g.tracks {
             let tid = stable_id("tr", &[&entry.path]);
             rows.push((
@@ -578,6 +578,10 @@ pub fn run_scan_files(
                 p.track,
                 p.title.trim().to_string(),
                 p.duration_sec,
+                // Empty/whitespace trims to None at parse time already; store
+                // the display string as-is so the playbar can prefer it over
+                // the album artist (NULL = fall back, never an empty line).
+                p.artist.clone(),
             ));
             if *fresh {
                 counts.added += 1;
@@ -586,19 +590,20 @@ pub fn run_scan_files(
             }
         }
         // Deterministic ordering within the album regardless of walk order.
-        rows.sort_by_key(|(_, _, disc, track, _, _)| (*disc, track.unwrap_or(9_999)));
-        for (tid, path, disc, track, title, dur) in &rows {
+        rows.sort_by_key(|(_, _, disc, track, _, _, _)| (*disc, track.unwrap_or(9_999)));
+        for (tid, path, disc, track, title, dur, artist) in &rows {
             let fe = g.tracks.iter().find(|(e, _, _)| e.path == *path);
             let (mtime_ns, size) = fe.map(|(e, _, _)| (e.mtime_ns, e.size)).unwrap_or((0, 0));
             tx.execute(
-                "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size, artist)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(path) DO UPDATE SET
                    album_id = excluded.album_id, disc = excluded.disc,
                    track = excluded.track, title = excluded.title,
                    duration_sec = excluded.duration_sec,
-                   mtime_ns = excluded.mtime_ns, size = excluded.size",
-                rusqlite::params![tid, album_id, disc, track, title, dur, path, mtime_ns, size],
+                   mtime_ns = excluded.mtime_ns, size = excluded.size,
+                   artist = excluded.artist",
+                rusqlite::params![tid, album_id, disc, track, title, dur, path, mtime_ns, size, artist],
             )
             .map_err(|e| e.to_string())?;
         }

@@ -13,6 +13,7 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type { ArtChange, ArtInventory } from "../lib/artChange";
   import { sniffMime, toBase64 } from "../lib/artChange";
+  import { tooltip } from "../lib/tooltip";
 
   let {
     albumId,
@@ -248,15 +249,16 @@
         <button
           class="as-tile as-sel"
           onclick={() => expand({ src: a.url, label: "New image" })}
-          title="Click to see the full image"
+          use:tooltip={"Click to see the full image"}
         >
           <img src={a.url} alt="" decoding="async" use:reveal />
           <span
             class="as-badge as-sel-badge"
             role="checkbox"
             aria-checked="true"
+            aria-label="This is the cover"
             tabindex="0"
-            title="This is the cover"
+            use:tooltip={"This is the cover"}
             onclick={(e) => e.stopPropagation()}
             onkeydown={(e) => e.key === "Enter" && e.stopPropagation()}
             >✓</span
@@ -292,7 +294,7 @@
                   : c.label,
               hash: c.hash,
             })}
-          title="Click to see the full image"
+          use:tooltip={"Click to see the full image"}
         >
           <img src={c.preview} alt="" decoding="async" use:reveal />
           <!-- selection: the corner dot (iOS photo-picker language) -->
@@ -301,8 +303,9 @@
             class:as-badge-on={isSel}
             role="checkbox"
             aria-checked={isSel}
+            aria-label={isSel ? "This is the cover" : "Use as cover"}
             tabindex="0"
-            title={isSel ? "This is the cover" : "Use as cover"}
+            use:tooltip={isSel ? "This is the cover" : "Use as cover"}
             onclick={(e) => {
               e.stopPropagation();
               pick(c.hash);
@@ -321,7 +324,7 @@
               class="as-rm"
               role="button"
               tabindex="0"
-              title="Remove artwork from every file"
+              use:tooltip={"Remove artwork from every file"}
               onclick={(e) => {
                 e.stopPropagation();
                 change = "clear";
@@ -338,7 +341,7 @@
           <span class="as-cap" class:as-cap-rm={willRm}>{willRm ? "removing on Save" : c.count > 0 ? `in ${c.count} ${c.count === 1 ? "file" : "files"}` : c.label}</span>
         </button>
       {/each}
-      <button class="as-tile as-add" onclick={() => void browse()} disabled={busy} title="Choose an image — or an audio file whose embedded cover to take">
+      <button class="as-tile as-add" onclick={() => void browse()} disabled={busy} use:tooltip={"Choose an image — or an audio file whose embedded cover to take"}>
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
         </svg>

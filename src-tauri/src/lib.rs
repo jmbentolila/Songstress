@@ -2044,7 +2044,7 @@ fn get_library(state: tauri::State<AppState>) -> Result<LibraryDump, String> {
     {
         let mut stmt = conn
             .prepare(
-                "SELECT id, album_id, disc, track, title, duration_sec, path, staged
+                "SELECT id, album_id, disc, track, title, duration_sec, path, staged, artist
                   FROM tracks",
             )
             .map_err(|e| e.to_string())?;
@@ -2071,6 +2071,7 @@ fn get_library(state: tauri::State<AppState>) -> Result<LibraryDump, String> {
                     "track": track,
                     "title": title,
                     "durationSec": r.get::<_, f64>(5)?,
+                    "artist": r.get::<_, Option<String>>(8)?,
                     "staged": staged,
                     "missing": missing,
                 });
@@ -2800,9 +2801,9 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-x','X','x');
              INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);
              INSERT INTO albums VALUES ('al-2','ar-x','B',2021,NULL,NULL,NULL);
-             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/track.flac',1,123,0);
-             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/track.flac',1,123,0);
-             INSERT INTO tracks VALUES ('tr-3','al-2',1,1,'t3',10.0,'/music/bc/other.flac',1,456,0);",
+             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/track.flac',1,123,0,NULL);
+             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/track.flac',1,123,0,NULL);
+             INSERT INTO tracks VALUES ('tr-3','al-2',1,1,'t3',10.0,'/music/bc/other.flac',1,456,0,NULL);",
         )
         .expect("seed");
         let n = super::delete_tracks_under_root(&conn, std::path::Path::new("/music/b"))
@@ -2826,10 +2827,10 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-x','X','x');
              INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);
              INSERT INTO albums VALUES ('al-2','ar-x','B',2021,NULL,NULL,NULL);
-             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/one.flac',1,1,0);
-             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/two.flac',1,1,0);
-             INSERT INTO tracks VALUES ('tr-3','al-2',1,2,'t3',10.0,'/music/b/three.flac',1,1,0);
-             INSERT INTO tracks VALUES ('tr-4','al-2',2,1,'t4',10.0,'/music/b-cd2/four.flac',1,1,0);",
+             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/one.flac',1,1,0,NULL);
+             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/two.flac',1,1,0,NULL);
+             INSERT INTO tracks VALUES ('tr-3','al-2',1,2,'t3',10.0,'/music/b/three.flac',1,1,0,NULL);
+             INSERT INTO tracks VALUES ('tr-4','al-2',2,1,'t4',10.0,'/music/b-cd2/four.flac',1,1,0,NULL);",
         )
         .expect("seed");
         // A track reveals ITS FILE (the caller --selects it).

@@ -7,6 +7,7 @@
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
   import { extractArtColors } from "../lib/artColors";
   import { artGradient, gradientFromColors } from "../lib/gradient";
+  import { tooltip } from "../lib/tooltip";
   import { SPLIT_MIN, discSplitPlan } from "../lib/discSplit";
   import StencilMark from "./StencilMark.svelte";
   import { resolvedTheme, ui } from "../lib/stores/ui.svelte";
@@ -135,11 +136,18 @@
 
   // Single click selects; a second click on the ALREADY-selected row plays
   // it (the selection gains a consequence; double-click still plays from
-  // unselected, and missing rows keep double-click = locate).
-  function onTrackClick(track: Track) {
+  // unselected, and missing rows keep double-click = locate). Playing never
+  // clears the highlight — Enter keeps it so the arrows can continue from
+  // the playing row; only picking another row (or Delete acting on it)
+  // moves it. Mouse second-click is the one exception: the toggle needs its
+  // off-ramp (keyboard activation arrives with detail 0, mouse with >= 1).
+  function onTrackClick(track: Track, e?: MouseEvent) {
     if (selectedId === track.id) {
       if (track.missing) return;
-      selectedId = null; // the current-track styling takes over
+      // Keyboard Enter (detail 0) plays AND holds the highlight so the
+      // arrows continue from the playing row; mouse second-click keeps its
+      // toggle off-ramp (the current-track styling takes over).
+      if (e && e.detail !== 0) selectedId = null;
       void playTrack(displayAlbum.id, indexById.get(track.id) ?? 0);
       return;
     }
@@ -163,9 +171,64 @@
   // interactive targets: a focused row already plays on native Enter
   // (keydown → click → second-click path), so this only covers focus on
   // the body — no double-fire.
+  // ArrowUp/Down walk the highlight through the VISIBLE tracklist instead
+  // of scrolling: after selecting a track the list behaves like a listbox.
+  // Scope is tight on purpose — body or a track row only. Focus in the
+  // search field, on a slider (arrows are theirs), or on any other control
+  // keeps native behavior. No selection yet + arrows from the body anchors
+  // at the near edge (Down = first track). Ends don't wrap; at an edge the
+  // keys fall through to the scroller. Ghost instances stand down via the
+  // same targetId guard (their targetId is null).
   function onKeydown(e: KeyboardEvent) {
-    if (e.key !== "Delete" && e.key !== "Enter") return;
+    if (
+      e.key !== "Delete" &&
+      e.key !== "Enter" &&
+      e.key !== "ArrowUp" &&
+      e.key !== "ArrowDown" &&
+      e.key !== "ArrowLeft" &&
+      e.key !== "ArrowRight"
+    )
+      return;
     if (targetId === null || ui.tagEditor.open || contextMenu.open) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      // Rows ONLY: on the body Left/Right belong to seek (PlayBar ±5s),
+      // and this handler must never steal them — no stopPropagation games,
+      // just a scope that never overlaps. Column-major grid: across means
+      // ± one column-height within the containing list; out of range (or
+      // single column) falls through silently.
+      const t = e.target as HTMLElement | null;
+      if (!t?.closest("button.track")) return;
+      const cur = selectedId;
+      if (!cur) return;
+      const c = colList(cur);
+      if (!c) return;
+      const li = c.ids.indexOf(cur);
+      if (li === -1) return;
+      const ni = li + (e.key === "ArrowLeft" ? -c.rows : c.rows);
+      if (ni < 0 || ni >= c.ids.length) return;
+      e.preventDefault();
+      focusTrack(c.ids[ni]);
+      return;
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      const t = e.target as HTMLElement | null;
+      const onRow = !!t?.closest("button.track");
+      if (!onRow && t !== document.body && !t?.closest("main.content")) return;
+      const ids = flatIds;
+      if (ids.length === 0) return;
+      let i = selectedId ? ids.indexOf(selectedId) : -1;
+      if (i === -1) {
+        // Nothing highlighted: anchor at the edge you're heading in from.
+        i = e.key === "ArrowUp" ? ids.length - 1 : 0;
+      } else {
+        const ni = i + (e.key === "ArrowUp" ? -1 : 1);
+        if (ni < 0 || ni >= ids.length) return; // edge: fall through to scroll
+        i = ni;
+      }
+      e.preventDefault();
+      focusTrack(ids[i]);
+      return;
+    }
     const id = selectedId;
     if (!id) return;
     const track = tracks.find((t) => t.id === id);
@@ -178,7 +241,7 @@
         void locateMissingTrack(id);
         return;
       }
-      selectedId = null;
+      // Highlight stays: the arrows continue from the playing row.
       void playTrack(displayAlbum.id, indexById.get(id) ?? 0);
       return;
     }
@@ -450,6 +513,35 @@
     const plan = discSplitPlan(groups.map((g) => g.tracks.length));
     return groups.map((g, i) => ({ ...g, rows: plan[i] }));
   });
+  // DOM-truthful flat id order for arrow navigation (group concatenation,
+  // never an assumed global sort) + the focused-track handoff.
+  let flatIds = $derived(
+    hasMultipleDiscs
+      ? discGroups.flatMap((g) => g.tracks.map((t) => t.id))
+      : tracks.map((t) => t.id),
+  );
+  function focusTrack(id: string) {
+    selectedId = id;
+    // By id, not by index: immune to group order, outro cells, rescan
+    // re-grouping mid-navigation.
+    const btn = panelEl?.querySelector<HTMLElement>(
+      `button.track[data-tid="${CSS.escape(id)}"]`,
+    );
+    btn?.focus({ preventScroll: true });
+    btn?.scrollIntoView({ block: "nearest" });
+  }
+  // The column-height + id list Left/Right moves within: the single list
+  // (two-col only — below SPLIT_MIN there is nothing across) or the
+  // containing disc group (unsplit groups return null: single column).
+  function colList(id: string): { ids: string[]; rows: number } | null {
+    if (!hasMultipleDiscs) {
+      if (tracks.length < SPLIT_MIN) return null;
+      return { ids: tracks.map((t) => t.id), rows: splitRows(tracks.length) };
+    }
+    const g = discGroups.find((gr) => gr.tracks.some((t) => t.id === id));
+    if (!g || g.rows === null) return null;
+    return { ids: g.tracks.map((t) => t.id), rows: g.rows };
+  }
 
   function fmt(sec: number): string {
     const m = Math.floor(sec / 60);
@@ -549,7 +641,7 @@
                      stays a label: it lives inside the tile's own button. -->
                 <button
                   class="staged-badge"
-                  title="Not saved to the library folder yet — open the import list"
+                  use:tooltip={"Not saved to the library folder yet — open the import list"}
                   onclick={() => void openImportManager(displayAlbum.id)}
                 >Imported</button>
               {/if}
@@ -557,7 +649,7 @@
               <button
                 class="edit-album"
                 aria-label={`Edit tags for ${displayAlbum.title}`}
-                title="Edit album tags"
+                use:tooltip={"Edit album tags"}
                 onclick={(e) => editAlbumTags(e, displayAlbum.id)}
               >
                 <svg viewBox="0 0 16 16"><path d="M11.3 2.2 L13.8 4.7 L5.5 13 H3 V10.5 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /></svg>
@@ -565,7 +657,7 @@
               <button
                 class="play-all"
                 aria-label={`Play ${displayAlbum.title}`}
-                title="Play"
+                use:tooltip={"Play"}
                 onclick={() => playTrack(displayAlbum.id, 0)}
               >
                 <svg viewBox="0 0 16 16"><path d="M5 3 L13 8 L5 13 Z" fill="currentColor" /></svg>
@@ -601,19 +693,20 @@
                       <li>
                         <button
                           class="track"
+                          data-tid={track.id}
                           transition:fade|local={ROW_FADE}
                           class:current={isCurrent(track.id)}
                           class:selected={selectedId === track.id}
-                          title={
+                          use:tooltip={
                             selectedId === track.id && !track.missing
                               ? "Click again to play (or press Enter)"
                               : undefined
                           }
-                          onclick={() => onTrackClick(track)}
+                          onclick={(e) => onTrackClick(track, e)}
                           ondblclick={() => onTrackDblClick(track)}
                           oncontextmenu={(e) => trackMenu(e, track)}
                         >
-                                                    <span class="num" class:missing={track.missing} title={track.missing ? "File missing — double-click to locate it" : undefined}>
+                                                    <span class="num" class:missing={track.missing} use:tooltip={track.missing ? "File missing — double-click to locate it" : undefined}>
                             {#if isCurrent(track.id)}
                               <span aria-hidden="true">{playback.isPlaying ? "▶" : "❚❚"}</span
                               ><span class="sr-only">Now playing</span>
@@ -644,19 +737,20 @@
                 <li>
                   <button
                     class="track"
+                    data-tid={track.id}
                     transition:fade|local={ROW_FADE}
                     class:current={isCurrent(track.id)}
                     class:selected={selectedId === track.id}
-                    title={
+                    use:tooltip={
                       selectedId === track.id && !track.missing
                         ? "Click again to play (or press Enter)"
                         : undefined
                     }
-                  onclick={() => onTrackClick(track)}
+                  onclick={(e) => onTrackClick(track, e)}
                   ondblclick={() => onTrackDblClick(track)}
                   oncontextmenu={(e) => trackMenu(e, track)}
                 >
-                                        <span class="num" class:missing={track.missing} title={track.missing ? "File missing — double-click to locate it" : undefined}>
+                                        <span class="num" class:missing={track.missing} use:tooltip={track.missing ? "File missing — double-click to locate it" : undefined}>
                       {#if isCurrent(track.id)}
                         <span aria-hidden="true">{playback.isPlaying ? "▶" : "❚❚"}</span
                         ><span class="sr-only">Now playing</span>

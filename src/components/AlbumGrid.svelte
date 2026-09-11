@@ -4,6 +4,7 @@
   import { ui } from "../lib/stores/ui.svelte";
   import { library } from "../lib/stores/library.svelte";
   import { currentTrack } from "../lib/stores/playback.svelte";
+  import { tooltip } from "../lib/tooltip";
   import { extractArtColors } from "../lib/artColors";
   import { buildRows, columnCount } from "../lib/buildRows";
   import { skeletonRows, libraryLoading } from "../lib/loadingState";
@@ -492,7 +493,7 @@
     {:else if library.live && library.ready && library.albums.length === 0}
       <EmptyState />
     {:else if searchActive && sections.length === 0}
-      <button class="no-match" onclick={() => (ui.search = "")} title="Clear search">
+      <button class="no-match" onclick={() => (ui.search = "")} use:tooltip={"Clear search"}>
         No albums or songs match “{searchQuery}” — clear search
       </button>
     {:else}
@@ -530,7 +531,7 @@
                       <span class="noart"><StencilMark /></span>
                     {/if}
                     {#if album.staged}
-                      <span class="staged" title="Not saved to the library folder yet">Imported</span>
+                      <span class="staged" use:tooltip={"Not saved to the library folder yet"}>Imported</span>
                     {/if}
                   </span>
                   <span class="caption">

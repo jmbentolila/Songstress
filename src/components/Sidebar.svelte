@@ -6,6 +6,7 @@
   import { ACCENT_PRESETS, accentVariants, hexToHsl } from "../lib/accent";
   import { menu, activateMenuItem } from "../lib/stores/menu.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
+  import { tooltip } from "../lib/tooltip";
   import { openImportManager } from "../lib/stores/imports.svelte";
   import { surfaceOpen } from "../lib/stores/surfaces.svelte";
   import { fold } from "../lib/search";
@@ -495,6 +496,13 @@
     ui.expandedAlbum.songs = null;
     ui.expandedAlbum.albums = null;
     ui.search = "";
+    // Back to the top, every time — including re-clicking the artist you're
+    // already on. Collapsing the panel shrinks the content under the
+    // scroller, so a kept scrollTop strands the view mid-grid ("middle of
+    // nowhere"). Instant, not smooth: the rows are being replaced anyway,
+    // and a glide would chase a layout that's still collapsing.
+    const scroller = document.querySelector<HTMLElement>("main.content");
+    if (scroller) scroller.scrollTop = 0;
   }
 
   // Right-click an artist → the same context menu as tiles/rows (shared
@@ -604,7 +612,7 @@
     <button
       class="gear"
       aria-label={ui.menuOpen ? "Close settings" : "Open settings"}
-      title="Settings — press s to toggle"
+      use:tooltip={"Settings — press s to toggle"}
       aria-expanded={ui.menuOpen}
       onclick={toggleSettings}
     >
@@ -646,7 +654,7 @@
           placeholder="Search library..."
           spellcheck="false"
           aria-label="Search library"
-          title={loading
+          use:tooltip={loading
             ? "Search once your library is built"
             : "Tip: press / anywhere to focus search — Escape clears"}
           disabled={loading}
@@ -662,7 +670,7 @@
           }}
         />
         {#if ui.search !== ""}
-          <button class="search-clear" aria-label="Clear search" onclick={() => (ui.search = "")}>
+          <button class="search-clear" aria-label="Clear search" use:tooltip={"Clear search"} onclick={() => (ui.search = "")}>
             <svg viewBox="0 0 10 10"><path d="M2.2 2.2 L7.8 7.8 M7.8 2.2 L2.2 7.8" /></svg>
           </button>
         {/if}
@@ -710,7 +718,7 @@
             <span
               class="count"
               class:pending={stagedCounts.has(artist.id)}
-              title={stagedCounts.has(artist.id)
+              use:tooltip={stagedCounts.has(artist.id)
                 ? `${albumCounts.get(artist.id) ?? 0} albums — ${stagedCounts.get(artist.id)} awaiting import`
                 : undefined}
               >{albumCounts.get(artist.id) ?? 0}</span
@@ -987,7 +995,7 @@
                         value={playback.eq.gains[i]}
                         aria-label={`${fmtHz(hz)} hertz`}
                         aria-valuetext={`${fmtDb(playback.eq.gains[i])} decibels`}
-                        title="Double-click to zero"
+                        use:tooltip={"Double-click to zero"}
                         style:background={fill(playback.eq.gains[i], -EQ_MAX_DB, EQ_MAX_DB)}
                         ondblclick={() => setEqBand(i, 0)}
                         oninput={(e) => setEqBand(i, +e.currentTarget.value)}
@@ -1180,7 +1188,7 @@
                 class:selected={ui.accentColor === p.hex}
                 style:background={p.hex ?? "linear-gradient(135deg, #a78bfa 50%, #7c58f0 50%)"}
                 style:box-shadow={swatchRing(p.hex, ui.accentColor === p.hex)}
-                title={clampHint(p.hex, p.name)}
+                use:tooltip={clampHint(p.hex, p.name)}
                 aria-label={clampHint(p.hex, p.name)}
                 onclick={() => (ui.accentColor = p.hex)}
               ></button>

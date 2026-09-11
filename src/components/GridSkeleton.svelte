@@ -69,6 +69,10 @@
     width: 100%;
     aspect-ratio: 1;
     border-radius: var(--radius-cover);
+    /* Weight arrives WITH the placeholder (owner call 2026-09-10): the real
+       tile carries this shadow, so the skeleton holds the same mass and the
+       artwork fades in without the tile gaining weight. */
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
   }
 
   .sk-caption {

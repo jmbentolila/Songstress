@@ -31,6 +31,7 @@
   } from "../lib/importPlan";
   import SurfaceClose from "./SurfaceClose.svelte";
   import ProgressRing from "./ProgressRing.svelte";
+  import { tooltip } from "../lib/tooltip";
   import { trapTab } from "../lib/focusTrap";
 
   const groups = $derived(groupByArtist(imports.plan));
@@ -389,7 +390,7 @@
                 </p>
               {/each}
               {#if heldMore > 0}
-                <p class="mi-said-line" title={heldAll}>
+                <p class="mi-said-line" use:tooltip={heldAll}>
                   and {heldMore} more
                 </p>
               {/if}
@@ -445,7 +446,7 @@
                       </span>
                     </span>
 
-                    <span class="mi-dest" title={a.destination.folder}>
+                    <span class="mi-dest" use:tooltip={a.destination.folder}>
                       <span class="mi-rule">{dest.lead}</span>
                       <!-- The two claims are different kinds of statement (what will
                            happen / where), and 6px of gap did not say that. A middle
@@ -535,7 +536,7 @@
             class="mi-apply"
             disabled={busy || sum.decided === 0}
             aria-label={sum.decided > 0 ? `Apply ${sum.decided} decisions` : "Apply"}
-            title={sum.decided === 0 ? "Mark an album first" : undefined}
+            use:tooltip={sum.decided === 0 ? "Mark an album first" : undefined}
             onclick={() => void applyImportDecisions()}
           >
             Apply

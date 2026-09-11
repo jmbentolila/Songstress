@@ -13,6 +13,7 @@
   import { library } from "../lib/stores/library.svelte";
   import { ui } from "../lib/stores/ui.svelte";
   import { announcer } from "../lib/stores/announcer.svelte";
+  import { tooltip } from "../lib/tooltip";
   import { rescan } from "../lib/stores/scanner.svelte";
   import TagSurface from "./TagSurface.svelte";
   import FieldGrid from "./FieldGrid.svelte";
@@ -323,11 +324,11 @@
             album{#if discs > 1} · across {discs} discs{/if}
           </span>
         {/if}
-        <button class="te-btn" onclick={close} title="Close without writing (Esc)">Cancel</button>
+        <button class="te-btn" onclick={close} use:tooltip={"Close without writing (Esc)"}>Cancel</button>
         <button
           class="te-btn primary"
           disabled={saving || (dirty && bad.size > 0)}
-          title={saving ? "Writing…" : dirty ? "Write the changed files (Enter)" : "Nothing to write (Enter)"}
+          use:tooltip={saving ? "Writing…" : dirty ? "Write the changed files (Enter)" : "Nothing to write (Enter)"}
           onclick={() => {
             // Clean form: the primary button reads Done — it closes.
             if (dirty) void save();

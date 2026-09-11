@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ui } from "../lib/stores/ui.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
+  import { tooltip } from "../lib/tooltip";
   import { trapTab } from "../lib/focusTrap";
   import {
     addMusicFolderRoot,
@@ -114,13 +115,13 @@
                 </li>
               {:else}
                 <li class="mf-row">
-                  <span class="mf-path" title={folder}>{folder}</span>
+                  <span class="mf-path" use:tooltip={folder}>{folder}</span>
                   <button
                     class="mf-remove"
                     aria-label={`Remove ${folder}`}
                     disabled={scanner.running}
                     onclick={() => (pendingRemove = folder)}
-                    title="Remove this folder (tracks drop from the library)"
+                    use:tooltip={"Remove this folder (tracks drop from the library)"}
                   >
                     ✕
                   </button>

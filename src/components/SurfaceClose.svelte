@@ -41,6 +41,7 @@
      (modals, popovers); a head-less surface (About) places it absolutely and needs
      `:global()` — a class forwarded into a child component is unscoped here. -->
 <script lang="ts">
+  import { tooltip } from "../lib/tooltip";
   let {
     onclick,
     label = "Close",
@@ -61,7 +62,7 @@
   type="button"
   class={`sc ${klass}`}
   aria-label={label}
-  title={label}
+  use:tooltip={label}
   {onclick}
 >
   <!-- The gear's ✕, verbatim: 16-unit box, 8-unit cross, 1.4 stroke, round caps.

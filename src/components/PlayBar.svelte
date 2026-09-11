@@ -33,6 +33,7 @@
   import SurfaceClose from "./SurfaceClose.svelte";
   import StencilMark from "./StencilMark.svelte";
   import { ui, resolvedTheme } from "../lib/stores/ui.svelte";
+  import { tooltip } from "../lib/tooltip";
   import {
     setEqEnabled,
     setEqPreamp,
@@ -51,7 +52,116 @@
 
   let track = $derived(currentTrack());
   let album = $derived(track ? library.albums.find((a) => a.id === track!.albumId) : null);
-  let artistName = $derived(album ? (library.artistOf(album)?.name ?? "") : "");
+  // Bottom line prefers the TRACK artist (guests/feats stay with their track)
+  // and falls back to the album artist when the file tags none — pre-v3 rows
+  // and untagged files read back null/empty, so the line never goes blank.
+  let albumArtist = $derived(album ? (library.artistOf(album)?.name ?? "") : "");
+  let displayArtist = $derived(
+    track?.artist?.trim() ? track.artist.trim() : albumArtist,
+  );
+  let titleText = $derived(track?.title ?? "Nothing playing");
+  let subText = $derived(track ? `${displayArtist} — ${album?.title}` : "Pick a track");
+  // Volume-tip idle fade: visible while the pointer moves over the slider or
+  // the value changes, gone 1s after everything goes still (hovering dead
+  // air is not adjusting). Timer restarts on every move/input; leaving the
+  // slider resets so the next hover starts visible.
+  let volIdle = $state(false);
+  let volTimer: ReturnType<typeof setTimeout> | undefined;
+  function pokeVol() {
+    volIdle = false;
+    clearTimeout(volTimer);
+    volTimer = setTimeout(() => (volIdle = true), 1000);
+  }
+  function calmVol() {
+    clearTimeout(volTimer);
+    volIdle = false;
+  }
+  // Keyboard focus only (:focus-visible): a mouse drag parks focus on the
+  // slider as a side effect, and :focus-within would keep the tip up forever
+  // after the pointer leaves — the stuck-tip bug. volKey is true only for
+  // keyboard focus, so mouse residue never holds it open.
+  let volKey = $state(false);
+  function volFocus(e: FocusEvent) {
+    volKey = (e.currentTarget as HTMLElement).matches(":focus-visible");
+  }
+  // Fill % for the seek bar's glass fill (mirrors the volume slider's logic:
+  // the gradient IS the track, so 100% means filled to the edge, not to the
+  // thumb's inset travel). Clamped — duration can read 0 briefly on load.
+  let seekPct = $derived(
+    playback.durationSec > 0
+      ? Math.min(100, Math.max(0, (playback.positionSec / playback.durationSec) * 100))
+      : 0,
+  );
+
+  // Marquee key: anything that changes what the two lines SAY restarts the
+  // overflow check (track switch, rescan rename, Full-Rescan backfill).
+  let mqKey = $derived(`${track?.id ?? "none"}|${titleText}|${subText}`);
+
+  // Seamless marquee, ONLY on overflow. The viewport (node) keeps the old
+  // ellipsis rules as the no-JS/reduced-motion fallback; when the single
+  // copy is wider than the viewport a hidden twin is appended and the inner
+  // strip loops by exactly one copy + gap, so the wrap point is invisible.
+  // CSS animation (off the main thread, linear = constant speed), duration
+  // scaled to distance at a device-pixel-aligned speed (see SPEED) — whole
+  // device pixels per frame read smoother than fractional ones, which shimmer. Pausing (music
+  // paused, hover to read) is animation-play-state in the stylesheet — the
+  // animation itself is never torn down, so resume continues mid-flight.
+  function marquee(node: HTMLElement, _key: string) {
+    const MQ_GAP = 48; // px between copy and twin — mirrors [data-clone] margin
+    // 37.5px/s = exactly 1 DEVICE pixel per frame on a 60Hz panel at scale 1.6
+    // (his setup): fractional device steps shimmer, whole ones don't. If his
+    // panel isn't 60Hz this won't help — then we switch technique (fade-paging).
+    const SPEED = 37.5; // px/s — ~1px/frame at 60fps (see above)
+    let ro: ResizeObserver | null = null;
+    let raf = 0;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+    function run() {
+      const inner = node.querySelector<HTMLElement>(".mq-in");
+      if (!inner) return;
+      // Strip last run's twin (text may have changed) and stop the loop so
+      // the single-copy measure is honest. Forced reflow restarts the
+      // animation below — without it re-adding the class is a no-op.
+      inner.querySelectorAll("[data-clone]").forEach((c) => c.remove());
+      node.classList.remove("is-over");
+      inner.style.removeProperty("--mq-to");
+      inner.style.removeProperty("--mq-dur");
+      void node.offsetWidth;
+      if (reduce.matches) return;
+      const single = inner.scrollWidth;
+      const view = node.clientWidth;
+      if (single <= view + 2) return;
+      const twin = document.createElement("span");
+      twin.setAttribute("data-clone", "");
+      twin.setAttribute("aria-hidden", "true");
+      twin.textContent = inner.textContent;
+      twin.style.marginLeft = `${MQ_GAP}px`;
+      inner.appendChild(twin);
+      const dist = single + MQ_GAP;
+      inner.style.setProperty("--mq-to", `${-dist}px`);
+      const dur = Math.min(24, Math.max(4, dist / SPEED));
+      inner.style.setProperty("--mq-dur", `${dur.toFixed(2)}s`);
+      node.classList.add("is-over");
+    }
+    function schedule() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(run);
+    }
+    schedule();
+    ro = new ResizeObserver(schedule);
+    ro.observe(node);
+    const onReduce = () => schedule();
+    reduce.addEventListener?.("change", onReduce);
+    return {
+      update() {
+        schedule();
+      },
+      destroy() {
+        cancelAnimationFrame(raf);
+        ro?.disconnect();
+        reduce.removeEventListener?.("change", onReduce);
+      },
+    };
+  }
 
   // Step 2b: optional artwork-gradient playbar backdrop at chrome alpha 0.7.
   // Shows whenever a track is loaded (paused included); stopped = plain chrome.
@@ -232,7 +342,7 @@
 
 <svelte:window onpointerdown={onDocPointerDown} onkeydown={onDocKeydown} />
 
-<footer class="playbar glass">
+<footer class="playbar glass" class:paused={!playback.isPlaying}>
   <!-- The gradient layer, behind every control, above the chrome fill
        (.playbar's z-index makes it a stacking context, so z-index:-1
        lands exactly between the two). Keyed so a value change runs the
@@ -249,8 +359,12 @@
       <div class="art placeholder"><StencilMark /></div>
     {/if}
     <div class="text">
-      <span class="t">{track?.title ?? "Nothing playing"}</span>
-      <span class="sub">{track ? `${artistName} — ${album?.title}` : "Pick a track"}</span>
+      <span class="t mq" use:marquee={mqKey} use:tooltip={titleText}>
+        <span class="mq-in">{titleText}</span>
+      </span>
+      <span class="sub mq" use:marquee={mqKey} use:tooltip={subText}>
+        <span class="mq-in">{subText}</span>
+      </span>
     </div>
   </div>
 
@@ -258,13 +372,13 @@
     <div class="transport">
       <button
         aria-label="Previous album"
-        title="Previous album"
+        use:tooltip={"Previous album"}
         disabled={!track}
         onclick={() => albumSkip(-1)}
       >
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3 v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13.5 3.5 v9 L6.5 8 Z" fill="currentColor"/></svg>
       </button>
-      <button aria-label="Previous track" disabled={!track} onclick={() => skip(-1)}>
+      <button aria-label="Previous track" use:tooltip={"Previous track"} disabled={!track} onclick={() => skip(-1)}>
         <!-- Bare triangle on purpose: track-level step. Bar+triangle is
          *reserved* for album-level jumps (the weight diff encodes it). -->
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 3 L6.5 8 l6 5 Z" fill="currentColor" /></svg>
@@ -272,7 +386,7 @@
       <button
         class="playpause"
         aria-label={playback.isPlaying ? "Pause" : "Play"}
-        title={playback.isPlaying ? "Pause — Space" : "Play — Space"}
+        use:tooltip={playback.isPlaying ? "Pause — Space" : "Play — Space"}
         onclick={togglePlay}
       >
         {#if playback.isPlaying}
@@ -281,12 +395,12 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 L13 8 L5 13 Z" fill="currentColor"/></svg>
         {/if}
       </button>
-      <button aria-label="Next track" disabled={!track} onclick={() => skip(1)}>
+      <button aria-label="Next track" use:tooltip={"Next track"} disabled={!track} onclick={() => skip(1)}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3 L9.5 8 l-6 5 Z" fill="currentColor" /></svg>
       </button>
       <button
         aria-label="Next album"
-        title="Next album"
+        use:tooltip={"Next album"}
         disabled={!track}
         onclick={() => albumSkip(1)}
       >
@@ -303,8 +417,9 @@
         value={playback.positionSec}
         disabled={!track}
         oninput={(e) => seekTo(+e.currentTarget.value)}
+        style:background={`linear-gradient(to right, var(--accent) ${seekPct}%, var(--hover) ${seekPct}%)`}
         aria-label="Seek"
-        title="Seek — ←/→ = ±5s"
+        use:tooltip={"Seek — ←/→ = ±5s"}
       />
       <span class="time">{fmt(playback.durationSec)}</span>
     </div>
@@ -317,7 +432,7 @@
         class:on={playback.eq.enabled}
         bind:this={eqBtn}
         aria-label="Equalizer"
-        title={`Equalizer: ${playback.eq.enabled ? "on" : "off"}${playback.eq.preset ? ` · ${playback.eq.preset}` : " · Custom"}`}
+        use:tooltip={`Equalizer: ${playback.eq.enabled ? "on" : "off"}${playback.eq.preset ? ` · ${playback.eq.preset}` : " · Custom"}`}
         onclick={toggleEq}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -336,7 +451,7 @@
         class="mode-btn"
         class:on={playback.shuffle !== "off"}
         aria-label="Shuffle"
-        title={`Shuffle: ${playback.shuffle === "off" ? "off" : playback.shuffle === "album" ? "album" : playback.shuffle === "artist" ? "artist" : "all artists"} (click to cycle)`}
+        use:tooltip={`Shuffle: ${playback.shuffle === "off" ? "off" : playback.shuffle === "album" ? "album" : playback.shuffle === "artist" ? "artist" : "all artists"} (click to cycle)`}
         onclick={cycleShuffle}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -358,7 +473,7 @@
         class="mode-btn"
         class:on={playback.repeat !== "off"}
         aria-label="Repeat"
-        title={`Repeat: ${playback.repeat === "off" ? "off" : playback.repeat} (click to cycle)`}
+        use:tooltip={`Repeat: ${playback.repeat === "off" ? "off" : playback.repeat} (click to cycle)`}
         onclick={cycleRepeat}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -375,7 +490,7 @@
         class="mode-btn"
         class:on={playback.queue.length > 0}
         aria-label="Queue"
-        title={`Queue: ${playback.queue.length} track${playback.queue.length === 1 ? "" : "s"} queued`}
+        use:tooltip={`Queue: ${playback.queue.length} track${playback.queue.length === 1 ? "" : "s"} queued`}
         bind:this={qBtn}
         onclick={toggleQueue}
       >
@@ -397,6 +512,7 @@
     <button
       class="vol-btn"
       aria-label={playback.volume === 0 ? "Unmute" : "Mute"}
+      use:tooltip={playback.volume === 0 ? "Unmute" : "Mute"}
       onclick={toggleMute}
     >
       {#if playback.volume === 0}
@@ -413,16 +529,34 @@
         </svg>
       {/if}
     </button>
-    <input
-      type="range"
-      min="0"
-      max="100"
-      step="1"
-      value={playback.volume}
-      oninput={(e) => setVolume(+e.currentTarget.value)}
-      style:background={`linear-gradient(to right, var(--accent) ${playback.volume}%, var(--hover) ${playback.volume}%)`}
-      aria-label="Volume"
-    />
+    <span class="vol-slider" class:idle={volIdle} class:key={volKey}>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        step="1"
+        value={playback.volume}
+        oninput={(e) => {
+          setVolume(+e.currentTarget.value);
+          pokeVol();
+        }}
+        onfocus={volFocus}
+        onblur={() => (volKey = false)}
+        onpointermove={pokeVol}
+        onpointerleave={calmVol}
+        style:background={`linear-gradient(to right, var(--accent) ${playback.volume}%, var(--hover) ${playback.volume}%)`}
+        aria-label="Volume"
+      />
+      <!-- Live % readout riding the thumb: visible while hovering, dragging
+           (drag implies hover), or tabbed onto the slider. aria-hidden — the
+           native range already announces its value to assistive tech. -->
+      <span
+        class="vol-tip"
+        aria-hidden="true"
+        style:left={`calc(${playback.volume}% + ${(0.5 - playback.volume / 100) * 14}px)`}
+        >{playback.volume}%</span
+      >
+    </span>
     </div>
   </div>
 
@@ -488,7 +622,7 @@
                 ondblclick={() => setEqBand(i, 0)}
                 oninput={(e) => setEqBand(i, +e.currentTarget.value)}
                 aria-label={`${fmtHz(hz)} Hz`}
-                title={`${fmtHz(hz)} Hz · double-click to zero`}
+                use:tooltip={`${fmtHz(hz)} Hz · double-click to zero`}
               />
             </span>
             <span class="hz">{fmtHz(hz)}</span>
@@ -514,7 +648,7 @@
           <button
             class="q-clear"
             aria-label="Clear queue"
-            title="Remove all queued tracks"
+            use:tooltip={"Remove all queued tracks"}
             onclick={() => void queueClear()}
           >
             Clear
@@ -531,7 +665,7 @@
           <ul class="q-list">
             {#each queueRows as row (row.trackId)}
               <li>
-                <button class="q-row" title="Play now" onclick={() => void queueJump(row.pos)}>
+                <button class="q-row" use:tooltip={"Play now"} onclick={() => void queueJump(row.pos)}>
                   <span class="q-name">{row.title}</span>
                   <span class="q-sub">{row.sub}</span>
                 </button>
@@ -673,6 +807,55 @@
     text-overflow: ellipsis;
   }
 
+  /* Seamless marquee for overlong lines (both rows share it — a long track
+     title overflows exactly the way a long artist — album line does). The
+     viewport keeps the ellipsis rules above as its fallback; .mq-in is the
+     strip that travels (twin gap = MQ_GAP in the action). transform-only,
+     linear: constant speed, GPU path.
+     1.2s delay reads the head on arrival (it applies to the first loop
+     only, then the cycle runs). Hover pauses so a line can be read;
+     .paused (music paused/stopped) parks it — cycling while nothing plays
+     is motion with no job. Reduced motion: no twin, no loop, ellipsis. */
+  .mq-in {
+    display: inline-block;
+    white-space: nowrap;
+    will-change: transform;
+  }
+
+  /* :global(.is-over): added by the action via classList (overflow measured
+     at runtime), so the compiler never sees it — same escape hatch as
+     ArtSelector's as-load. Scoping stays on .mq; only the JS-owned class
+     is global. */
+  .mq:global(.is-over) .mq-in {
+    animation: mq-scroll var(--mq-dur, 8s) linear infinite;
+    animation-delay: 1.2s;
+  }
+
+  @keyframes mq-scroll {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(var(--mq-to));
+    }
+  }
+
+  .playbar.paused .mq-in {
+    animation-play-state: paused;
+  }
+
+  @media (hover: hover) {
+    .mq:hover .mq-in {
+      animation-play-state: paused;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mq:global(.is-over) .mq-in {
+      animation: none;
+    }
+  }
+
   .center {
     display: flex;
     flex-direction: column;
@@ -730,10 +913,37 @@
     max-width: 520px;
   }
 
+  /* Glass slider, same treatment as the volume slider (which had this exact
+   * bug: the native accent-color range insets the thumb's travel but not its
+   * track, so near 100% a sliver of unfilled bar stays visible past the
+   * thumb. With appearance:none the fill gradient IS the whole box). */
   .seek input {
     flex: 1;
-    accent-color: var(--accent);
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--hover);
+    cursor: pointer;
+  }
+
+  .seek input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
     height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .seek input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+  }
+
+  .seek input:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
 
   .time {
@@ -878,6 +1088,62 @@
   .volume input:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 4px;
+  }
+
+  /* % readout riding the thumb (see markup): parked above the track,
+     following the thumb with the standard half-thumb correction (14px
+     thumb), edge to edge — the pill overhangs past the ends rather than
+     detaching from the thumb. Fixed 4ch width (tabular) so it never
+     reflows between "7%" and "100%". Opacity-only entrance — state
+     feedback, not motion — instant under reduced-motion. The idle class
+     (1s without pointer/input) wins over hover/focus so a parked cursor
+     doesn't leave it hanging. */
+  .vol-slider {
+    position: relative;
+    display: flex;
+    flex: none;
+  }
+
+  .vol-tip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    transform: translateX(-50%);
+    padding: 2px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--active);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    backdrop-filter: blur(14px) saturate(160%);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    color: var(--text);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    /* content-box: the app is border-box globally, under which min-width
+       caps padding INCLUDED — "100%" overflowed the 4ch floor and grew.
+       Content-box floors the text (constant) with padding constant outside. */
+    box-sizing: content-box;
+    min-width: 4ch;
+    text-align: center;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms ease-out;
+  }
+
+  .vol-slider:hover .vol-tip,
+  .vol-slider.key .vol-tip {
+    opacity: 1;
+  }
+
+  .vol-slider.idle:hover .vol-tip,
+  .vol-slider.idle.key .vol-tip {
+    opacity: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .vol-tip {
+      transition: none;
+    }
   }
 
   /* --- Equalizer popover (Step 6) ------------------------------------------ */

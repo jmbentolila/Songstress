@@ -45,6 +45,11 @@ pub const MIGRATIONS: &[&str] = &[
     // are flagged at startup by `import::mark_legacy_staged`, which knows where
     // the cache lives and a migration here does not.
     "ALTER TABLE tracks ADD COLUMN staged INTEGER NOT NULL DEFAULT 0;",
+    // v3 — per-track artist. The scan always knew it (guest/feats stay guests
+    // under the albumartist), it just never stored it — so the playbar could
+    // only show the ALBUM artist. Nullable: pre-v3 rows read back NULL until
+    // a rescan fills them, and the frontend falls back to the album artist.
+    "ALTER TABLE tracks ADD COLUMN artist TEXT;",
 ];
 
 fn apply_migrations(conn: &Connection) -> rusqlite::Result<()> {
@@ -120,7 +125,7 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-1', 'Helloween', 'helloween');
              INSERT INTO albums VALUES ('al-1', 'ar-1', 'Giants & Monsters', 2021, NULL, 'ff8800', '0044cc');
              INSERT INTO tracks VALUES ('tr-1', 'al-1', 1, 1, 'Silent Echoes', 336.0,
-                 '/music/helloween/giants/01.flac', 123, 456, 0);",
+                 '/music/helloween/giants/01.flac', 123, 456, 0, NULL);",
         )
         .expect("seed");
         let (title, c1): (String, String) = conn

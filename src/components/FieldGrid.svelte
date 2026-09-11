@@ -23,6 +23,7 @@
     type FieldDef,
     type FieldKey,
   } from "../lib/tagFields";
+  import { tooltip } from "../lib/tooltip";
 
   let {
     edit,
@@ -221,7 +222,7 @@
                 class="te-chip"
                 class:te-chip-on={String(edit[f.key]) === v.value}
                 onclick={() => (edit[f.key] = v.value)}
-                title={`${v.value} — in ${v.count} ${v.count === 1 ? "file" : "files"}`}
+                use:tooltip={`${v.value} — in ${v.count} ${v.count === 1 ? "file" : "files"}`}
               >{v.value}<i>{v.count}</i></button>
             {/each}
           </span>

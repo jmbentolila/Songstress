@@ -104,6 +104,11 @@ for (const seed of seeds) {
       track: (i % perDisc) + 1,
       title,
       durationSec: 180 + Math.floor(rand() * 240),
+      // One guest spot so the playbar's track-artist line has something to
+      // prefer in fake mode; everything else falls back to the album artist.
+      ...(seed.artistId === "various-artists" && i === 1
+        ? { artist: "Guest Vocalist" }
+        : {}),
     });
   }
   tracksByAlbum.set(seed.albumId, tracks);
