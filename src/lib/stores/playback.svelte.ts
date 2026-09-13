@@ -127,6 +127,20 @@ function wireLive(): Promise<void> {
       playback.queue = p.queue ?? [];
       playback.upNext = p.upNext ?? [];
     });
+    // True level as mpv reports it: an external change (MPRIS client, KDE
+    // media widget) used to leave the thumb stale — the "volume dropped on
+    // its own" report. Echoes of our own set_volume land here too and are
+    // ignored by the rounding guard, so there is no feedback loop. Persist
+    // the real value, not the thumb's, so a restart keeps what was heard.
+    await listen("playback-volume", (e) => {
+      const v = Math.min(100, Math.max(0, Math.round(Number(e.payload))));
+      if (!Number.isFinite(v) || v === playback.volume) return;
+      playback.volume = v;
+      try {
+        localStorage.setItem("songstress.volume", JSON.stringify(v));
+        void invoke("set_setting", { key: "volume", value: JSON.stringify(v) }).catch(() => {});
+      } catch { /* private mode */ }
+    });
     // Push the persisted volume into the freshly spawned engine once it has
     // had a moment to come up; harmless if it fails. Same for the persisted
     // EQ (belt and suspenders: Rust also re-applies it from settings at

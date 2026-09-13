@@ -305,6 +305,20 @@ pub fn current_volume() -> f64 {
     f64::from_bits(VOL_BITS.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// Last observed mpv `path` — ground truth for the resync check below.
+static CURRENT_PATH: LazyLock<Mutex<Option<String>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn store_path(p: Option<String>) {
+    *CURRENT_PATH.lock().unwrap() = p;
+}
+
+/// Journal-friendly tail of a library path (the full /home/yossi/... line
+/// drowns the signal one log line per advance is supposed to carry).
+fn file_name(p: &str) -> &str {
+    p.rsplit('/').next().unwrap_or(p)
+}
+
 // --- pending request registry -------------------------------------------------
 // Responses arrive on the reader task while commands await on their own tasks,
 // so the map must be process-global, not thread-local.
@@ -407,8 +421,15 @@ impl Mpv {
         store_volume(initial_volume);
         Self::spawn_reader(&this, reader);
         // mpv pushes NOTHING for these properties until explicitly observed.
-        for (id, prop) in
-            [(1i64, "time-pos"), (2, "duration"), (3, "pause"), (4, "volume")]
+        for (id, prop) in [
+            (1i64, "time-pos"),
+            (2, "duration"),
+            (3, "pause"),
+            (4, "volume"),
+            // `path` is the resync ground truth (2026-09-11 wrap desync):
+            // it changes on every file boundary, whatever Rust thinks.
+            (5, "path"),
+        ]
         {
             let cmd = serde_json::json!(["observe_property", id, prop]);
             if let Err(e) = this.command(cmd).await {
@@ -476,8 +497,28 @@ impl Mpv {
                             }
                             "volume" => {
                                 if let Some(v) = number(&msg, "data") {
+                                    let before = current_volume();
                                     store_volume(v);
+                                    // External changes (MPRIS client, KDE media
+                                    // widget, playerctl) land here with no
+                                    // frontend round-trip, so the thumb would
+                                    // sit stale forever. Mirror it forward;
+                                    // the UI ignores echoes of its own value.
+                                    // The journal line names the suspect when
+                                    // the level moves on its own.
+                                    if (v - before).abs() > f64::EPSILON {
+                                        eprintln!("[mpv] volume {before:.0} -> {v:.0}");
+                                        emit("playback-volume", &v);
+                                    }
                                 }
+                            }
+                            "path" => {
+                                let p = msg
+                                    .get("data")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+                                store_path(p);
+                                this.recheck_path_later();
                             }
                             _ => {}
                         }
@@ -498,8 +539,22 @@ impl Mpv {
                             let before = this.state.lock().unwrap().index;
                             let action = eof_advance(&mut this.state.lock().unwrap());
                             let after = this.state.lock().unwrap().index;
+                            let now = this
+                                .state
+                                .lock()
+                                .unwrap()
+                                .current()
+                                .map(|i| file_name(&i.path).to_string())
+                                .unwrap_or("<none>".into());
+                            let pre_first = match &action {
+                                Some(EofAction::Advance { pre, .. }) => pre
+                                    .first()
+                                    .map(|p| file_name(p).to_string())
+                                    .unwrap_or_default(),
+                                _ => String::new(),
+                            };
                             eprintln!(
-                                "[mpv] end-file reason={} idx={before}->{after} action={action:?}",
+                                "[mpv] end-file reason={} idx={before}->{after} action={action:?} now={now} pre_first={pre_first}",
                                 reason.unwrap_or("?")
                             );
                             match action {
@@ -608,6 +663,50 @@ impl Mpv {
         emit("queue-changed", &QueueEvent { queue, up_next });
     }
 
+    /// Ground-truth resync (2026-09-11 Avantasia wrap): mpv's playlist once
+    /// diverged from Rust's order with no eof trail (UI Stargazers, audio
+    /// Your Love Is Evil), so the observed `path` is authoritative. The
+    /// check runs 500ms after the observation: a matching state is the
+    /// common case — normal eof-first and path-first orderings both settle
+    /// by then — while a lingering mismatch self-heals to the observed file
+    /// with a loud journal line. Never guesses: an unknown path only logs.
+    fn recheck_path_later(self: &Arc<Self>) {
+        let this = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let actual = CURRENT_PATH.lock().unwrap().clone();
+            let mut st = this.state.lock().unwrap();
+            let Some(path) = actual else { return };
+            let Some(cur) = st.current() else { return }; // stopped since
+            if cur.path == path {
+                return; // settled — nothing to do
+            }
+            let expected = cur.path.clone();
+            let before = st.index;
+            match resync_index(&st.order, before, &path) {
+                Some(i) => {
+                    st.index = i;
+                    st.from_queue = false;
+                    eprintln!(
+                        "[mpv] RESYNC idx={before}->{i} now={} (observed; expected {})",
+                        file_name(&path),
+                        file_name(&expected)
+                    );
+                    drop(st);
+                    this.emit_changed();
+                    this.emit_queue_changed();
+                }
+                None => {
+                    eprintln!(
+                        "[mpv] PATH-MISMATCH observed={} expected={} (unknown file — playlist diverged, not correcting)",
+                        file_name(&path),
+                        file_name(&expected)
+                    );
+                }
+            }
+        });
+    }
+
     /// Send a command WITHOUT waiting for its response. Used for playlist
     /// appends: awaiting each one made queue rebuilds take seconds (every
     /// later command queues behind the drain). Responses for unregistered ids
@@ -668,6 +767,11 @@ impl Mpv {
         if start >= order.len() {
             return Err("track index out of range".into());
         }
+        eprintln!(
+            "[mpv] play_order start={start} len={} file={}",
+            order.len(),
+            file_name(&order[start].path)
+        );
         let (shuffle, repeat) = {
             let st = self.state.lock().unwrap();
             (st.shuffle, st.repeat)
@@ -714,8 +818,9 @@ impl Mpv {
     /// the order resumes (MPRIS Next goes through here too). Previous from a
     /// promoted queue entry returns to the order entry before it.
     pub async fn jump(&self, delta: i64) -> Result<(), String> {
-        let (index, paths) = {
+        let (from, index, paths) = {
             let mut st = self.state.lock().unwrap();
+            let from = st.index;
             if st.current().is_none() {
                 return Ok(());
             }
@@ -763,8 +868,12 @@ impl Mpv {
             st.paused = false;
             // The queue rebuild discards any pre-appended next pass.
             st.wrapped = None;
-            (st.index, st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+            (from, st.index, st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
         };
+        eprintln!(
+            "[mpv] jump delta={delta} idx={from}->{index} file={}",
+            paths.get(index).map(|p| file_name(p)).unwrap_or("<none>")
+        );
         store_duration(0.0);
         store_position(0.0);
         self.load_queue(index, &paths, true).await;
@@ -868,6 +977,10 @@ impl Mpv {
             st.wrapped = None;
             (st.index, st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
         };
+        eprintln!(
+            "[mpv] queue_jump pos={pos} idx={index} file={}",
+            paths.get(index).map(|p| file_name(p)).unwrap_or("<none>")
+        );
         store_duration(0.0);
         store_position(0.0);
         self.load_queue(index, &paths, true).await;
@@ -936,6 +1049,11 @@ impl Mpv {
                     let st = self.state.lock().unwrap();
                     st.order.iter().map(|i| i.path.clone()).collect()
                 };
+                eprintln!(
+                    "[mpv] shuffle-rebuild stage={} idx={start} len={}",
+                    stage.as_str(),
+                    paths.len()
+                );
                 // Current file keeps playing; only the upcoming queue swaps.
                 self.load_queue(start, &paths, false).await;
             }
@@ -968,6 +1086,13 @@ impl Mpv {
             }
         };
         if let Some(paths) = pre_wrap {
+            if let Some(first) = paths.first() {
+                eprintln!(
+                    "[mpv] repeat-arm {} files first={}",
+                    paths.len(),
+                    file_name(first)
+                );
+            }
             for p in paths {
                 self.fire(serde_json::json!(["loadfile", p, "append-play"]));
             }
@@ -1067,6 +1192,15 @@ fn pre_arm_if_last(st: &mut PlayState) -> Vec<String> {
     } else {
         Vec::new()
     }
+}
+
+/// Where the observed path sits in the order, if anywhere: None = already
+/// current (or order empty / unknown file — the caller logs, never guesses).
+fn resync_index(order: &[OrderItem], index: usize, actual: &str) -> Option<usize> {
+    if order.get(index).is_some_and(|c| c.path == actual) {
+        return None;
+    }
+    order.iter().position(|i| i.path == actual)
 }
 
 pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
@@ -1451,5 +1585,28 @@ mod tests {
         };
         assert!(matches!(eof_advance(&mut st), Some(EofAction::Advance { .. })));
         assert_eq!(st.current().unwrap().track_id, "q1");
+    }
+
+    // --- path resync (2026-09-11 wrap desync) -------------------------------
+
+    #[test]
+    fn resync_matching_path_is_none() {
+        let order = order_of(&["a", "b", "c"]);
+        assert_eq!(resync_index(&order, 1, "/b.mp3"), None);
+    }
+
+    #[test]
+    fn resync_finds_forward_and_backward_entries() {
+        // The Avantasia case: Rust at 0 (Stargazers), mpv playing order[2].
+        let order = order_of(&["a", "b", "c"]);
+        assert_eq!(resync_index(&order, 0, "/c.mp3"), Some(2));
+        assert_eq!(resync_index(&order, 2, "/a.mp3"), Some(0));
+    }
+
+    #[test]
+    fn resync_unknown_file_is_none_so_the_caller_only_logs() {
+        let order = order_of(&["a", "b"]);
+        assert_eq!(resync_index(&order, 0, "/stale-append.mp3"), None);
+        assert_eq!(resync_index(&[], 0, "/a.mp3"), None);
     }
 }

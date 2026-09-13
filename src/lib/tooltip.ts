@@ -31,6 +31,14 @@ function ensure(): HTMLElement {
     if (e.key === "Escape") hide();
   });
   window.addEventListener("pointerdown", hide, true);
+  // Stuck-tip guard: minimizing with the pointer over an anchor (or with a
+  // pending show-timer) fires no mouseleave, so the timer would pop the tip
+  // while hidden and it would still be up on restore — until another anchor
+  // steals it. A window blur cancels the pending show and drops a visible tip.
+  window.addEventListener("blur", hide);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hide();
+  });
   return tip;
 }
 

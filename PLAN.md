@@ -4126,6 +4126,11 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   ground-truth resync off observed `path` — behavior risk with no repro to
   validate against; revisit with logs in hand.
 
+### Wrap desync recurred with proof — path resync shipped (2026-09-11, Avantasia "Angel Of Babylon")
+
+  The Sept-6 Avalon ghost came back, this time with the new eof logging to convict with. Passive listening, repeat=album, 11-track album: at the wrap the playbar showed Stargazers at 0:56 / 3:52 — but Stargazers is 571s and 3:52 is Your Love Is Evil (232.8s, DB-verified). `upNext` (Angel / Your Love / Death) proved Rust sat at index 0 while mpv played a 232s file starting at the wrap instant. The eof trail is unambiguous: single `10->0` at 16:50:55, NO `0->1`/`1->2` after — Rust never double-advanced, so mpv's playlist diverged from Rust's order with zero eof trail. The Sept-6 top-up fix is exonerated (N=11 < 32, and the trail shows no duplicate). What the trail still cannot show is the mpv-side playlist CONTENT at the wrap (pre-arm is logged only as a count) — the divergence mechanism itself remains unproven (candidates: stale fire-and-forget appends landing after a later playlist-clear during rapid rebuilds; a toggle re-arm; none confirmed).
+  Shipped the item deliberately deferred on Sept 6, now justified: (1) ground-truth resync — mpv `path` is now an observed property (id 5); every change schedules a 500ms delayed recheck (both eof-first and path-first orderings settle by then), and a lingering mismatch self-heals Rust's index to the observed file with a loud `[mpv] RESYNC` line, or `[mpv] PATH-MISMATCH` when the file is unknown (log, never guess). Normal advances recheck clean and stay silent. (2) The silent-path blind spot is closed: one journal line per index-changing op (`play_order`, `jump`, `queue_jump`, `shuffle-rebuild`, `repeat-arm` with first file), and every end-file line now carries `now=` (current file) + `pre_first=` (what the armed pass starts with) — the exact evidence missing today. A second `10->0` 7 min after the screenshot needs index 10 just before, reachable only via those now-logged silent paths (owner's own post-screenshot clicking is the working theory, unconfirmed). Pure-fn `resync_index` + 3 unit tests. Gates: cargo 103, check 0/0, vitest 97, build ok. RPM `Songstress-0.10.1-1.x86_64.rpm` built + verified (Name songstress, Requires mpv + kdialog) — handed to owner for `dnf install` + window-drag protocol. Version 0.10.1 (patch: wrap-desync resync + op logging).
+
 ### Repeat-wrap appended track #32 twice on >32-track albums (2026-09-06, found during the above audit)
 
   At every gapless/queue-drained wrap promote, eof_advance appended
@@ -4322,3 +4327,30 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   "Broken UI" same night: NOT the tooltips — global-sheet HMR rot (--gap
   computed "", all theme tokens dead after the long hot-edit series).
   Fixed with `touch src/app.css` (seconds, zero restarts); `--gap` back.
+
+### Stuck seek tooltip after minimize + external-volume thumb sync (2026-09-13, owner report)
+
+  Two reports, one session. (1) Restoring the minimized window with the
+  pointer over the seek bar left its "Seek" tip up until another anchor
+  stole it: minimize fires no mouseleave, so the 350ms show-timer popped
+  while hidden and greeted the restore. Fix: tooltip hides + cancels on
+  window blur and on document hidden (tooltip.ts ensure()). (2) Output
+  level dropping on its own (thumb unmoved, master max; once mid-game):
+  any MPRIS client (KDE media widget, playerctl) lowering mpv's volume
+  never reached the thumb — Rust observed it but told nobody, so the UI
+  kept showing the old value. Fix: the volume observer now emits
+  `playback-volume` + a `[mpv] volume a -> b` journal line, and the
+  playback store mirrors it into thumb + localStorage + settings (echoes
+  of our own sets ignored by the rounding guard, no loop). NOT covered:
+  replaygain=album (per-track gain, volume property untouched — a quiet
+  master on one album is expected) and OS-level ducking (PipeWire
+  role-duck lowers the sink outside mpv entirely; nothing to mirror).
+
+  Follow-up (same day): owner confirms the dip was MID-TRACK — rules out
+  replaygain (per-track gain). System probe finds PipeWire role-based
+  ducking live (`linking.role-based.duck-level = 0.3`): a game stream ducks
+  music to 30% below mpv entirely — no property changes, nothing to mirror,
+  master untouched. Verdict: the game dip was the audio server, not the
+  app. The new thumb-mirror + journal line now separate the two worlds:
+  thumb moves = something drove mpv (logged); thumb still + quiet = the
+  server ducked it.
