@@ -33,7 +33,7 @@
     ],
     "linux": {
       "rpm": {
-        "release": "1",
+        "release": "2",
         "depends": [
           "mpv",
           "kdialog"

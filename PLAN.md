@@ -4354,3 +4354,10 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   app. The new thumb-mirror + journal line now separate the two worlds:
   thumb moves = something drove mpv (logged); thumb still + quiet = the
   server ducked it.
+
+### RPM release bump 0.10.1-1 → -2 (2026-09-13)
+
+  0.10.1-1 was already built + installed from the intermediate tree, so the
+  fixed RPM read as "already installed" (same EVR, no upgrade). Rule: a
+  rebuild with an unchanged version bumps the rpm `release` instead.
+  The three version files stay 0.10.1 — release is packaging revision.
