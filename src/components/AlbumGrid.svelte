@@ -52,11 +52,66 @@
 
   let cols = $derived(columnCount(gridWidth, ui.tileSize, GAP));
 
+  // Artist-switch bridge (owner request 2026-09-14): every artist tab
+  // switch replays a fast variant of the arrival cascade — the old grid
+  // sinks out, the new one rises in. The boot dials (320 ms + 540 ms cap)
+  // are the rare-tier budget; a tab switch fires tens of times a day, so
+  // this runs quicker and shorter (160 ms exit, 260 ms rise, 240 ms cap).
+  // The swap is decoupled from the store: `displayedArtistId` holds the old
+  // list through the exit, flips at the bottom, then the entrance plays on
+  // the fresh rows. The exit is a TRANSITION (not keyframes) so rapid
+  // re-clicks retarget from the presentation value instead of restarting
+  // from zero. Search keystrokes never enter here — only artist switches.
+  const SWITCH_EXIT_MS = 160;
+  const SWITCH_ENTER_MS = 600;
+  let displayedArtistId = $state(ui.activeArtistId);
+  let leaving = $state(false);
+  let switchEnter = $state(false);
+  let switchTimers: ReturnType<typeof setTimeout>[] = [];
+
+  function clearSwitchTimers() {
+    for (const t of switchTimers) clearTimeout(t);
+    switchTimers = [];
+  }
+
+  $effect(() => {
+    const next = ui.activeArtistId;
+    if (next === displayedArtistId) return;
+    clearSwitchTimers();
+    const resetScroll = () => {
+      const sc = document.querySelector<HTMLElement>("main.content");
+      if (sc) sc.scrollTop = 0;
+    };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      displayedArtistId = next;
+      resetScroll();
+      return;
+    }
+    // Abort a still-playing entrance: its rows unmount at the swap anyway.
+    switchEnter = false;
+    leaving = true;
+    switchTimers.push(
+      setTimeout(() => {
+        displayedArtistId = next;
+        leaving = false;
+        // Scroll + entrance start with the new rows (Sidebar's select()
+        // leaves the scroll alone on a real switch, so a mid-exit re-click
+        // can't strand the view).
+        resetScroll();
+        switchEnter = true;
+        switchTimers.push(setTimeout(() => (switchEnter = false), SWITCH_ENTER_MS));
+      }, SWITCH_EXIT_MS),
+    );
+  });
+
   // All Artists: alphabetical by artist (sort_name), then year ascending
-  // within each artist. Artist view: year ascending (store order).
+  // within each artist. Artist view: year ascending (store order). Reads
+  // displayedArtistId — the switch bridge holds the old artist through the
+  // exit and flips at the bottom, so the store and the rows never disagree
+  // mid-flight.
   let visibleAlbums = $derived.by(() => {
-    if (ui.activeArtistId !== "all") {
-      return library.albums.filter((a) => a.artistId === ui.activeArtistId);
+    if (displayedArtistId !== "all") {
+      return library.albums.filter((a) => a.artistId === displayedArtistId);
     }
     return [...library.albums].sort((a, b) => {
       const an = library.artistOf(a)?.sortName ?? "";
@@ -485,7 +540,13 @@
 </script>
 
 <main class="content" bind:clientHeight={stageHeight} aria-busy={loading}>
-  <div class="grid" class:enter={library.entering} bind:clientWidth={gridWidth}>
+  <div
+    class="grid"
+    class:enter={library.entering || switchEnter}
+    class:switch-enter={switchEnter}
+    class:leaving
+    bind:clientWidth={gridWidth}
+  >
     {#if loading}
       <div class="sk-holder" transition:fade={SK_FADE}>
         <GridSkeleton {cols} rows={skRows} />
@@ -537,7 +598,7 @@
                   <span class="caption">
                     <span class="t">{album.title}</span>
                     <span class="sub">
-                      {ui.activeArtistId === "all" ? library.artistOf(album)?.name : album.year}
+                      {displayedArtistId === "all" ? library.artistOf(album)?.name : album.year}
                     </span>
                   </span>
                 </button>
@@ -658,6 +719,30 @@
     display: flex;
     flex-direction: column;
     gap: var(--gap);
+    /* The artist-switch exit (see the switch bridge in <script>): the whole
+       grid sinks + fades as one surface — transform/opacity only, compositor.
+       A transition so rapid re-clicks retarget from the presentation value.
+       Reduced motion collapses it via the global kill switch (duration
+       0.01 ms), so no local reduce rule is needed. */
+    transition:
+      opacity 160ms var(--ease-out),
+      transform 160ms var(--ease-out);
+  }
+
+  .grid.leaving {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  /* The switch entrance: the same rise-and-fade path as boot, but the
+     tens-of-times-a-day dials — 260 ms, a 40 ms diagonal step capped at
+     240 ms, 12 px of travel. Specificity (3 classes) beats the boot rule
+     it narrows. */
+  .grid.enter.switch-enter .tile {
+    --enter-dur: 260ms;
+    --enter-step: 40ms;
+    --enter-cap: 240ms;
+    --enter-rise: 12px;
   }
 
   .grid-row {
@@ -747,7 +832,8 @@
   /* Reduce: the global kill switch owns the duration, this owns the travel and the
      ladder. Specificity has to reach `.grid.enter .tile` for the delay to lose. */
   @media (prefers-reduced-motion: reduce) {
-    .grid.enter .tile {
+    .grid.enter .tile,
+    .grid.enter.switch-enter .tile {
       animation-delay: 0s;
       animation-play-state: paused;
     }

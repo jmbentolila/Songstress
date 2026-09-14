@@ -492,6 +492,7 @@
   });
 
   function select(id: string) {
+    const switched = ui.activeArtistId !== id;
     ui.activeArtistId = id;
     ui.expandedAlbum.songs = null;
     ui.expandedAlbum.albums = null;
@@ -500,7 +501,12 @@
     // already on. Collapsing the panel shrinks the content under the
     // scroller, so a kept scrollTop strands the view mid-grid ("middle of
     // nowhere"). Instant, not smooth: the rows are being replaced anyway,
-    // and a glide would chase a layout that's still collapsing.
+    // and a glide would chase a layout that's still collapsing. On a REAL
+    // switch the grid owns the reset: it holds the old list through a 160 ms
+    // exit, so resetting here would jump the fading rows — the reset lands
+    // at the swap (AlbumGrid's switch bridge), when the new rows mount.
+    // Re-clicking the same artist still pops straight to the top here.
+    if (switched) return;
     const scroller = document.querySelector<HTMLElement>("main.content");
     if (scroller) scroller.scrollTop = 0;
   }

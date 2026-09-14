@@ -70,6 +70,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Expand/modal jank audit: content-visibility tried and REVERTED (clips outset rings; owner confirmed rings whole again); worst cases are single mount-burst frames on 200+ row content — accepted as known characteristic, standard sizes hold 60fps | ✅ 2026-09-06 |
 | Perf: 53-track 4-disc ROTK expands at locked 60fps (zero dropped frames); worst-case single mount bursts only on 200+ row compilations | ✅ 2026-09-06 |
 | EQ + 32 kHz sources: Nyquist-unstable 16 kHz band railed output (silence + pops) → `aresample=48000` pinned in chain + `gapless-audio=weak` | ✅ 2026-09-06 |
+| Artist-switch bridge: every artist tab replays a fast arrival variant (130 ms sink-out, 200 ms rise-in) | ✅ 2026-09-14 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -4377,3 +4378,23 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   via devctl: synthetic enter → no tip, programmatic focus → no tip, real
   move + enter → tip shows. Earlier false-negative on the positive control
   was HMR-mixed module state, cleared by the restart.
+
+### Artist-switch bridge (2026-09-14, owner request)
+
+  Every artist tab switch now replays the population animation: the current
+  grid sinks + fades out (160 ms, whole-grid transition) and the new grid
+  rises + fades in on the boot cascade's diagonal (260 ms, 40 ms step capped
+  at 240 ms, 12 px travel). The boot dials (320 ms + 540 ms cap) are the
+  rare-tier budget; a tab switch fires tens of times a day, so this runs the
+  fast/subtle variant (animate-skill gate: tens/day = near-imperceptible).
+  Mechanism: `displayedArtistId` in AlbumGrid holds the old list through the
+  exit and flips at the bottom; the exit is a transition so rapid re-clicks
+  retarget from the presentation value. Sidebar's select() leaves scrollTop
+  alone on a real switch — the reset lands at the swap — and still pops to
+  the top on a same-artist re-click. Search keystrokes never enter the
+  bridge (keystroke tier stays silent). Reduced motion: instant swap, no
+  travel, via the existing global kill switch + matching reduce specificity.
+  Caption sub-label reads displayedArtistId so the fading rows keep the right
+  voice (year vs artist name). Gates: check 0 errors, vitest 97 green, build
+  OK. Feel-check open: play it in the app — if the 130 ms exit reads as a
+  blink rather than a hand-over, raise EXIT to ~160 ms.
