@@ -4361,3 +4361,19 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   fixed RPM read as "already installed" (same EVR, no upgrade). Rule: a
   rebuild with an unchanged version bumps the rpm `release` instead.
   The three version files stay 0.10.1 — release is packaging revision.
+
+### Stuck seek tip, round 2 (2026-09-13, still sticking after the blur fix)
+
+  The blur/visibility fix only cancelled a *pending* timer — the restore has
+  two hotter paths: a SYNTHETIC mouseenter (window remaps under a stationary
+  pointer, no matching leave ever comes) and refired focus (a dragged slider
+  parks DOM focus; the cycle re-arms it with the pointer nowhere near).
+  Fix in tooltip.ts: a `seenMove` gate — blur/hide/activation disarm hover,
+  only a real pointermove re-arms — plus focus tips require `:focus-visible`
+  (keyboard-driven focus; mouse users get the hover tip). Probe hole found
+  live: the wiring lived in `ensure()` (first-show), so a session whose FIRST
+  trigger was the synthetic enter had nothing disarmed — guards now run at
+  module load (window flag dedupes HMR re-imports). Verified on a cold unit
+  via devctl: synthetic enter → no tip, programmatic focus → no tip, real
+  move + enter → tip shows. Earlier false-negative on the positive control
+  was HMR-mixed module state, cleared by the restart.

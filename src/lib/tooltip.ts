@@ -17,6 +17,11 @@
 let tip: HTMLElement | null = null;
 let current: HTMLElement | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
+// True only after a real pointer move since the last blur/hide/activation:
+// a restore remaps the window under a stationary pointer and the engine
+// delivers a SYNTHETIC mouseenter for it — arming from that is the stuck
+// tip (nothing ever sends the matching leave).
+let seenMove = true;
 
 function ensure(): HTMLElement {
   if (tip) return tip;
@@ -26,20 +31,53 @@ function ensure(): HTMLElement {
   tip.setAttribute("role", "tooltip");
   tip.hidden = true;
   document.body.appendChild(tip);
+  return tip;
+}
+
+// Page-load guards, NOT first-show guards (stuck-tip hole, found live
+// 2026-09-14): the wiring above used to run inside ensure(), so when the
+// session's FIRST trigger was itself the synthetic restore-enter, nothing
+// was disarmed yet and the tip raised. The window flag survives HMR
+// re-imports (dev-only) so a hot edit doesn't stack duplicate listeners.
+// Stuck-tip guard (minimize/restore cycle): the restore can deliver a
+// synthetic mouseenter for a pointer that never moved, and can refire
+// focus on whatever held it (a dragged slider parks focus as a side
+// effect) — either raises the tip with nothing to dismiss it until
+// another anchor steals it. So blur/hide/activation disarm hover and drop
+// a visible tip; only a real pointer move re-arms. Focus tips are gated
+// separately below (:focus-visible — keyboard-driven focus only).
+if (
+  typeof window !== "undefined" &&
+  !(window as unknown as Record<string, unknown>).__songstressTipWired
+) {
+  (window as unknown as Record<string, unknown>).__songstressTipWired = true;
   window.addEventListener("scroll", hide, true);
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hide();
   });
   window.addEventListener("pointerdown", hide, true);
-  // Stuck-tip guard: minimizing with the pointer over an anchor (or with a
-  // pending show-timer) fires no mouseleave, so the timer would pop the tip
-  // while hidden and it would still be up on restore — until another anchor
-  // steals it. A window blur cancels the pending show and drops a visible tip.
-  window.addEventListener("blur", hide);
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) hide();
+  window.addEventListener("blur", () => {
+    seenMove = false;
+    hide();
   });
-  return tip;
+  // A fresh activation is not a hover: any mouseenter arriving without an
+  // intervening pointermove is the remap talking, not the user.
+  window.addEventListener("focus", () => {
+    seenMove = false;
+  });
+  window.addEventListener(
+    "pointermove",
+    () => {
+      seenMove = true;
+    },
+    true,
+  );
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      seenMove = false;
+      hide();
+    }
+  });
 }
 
 function hide() {
@@ -90,8 +128,16 @@ function arm(node: HTMLElement, ms: number) {
 /** `use:tooltip={text}` — replaces `title={text}`. Null/undefined disables. */
 export function tooltip(node: HTMLElement, text: string | null | undefined) {
   const original = node.getAttribute("title");
-  const onEnter = () => arm(node, 350);
-  const onFocus = () => arm(node, 150);
+  const onEnter = () => {
+    if (!seenMove) return;
+    arm(node, 350);
+  };
+  const onFocus = () => {
+    // Stale-focus guard: the other half of the stuck seek tip. Focus that
+    // wasn't keyboard-driven (a parked slider focus refired by the restore)
+    // needs no tip — mouse users get the hover one.
+    if (node.matches(":focus-visible")) arm(node, 150);
+  };
   const onLeave = () => {
     if (current !== node) clearTimeout(timer);
     else hide();
