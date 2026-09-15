@@ -838,7 +838,6 @@ pub(crate) mod colors {
             if *n * 50 < total_px || dist(*c, hot_c) == 0 {
                 continue;
             }
-            let d = dist(*c, hot_c);
             let score = match (hot_hue, hue_deg(*c)) {
                 (Some(h), Some(hc)) => (hue_dist(h, hc) * chroma(*c) as f32) as u32,
                 _ => 0,
