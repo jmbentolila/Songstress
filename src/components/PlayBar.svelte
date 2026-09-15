@@ -167,8 +167,16 @@
   // Shows whenever a track is loaded (paused included); stopped = plain chrome.
   // Stops are lightness-clamped so text/icons always clear WCAG contrast.
   let backdrop = $derived.by(() => {
-    if (!ui.playbarGradient || !album?.colorC1 || !album?.colorC2) return null;
-    return artGradientContrast(album.colorC1, album.colorC2, resolvedTheme(), 0.7);
+    if (!ui.playbarGradient || !album) return null;
+    // The panel override wins here too (Step 9b): the playbar wears what
+    // the panel wears. Unparseable overrides fall through to the scan
+    // colors — same promise as the panel, and the contrast clamp below
+    // still applies to custom hex (unlike the panel's raw builder).
+    const o = ui.panelGradients[album.id];
+    const c1 = o?.c1 ?? album.colorC1;
+    const c2 = o?.c2 ?? album.colorC2;
+    if (!c1 || !c2) return null;
+    return artGradientContrast(c1, c2, resolvedTheme(), 0.7);
   });
 
   // The gradient cannot crossfade itself — CSS does not interpolate one

@@ -7,6 +7,7 @@ import {
   ensureContrast,
   hexToRgb,
   mixedColor,
+  normalizeHex,
 } from "./gradient";
 import type { RGB } from "./artColors";
 
@@ -57,5 +58,22 @@ describe("gradient contrast guarantee", () => {
 
   it("returns null on invalid hex", () => {
     expect(artGradientContrast("zzzzzz", "123456", "dark", 0.7)).toBeNull();
+  });
+});
+
+describe("normalizeHex", () => {
+  it("accepts bare, hashed and shorthand forms", () => {
+    expect(normalizeHex("ff6ec7")).toBe("ff6ec7");
+    expect(normalizeHex("#FF6EC7")).toBe("ff6ec7");
+    expect(normalizeHex("#abc")).toBe("aabbcc");
+    expect(normalizeHex("abc")).toBe("aabbcc");
+    expect(normalizeHex("  #123456  ")).toBe("123456");
+  });
+
+  it("rejects non-hex", () => {
+    expect(normalizeHex("")).toBeNull();
+    expect(normalizeHex("zzzzzz")).toBeNull();
+    expect(normalizeHex("#12345")).toBeNull();
+    expect(normalizeHex("red")).toBeNull();
   });
 });

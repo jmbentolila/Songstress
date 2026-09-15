@@ -127,6 +127,21 @@ class LibraryStore {
         (firstDump || (this.albums.length === 0 && (fromScan || this.scanning)));
       this.artists = dump.artists;
       this.albums = byYear(dump.albums);
+      // Orphaned panel-gradient overrides (Step 9b prune): an album id
+      // derives from its path, so a moved/renamed/regrouped album strands
+      // its entry. Drop them on every successful dump — boot AND rescans —
+      // but only against a LIVE dump (the fake library's ids would wipe
+      // real overrides in dev). Assigns only when something actually died,
+      // so quiet loads never churn the persisted settings.
+      if (this.live) {
+        const known = new Set(dump.albums.map((a) => a.id));
+        const stale = Object.keys(ui.panelGradients).filter((id) => !known.has(id));
+        if (stale.length > 0) {
+          const kept = { ...ui.panelGradients };
+          for (const id of stale) delete kept[id];
+          ui.panelGradients = kept;
+        }
+      }
       this.trackCount = dump.tracks.length;
       this.#byAlbum = new Map<string, Track[]>();
       for (const t of dump.tracks) {

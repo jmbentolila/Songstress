@@ -39,6 +39,7 @@
     void library.albums.length;
     void ui.theme;
     void ui.playbarGradient;
+    void ui.albumGradient;
     pushMenuState();
   });
 
@@ -98,11 +99,21 @@
       "songstress.playbarGradient",
       JSON.stringify(ui.playbarGradient),
     );
+    localStorage.setItem(
+      "songstress.albumGradient",
+      JSON.stringify(ui.albumGradient),
+    );
+    localStorage.setItem(
+      "songstress.panelGradients",
+      JSON.stringify(ui.panelGradients),
+    );
     localStorage.setItem("songstress.accentColor", JSON.stringify(ui.accentColor));
     pushSetting("theme", ui.theme);
     pushSetting("tileSize", ui.tileSize);
     pushSetting("sidebarRowSize", ui.sidebarRowSize);
     pushSetting("playbarGradient", ui.playbarGradient);
+    pushSetting("albumGradient", ui.albumGradient);
+    pushSetting("panelGradients", ui.panelGradients);
     pushSetting("accentColor", ui.accentColor);
   });
 </script>

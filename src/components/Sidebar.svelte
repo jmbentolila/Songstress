@@ -860,6 +860,11 @@
                  the group's 12px peer gap applies above it, to the segment. -->
             <div class="rows">
               <Toggle
+                checked={ui.albumGradient}
+                label="Album artwork gradient"
+                onchange={(on) => (ui.albumGradient = on)}
+              />
+              <Toggle
                 checked={ui.playbarGradient}
                 label="Playbar artwork gradient"
                 onchange={(on) => (ui.playbarGradient = on)}

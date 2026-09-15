@@ -50,6 +50,20 @@ pub const MIGRATIONS: &[&str] = &[
     // only show the ALBUM artist. Nullable: pre-v3 rows read back NULL until
     // a rescan fills them, and the frontend falls back to the album artist.
     "ALTER TABLE tracks ADD COLUMN artist TEXT;",
+    // v4 — re-extract panel colors under the Step 9b rule (two named hues:
+    // most vivid significant family + most colorful distant family, quiet
+    // first — never the whole-artwork average, which photographed bimodal
+    // art as mud). NULLing refills them through the normal artwork refresh
+    // on the next scan; covers are untouched, so no thumbnail churn beyond
+    // a byte-identical rewrite. Settings overrides win at render time and
+    // are unaffected by this migration either way.
+    "UPDATE albums SET color_c1 = NULL, color_c2 = NULL;",
+    // v5 — same refill, second round: the anchor score is now hue
+    // opposition × chroma (RGB distance let warm-grey mush outscore the
+    // real complement — measured tan beating teal on Moonflower). Mush is
+    // hue-adjacent to every hot star by construction, so whatever wins now
+    // is the greenest distant region available, never the mud.
+    "UPDATE albums SET color_c1 = NULL, color_c2 = NULL;",
 ];
 
 fn apply_migrations(conn: &Connection) -> rusqlite::Result<()> {

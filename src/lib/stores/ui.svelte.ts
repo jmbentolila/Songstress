@@ -30,6 +30,17 @@ export const ui = $state({
   sidebarRowSize: load("songstress.sidebarRowSize", DEFAULT_SIDEBAR_ROWS),
   /** Playbar backdrop = artwork gradient while something is playing (Step 2b). */
   playbarGradient: load("songstress.playbarGradient", false),
+  /** Expanded-panel artwork gradient (Step 9b). True = the shipped look;
+   *  false = plain --panel-bg everywhere, per-album overrides included. */
+  albumGradient: load("songstress.albumGradient", true),
+  /** Per-album gradient overrides (Step 9b): album id → raw hex pair in DB
+   *  form (6-digit, no #). Wins over the scan colors; clearing the entry
+   *  returns the album to its artwork colors. Your hex, your problem — no
+   *  contrast clamping (unlike the playbar's artGradientContrast). */
+  panelGradients: load<Record<string, { c1: string; c2: string }>>(
+    "songstress.panelGradients",
+    {},
+  ),
   /** Accent color (Step 4) — ONE hex; null = stock purple from app.css. */
   accentColor: load<string | null>("songstress.accentColor", null),
   /** In-sidebar menu (Step 8b, iOS Settings-style stack): gear swaps the
@@ -97,6 +108,22 @@ export function resetAppearance() {
   ui.theme = "system";
   ui.accentColor = null;
   ui.playbarGradient = false; // the pane's other visible control; reset means reset
+  ui.albumGradient = true;
+  ui.panelGradients = {}; // custom panel colors are appearance too
+}
+
+/** Per-album panel gradient override (Step 9b): hex WITHOUT # (DB form).
+ *  Applies instantly — this is display state, not file tags, so it never
+ *  waits for the modal's Save. Survives rescans: it lives in settings,
+ *  keyed by album id, never in the color_c1/c2 columns a scan rewrites. */
+export function setPanelGradient(albumId: string, c1: string, c2: string) {
+  ui.panelGradients = { ...ui.panelGradients, [albumId]: { c1, c2 } };
+}
+
+/** Forget the override: the album returns to its artwork colors. */
+export function clearPanelGradient(albumId: string) {
+  const { [albumId]: _, ...rest } = ui.panelGradients;
+  ui.panelGradients = rest;
 }
 
 // --- SQLite-backed settings (Phase 2 M4) ------------------------------------
@@ -139,6 +166,8 @@ export async function initSettings() {
           tileSize: JSON.stringify(ui.tileSize),
           sidebarRowSize: JSON.stringify(ui.sidebarRowSize),
           playbarGradient: JSON.stringify(ui.playbarGradient),
+          albumGradient: JSON.stringify(ui.albumGradient),
+          panelGradients: JSON.stringify(ui.panelGradients),
           accentColor: JSON.stringify(ui.accentColor),
         },
       });
@@ -155,6 +184,11 @@ export async function initSettings() {
     ui.tileSize = parse<number>("tileSize", ui.tileSize);
     ui.sidebarRowSize = parse<number>("sidebarRowSize", ui.sidebarRowSize);
     ui.playbarGradient = parse<boolean>("playbarGradient", ui.playbarGradient);
+    ui.albumGradient = parse<boolean>("albumGradient", ui.albumGradient);
+    ui.panelGradients = parse<typeof ui.panelGradients>(
+      "panelGradients",
+      ui.panelGradients,
+    );
     ui.accentColor = parse<string | null>("accentColor", ui.accentColor);
     // musicDirs is the migrated multi-root list (setup writes it from the
     // legacy musicDir on first launch); parse falls back to [] when absent.

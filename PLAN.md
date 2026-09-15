@@ -71,6 +71,8 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Perf: 53-track 4-disc ROTK expands at locked 60fps (zero dropped frames); worst-case single mount bursts only on 200+ row compilations | ✅ 2026-09-06 |
 | EQ + 32 kHz sources: Nyquist-unstable 16 kHz band railed output (silence + pops) → `aresample=48000` pinned in chain + `gapless-audio=weak` | ✅ 2026-09-06 |
 | Artist-switch bridge: every artist tab replays a fast arrival variant (130 ms sink-out, 200 ms rise-in) | ✅ 2026-09-14 |
+| Album panel gradients: per-album hex overrides (album edit modal, below the artwork) + global kill switch (Appearance + Global Menu) | ✅ 2026-09-15 |
+| Screen dropper in the gradient editor (portal PickColor crosshair, per stop) | 🔶 2026-09-15 — shipped, needs one live pick + one Esc in the app |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -4398,3 +4400,129 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   voice (year vs artist name). Gates: check 0 errors, vitest 97 green, build
   OK. Feel-check open: play it in the app — if the 130 ms exit reads as a
   blink rather than a hand-over, raise EXIT to ~160 ms.
+
+### Album panel gradients: per-album overrides + global switch (2026-09-15, owner request)
+
+  Feasibility question ("let the user change the hex gradient points?") →
+  yes, shipped same session plus the two follow-ups: a global kill switch
+  like the playbar's, and the editor living in the space below the artwork
+  column of the album edit modal.
+  - Store: `ui.albumGradient` (default true) + `ui.panelGradients`
+    (album id → {c1, c2} in DB hex form) in ui.svelte.ts — localStorage
+    mirror + SQLite via the existing App effect/initSettings plumbing;
+    `setPanelGradient`/`clearPanelGradient` helpers; Reset appearance
+    restores both (toggle → true, overrides → {}).
+  - Panel: ExpandedPanel's gradient effect checks the kill switch first
+    (off = plain --panel-bg, overrides included — no half-state), then the
+    override, then scan colors, then extraction. Corrupt override entries
+    fall through to artwork colors instead of blanking the panel.
+  - Editor: new PanelGradient.svelte under the ArtSelector in a `.te-artcol`
+    stack — preview strip, two swatch+hex rows (native color inputs synced
+    to free hex text via `normalizeHex` in gradient.ts: #rrggbb/rrggbb/#rgb),
+    "Use artwork colors" reset. Applies instantly (display state, not file
+    tags — never waits for Save); half-typed text writes nothing, the panel
+    keeps the last good pair. Your hex, your problem: no contrast clamp.
+    Off-state shows the Appearance pointer note.
+  - Surfaces: Appearance pane Toggle ("Album artwork gradient") + Global
+    Menu `appearance.album-gradient` row (menu.rs field with default-true,
+    menu.svelte.ts handler + pushMenuState, new Rust test).
+  - Gates: check 0 errors, vitest 99 green (2 new normalizeHex), cargo 104
+    green (1 new), build OK. No visual pass taken — owner drives the UI.
+
+### Screen dropper in the gradient editor (2026-09-15, owner request)
+
+  "Can we get a dropper icon?" — the web EyeDropper API is ABSENT in this
+  WebKitGTK (probed live: `'EyeDropper' in window` → false), so the dropper
+  goes through the compositor instead: new `pick_screen_color` command
+  (`pick_color.rs`) calls the xdg-desktop-portal `Screenshot.PickColor`
+  method over the existing `zbus` (handle_token per call, empty parent —
+  the picker is a fullscreen crosshair, not our dialog) and waits on the
+  Request's Response signal (0 = color doubles → hex, 1/2 = silent None).
+  No new D-Bus crate; only `futures-util` added (was already in the cargo
+  cache). PanelGradient rows each gained a 28px pipette tool (hidden in
+  browser dev, where there is no portal); a pick fills that row's hex,
+  Esc cancels silently, real failures announce once. Portal interface
+  verified present (`PickColor` introspected); the live click-through is
+  inherently interactive — owner to pick once + Esc once in the app.
+  Gates: check 0, vitest 99, cargo 104, build OK.
+
+### Dropper fix: wrong portal interface (2026-09-15, same session)
+
+  Click did nothing and said nothing — two bugs. (1) The proxy named the
+  interface `org.freedesktop.portal.Desktop`; that object carries no such
+  interface (the per-portal interfaces live there: Screenshot, FileChooser,
+  …), so the call died with UnknownMethod. The earlier busctl introspection
+  had used the RIGHT name all along; the code just didn't match it. Fixed
+  to `org.freedesktop.portal.Screenshot`. (2) The failure was invisible:
+  announcer-only + console. The editor now prints picker failures in a
+  caution line under the rows — a click owes an answer. Lesson for portal
+  work: verify the interface name against introspection, and busctl arg
+  encoding for dicts is fiddly enough to skip (verify through the app).
+  A stray `cargo test` failure in the same run passed twice on re-run
+  (watcher timing flake under load, unrelated to this change).
+
+### Playbar follows panel overrides (2026-09-15, owner request)
+
+  The playbar read scan colors only, so a customized album snapped back to
+  its artwork hues the moment it played. Its backdrop now checks
+  `ui.panelGradients` first (same override-wins + fall-through promise as
+  the panel). One deliberate asymmetry kept: the playbar keeps its
+  contrast clamp on custom hex (controls must stay readable); the panel
+  stays raw, per the earlier ruling. The album switch already crossfades
+  gradient layers, so override edits made mid-playback glide in.
+
+### Override orphan prune (2026-09-15, owner request)
+
+  `library.load()` drops `ui.panelGradients` entries whose album id is gone
+  from the dump — boot and every rescan, since regroups orphan mid-session
+  too. Guarded to live dumps (fake-library ids must never wipe real
+  overrides in dev) and no-op assigns (quiet loads don't churn settings;
+  persistence rides the existing App effect). Gates: check 0, vitest 99.
+
+### Extraction rework: two named hues, never the average (2026-09-15, owner request)
+
+  Standardized the owner's hand-pick rule (Step 9b): hot stop = most vivid
+  significant family, anchor = most colorful distant family
+  (distance × chroma over regions covering >= 2% of pixels), ordered
+  quiet-first. Separate bars on purpose: the old single 25%-weight bar
+  starved dull-sky complements 10:1 under a vivid star (measured on the
+  real thumbs: Dragons came out red-on-red, Moonflower brown-to-red).
+  Findings while tuning: merge radius 48 fragments Moonflower's forest
+  into khaki — 64 stays (its transitivity already protects gradients);
+  thin vivid ribbons that merge away (the teal portal → sage) are accepted
+  as honest acreage voice. Multiplied score demotes white title text
+  without banning black grounds. v4 migration NULLs the color columns so
+  the next ordinary scan refills them (covers untouched; overrides immune).
+  Tests: anison pin rewritten (teal water → amber glow, same hues, new
+  order) + 3 synthetic (mud rejection, quiet-first, mono fallback). Two
+  u8-overflow panics caught en route — both in TEST arithmetic (`c+20`),
+  fixed with casts; the habit is now documented at the pin.
+  Gates: cargo 107, check 0, vitest 99, build OK.
+
+### Extraction round 2: hue opposition (2026-09-15, owner verdict: hit or miss)
+
+  The v4 rule (distance × chroma) fixed Dragons (navy → vermilion in the
+  DB, near the owner's steel blue) but Moonflower came out TAN — a warm
+  khaki fragment outscoring the teal 5% on RGB distance. Diagnosis: RGB
+  distance conflates lightness with opposition, so bright mush beats dim
+  complements. The anchor score is now hue-angle distance × chroma: mush
+  is hue-adjacent to every hot star by construction and can never win;
+  white title text dies on chroma; black grounds/snow still win by
+  default when nothing colorful stands apart. Verified on the three
+  target covers + six repo covers (eyeballed the two near-mono ones —
+  beige-on-beige and white-on-white stay honest). v5 migration NULLs the
+  colors for one more ordinary rescan. Methodology lesson learned twice:
+  thumb probes ≠ full-res pipeline results (downscale blur changes
+  buckets) — tune against DB outcomes, and a misplaced floor (applied to
+  the winner instead of the pool) reads as "nothing qualifies".
+
+### Version 0.11.0 (2026-09-15): panel gradients go personal
+
+  Minor bump (new user-visible capability, no breaking changes): per-album
+  gradient overrides in the album edit modal (preview, swatch+hex rows,
+  portal-crosshair dropper per stop, instant apply) + global Album artwork
+  gradient switch (Appearance + Global Menu) + playbar follows overrides
+  (contrast-clamped) + orphan prune on every library load + extraction
+  rework across two rounds (vivid-significant hot stop, hue-opposition
+  anchor, quiet-first ordering; v4/v5 color refills). Nine owner customs
+  already in settings; anison pin rewritten, 4 synthetic color tests.

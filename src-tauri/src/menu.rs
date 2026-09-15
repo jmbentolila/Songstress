@@ -69,6 +69,9 @@ pub struct MenuState {
     pub theme: String,
     #[serde(default)]
     pub playbar_gradient: bool,
+    /// Expanded-panel artwork gradient (Step 9b) — on is the shipped look.
+    #[serde(default = "default_on")]
+    pub album_gradient: bool,
     /// Shuffle stage: off/album/artist/all (Step 5a).
     #[serde(default)]
     pub shuffle: String,
@@ -91,6 +94,10 @@ fn default_theme() -> String {
     "system".into()
 }
 
+fn default_on() -> bool {
+    true
+}
+
 impl Default for MenuState {
     fn default() -> Self {
         Self {
@@ -100,6 +107,7 @@ impl Default for MenuState {
             staged_count: 0,
             theme: default_theme(),
             playbar_gradient: false,
+            album_gradient: true,
             shuffle: "off".into(),
             repeat: "off".into(),
             eq_enabled: false,
@@ -290,6 +298,12 @@ pub fn build() -> Vec<Menu> {
                     true,
                     Some(s.playbar_gradient),
                 ),
+                item(
+                    "appearance.album-gradient",
+                    "Album artwork gradient",
+                    true,
+                    Some(s.album_gradient),
+                ),
                 item("appearance.accent", "Accent color…", true, None),
                 sep(),
                 item("appearance.more", "More appearance settings…", true, None),
@@ -448,7 +462,7 @@ mod tests {
     fn sections_mirror_the_sidebar_panes() {
         // Playback: transport | modes | equalizer | reset → 3 breaks.
         // Library: import | scan | storage → 2 breaks.
-        // Appearance: theme | playbar+accent | more+reset → 2 breaks.
+        // Appearance: theme | playbar+album+accent | more+reset → 2 breaks.
         set_state(MenuState::default());
         let menus = build();
         assert_eq!(n_seps(&menus, "playback"), 3);
@@ -479,6 +493,25 @@ mod tests {
         assert_eq!(
             find(&menus, "appearance", "appearance.playbar-gradient").checked,
             Some(true)
+        );
+    }
+
+    #[test]
+    fn album_gradient_toggle_follows_state() {
+        // On is the default (the shipped look); the toggle reports state.
+        let menus = build();
+        assert_eq!(
+            find(&menus, "appearance", "appearance.album-gradient").checked,
+            Some(true)
+        );
+        set_state(MenuState {
+            album_gradient: false,
+            ..MenuState::default()
+        });
+        let menus = build();
+        assert_eq!(
+            find(&menus, "appearance", "appearance.album-gradient").checked,
+            Some(false)
         );
     }
 

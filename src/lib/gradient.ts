@@ -67,6 +67,16 @@ export function hexToRgb(hex: string): [number, number, number] | null {
   ];
 }
 
+/** Normalize user-typed hex ("#rrggbb", "rrggbb", "#rgb", "rgb") to the
+ *  6-digit lowercase form the DB and artGradient speak; null when invalid. */
+export function normalizeHex(raw: string): string | null {
+  const h = raw.trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(h)) return h.toLowerCase();
+  if (/^[0-9a-fA-F]{3}$/.test(h))
+    return h.toLowerCase().split("").map((c) => c + c).join("");
+  return null;
+}
+
 export function gradientFromColors(c1: RGB, c2: RGB, theme: Theme, alpha: number): string {
   return `linear-gradient(135deg, rgba(${mixedColor(c1, theme).join(", ")}, ${alpha}), rgba(${mixedColor(c2, theme).join(", ")}, ${alpha}))`;
 }

@@ -17,6 +17,7 @@
   import { rescan } from "../lib/stores/scanner.svelte";
   import TagSurface from "./TagSurface.svelte";
   import FieldGrid from "./FieldGrid.svelte";
+  import PanelGradient from "./PanelGradient.svelte";
   import ArtSelector from "./ArtSelector.svelte";
   import type { ArtChange, ArtInventory } from "../lib/artChange";
   import {
@@ -348,14 +349,17 @@
   </p>
 
   <div class="te-cols">
-    <ArtSelector
-      {albumId}
-      refreshSeq={artSeq}
-      stack
-      bind:open={artLb}
-      bind:change={art}
-      bind:inventory={inv}
-    />
+    <div class="te-artcol">
+      <ArtSelector
+        {albumId}
+        refreshSeq={artSeq}
+        stack
+        bind:open={artLb}
+        bind:change={art}
+        bind:inventory={inv}
+      />
+      <PanelGradient {albumId} />
+    </div>
     <div class="te-fields">
       <div class="te-col-title">Album tags</div>
       <FieldGrid {edit} layout="album-core" bad={bad} {census} {disputed} />
@@ -395,6 +399,16 @@
 </TagSurface>
 
 <style>
+  /* The artwork column stacks two residents now (artwork + panel
+     background): one flex column so the gradient editor sits in the
+     space below the art instead of beside it. */
+  .te-artcol {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
   /* Mirrors the track modal: the two column titles start on one line
      (the artwork column's own 11px offset is matched, not ignored). */
   .te-fields {

@@ -10,6 +10,7 @@ mod menu;
 mod menu_dbus;
 mod mpris;
 mod mpv;
+mod pick_color;
 mod wayland_appmenu;
 mod watcher;
 mod window_state;
@@ -700,10 +701,11 @@ pub(crate) mod colors {
     fn dominant_pair(img: &image::DynamicImage) -> Option<(Rgb, Rgb)> {
         let thumb = img.thumbnail(48, 48);
         let mut wsum = 0u64;
-        let mut sr = 0u64;
-        let mut sg = 0u64;
-        let mut sb = 0u64;
-        let mut counts: HashMap<Rgb, u64> = HashMap::new();
+        let mut total_px = 0u64;
+        // Weight (chroma-boosted: vivid details punch above their acreage)
+        // AND raw pixel share travel together — the hot stop is chosen by
+        // weight, the anchor by acreage, and the two bars differ on purpose.
+        let mut counts: HashMap<Rgb, (u64, u64)> = HashMap::new();
         for (_x, _y, p) in thumb.pixels() {
             let [r, g, b, a] = p.0;
             if a < 128 {
@@ -712,20 +714,17 @@ pub(crate) mod colors {
             let max = r.max(g).max(b);
             let min = r.min(g).min(b);
             let chroma = max - min;
-            // Every pixel counts so the primary color represents the whole
-            // artwork; vivid regions simply pull harder than dark fill.
             let w = 4u64 + (chroma as u64) * (chroma as u64) / 16;
             wsum += w;
-            sr += w * r as u64;
-            sg += w * g as u64;
-            sb += w * b as u64;
+            total_px += 1;
             let key = [r >> 4, g >> 4, b >> 4];
-            *counts.entry(key).or_insert(0) += w;
+            let entry = counts.entry(key).or_insert((0, 0));
+            entry.0 += w;
+            entry.1 += 1;
         }
         if wsum == 0 {
             return None;
         }
-        let c1: Rgb = [(sr / wsum) as u8, (sg / wsum) as u8, (sb / wsum) as u8];
 
         let to_rgb = |k: Rgb| {
             [
@@ -743,14 +742,18 @@ pub(crate) mod colors {
 
         // Merge near-identical buckets so spread-out regions (e.g. shaded
         // hair across many buckets) count as one significant color family.
-        let mut buckets: Vec<(Rgb, u64)> =
-            counts.into_iter().map(|(k, w)| (to_rgb(k), w)).collect();
+        // Weights AND pixel counts both merge (the center stays
+        // weight-averaged; acreage is the plain sum).
+        let mut buckets: Vec<(Rgb, u64, u64)> = counts
+            .into_iter()
+            .map(|(k, (w, n))| (to_rgb(k), w, n))
+            .collect();
         buckets.sort_by(|a, b| b.1.cmp(&a.1));
-        let mut clusters: Vec<(Rgb, u64)> = Vec::new();
-        for (color, weight) in buckets {
+        let mut clusters: Vec<(Rgb, u64, u64)> = Vec::new();
+        for (color, weight, pixels) in buckets {
             if let Some(entry) = clusters
                 .iter_mut()
-                .find(|(c, _)| dist(*c, color) < 64)
+                .find(|(c, _, _)| dist(*c, color) < 64)
             {
                 let total = entry.1 + weight;
                 entry.0 = [
@@ -759,52 +762,114 @@ pub(crate) mod colors {
                     ((entry.0[2] as u64 * entry.1 + color[2] as u64 * weight) / total) as u8,
                 ];
                 entry.1 = total;
+                entry.2 += pixels;
             } else {
-                clusters.push((color, weight));
+                clusters.push((color, weight, pixels));
             }
         }
 
-        let top_weight = clusters.first().map(|(_, w)| *w).unwrap_or(0);
+        let top_weight = clusters.first().map(|(_, w, _)| *w).unwrap_or(0);
 
-        // A busy artwork can average out to near-gray (e.g. blue night sky in
-        // the top half, white snow in the bottom). If the whole-artwork
-        // average lost its chroma, anchor the gradient's primary on the
-        // heaviest significant color family instead — the one the eye calls
-        // "the color" of this artwork.
         let chroma = |c: Rgb| -> u8 {
             let max = c[0].max(c[1]).max(c[2]);
             let min = c[0].min(c[1]).min(c[2]);
             max - min
         };
-        let mut c1_final = c1;
-        if chroma(c1) < 32 {
-            if let Some((c, _)) = clusters
-                .iter()
-                .filter(|(c, w)| *w * 4 >= top_weight && chroma(*c) >= 48)
-                .max_by_key(|(_, w)| *w)
-            {
-                c1_final = *c;
+        // Darkness for the quiet-first tiebreak (a panel grounds on dark).
+        let lum = |c: Rgb| -> u32 { u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2]) };
+        let significant = |w: &u64| *w * 4 >= top_weight;
+        // Hue in degrees, None when achromatic. Achromatic families score
+        // nothing on their own — white title text must never win on raw
+        // distance — but stay eligible, so black grounds and snow still
+        // win by default when nothing colorful stands apart.
+        let hue_deg = |c: Rgb| -> Option<f32> {
+            let (r, g, b) = (c[0] as f32, c[1] as f32, c[2] as f32);
+            let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+            let ch = mx - mn;
+            if ch == 0.0 {
+                return None;
             }
-        }
+            let h = if mx == r {
+                60.0 * (((g - b) / ch) % 6.0)
+            } else if mx == g {
+                60.0 * ((b - r) / ch + 2.0)
+            } else {
+                60.0 * ((r - g) / ch + 4.0)
+            };
+            Some(h.rem_euclid(360.0))
+        };
+        let hue_dist = |a: f32, b: f32| -> f32 {
+            let d = (a - b).abs() % 360.0;
+            if d > 180.0 {
+                360.0 - d
+            } else {
+                d
+            }
+        };
 
-        // Accent: among significant clusters (>= 25% of the heaviest),
-        // take the one perceptually farthest from the primary.
-        let mut best: Option<Rgb> = None;
-        let mut best_dist = 60u32;
-        for (c, w) in &clusters {
-            if *w * 4 >= top_weight {
-                let d = dist(*c, c1_final);
-                if d > best_dist {
-                    best_dist = d;
-                    best = Some(*c);
-                }
+        // The pair is TWO NAMED HUES, never the global average (Step 9b:
+        // averaging a red dragon with a blue sky yields brick mud that
+        // exists nowhere in the frame — both fired anchors were averages).
+        // Hot stop = the most vivid significant family (chroma, then
+        // weight): the thing the eye names first. The significance bar
+        // (25% of the chroma-boosted top) keeps the lead honest — but it
+        // would ALSO starve the complement (a vivid star outweighs a dull
+        // sky ten to one), so the anchor plays by a different rule: any
+        // family covering >= 2% of pixels is a named region, and among
+        // those the most OPPOSED colorful one wins (hue distance ×
+        // chroma). Hue opposition is the actual principle — RGB distance
+        // conflates lightness with opposition, so bright tan mush
+        // outscored the real teal complement (measured on Moonflower).
+        // Shaded star variants die on hue (a darker red is still red);
+        // white text and mud die on chroma.
+        let hot: Option<Rgb> = clusters
+            .iter()
+            .filter(|(_, w, _)| significant(w))
+            .max_by_key(|(c, w, _)| (chroma(*c), *w))
+            .map(|(c, _, _)| *c);
+        let Some(hot_c) = hot else {
+            return None;
+        };
+        let hot_hue = hue_deg(hot_c);
+        let mut best: Option<(Rgb, (u32, u64))> = None;
+        for (c, _, n) in &clusters {
+            // >= 2% of pixels: a region, not speckle. The star itself is
+            // out (distance zero would otherwise win B&W ties on pixels).
+            if *n * 50 < total_px || dist(*c, hot_c) == 0 {
+                continue;
+            }
+            let d = dist(*c, hot_c);
+            let score = match (hot_hue, hue_deg(*c)) {
+                (Some(h), Some(hc)) => (hue_dist(h, hc) * chroma(*c) as f32) as u32,
+                _ => 0,
+            };
+            if best.is_none_or(|(_, s)| (score, *n) > s) {
+                best = Some((*c, (score, *n)));
             }
         }
-        let c2 = best.unwrap_or_else(|| [
-                c1_final[0].saturating_add(48),
-                c1_final[1].saturating_add(44),
-                c1_final[2].saturating_add(56),
-            ]);
+        // No far family (near-monochrome art, or the winner sits too
+        // close to the star): lighten the hot stop, as before — a
+        // gradient still needs two ends.
+        let anchor = match best {
+            Some((c, _)) if dist(c, hot_c) > 60 => c,
+            _ => [
+                hot_c[0].saturating_add(48),
+                hot_c[1].saturating_add(44),
+                hot_c[2].saturating_add(56),
+            ],
+        };
+        // Order: quiet first (lower chroma), darker breaks ties — the
+        // hand-picked pairs both run cool/dark → hot along the diagonal.
+        // (The old whole-artwork average is intentionally gone: it was
+        // the mud. Its gray-artwork shape — blue sky under white snow —
+        // needs no special case now: snow has no chroma, so the vivid
+        // pick lands on the sky and the far pick on the snow.)
+        let (c1_final, c2) =
+            if (chroma(anchor), lum(anchor)) <= (chroma(hot_c), lum(hot_c)) {
+                (anchor, hot_c)
+            } else {
+                (hot_c, anchor)
+            };
         Some((c1_final, c2))
     }
 
@@ -1350,6 +1415,15 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Screen color picker (Step 9b: the dropper in the panel-gradient editor).
+/// Raises the compositor's crosshair through the portal — no screenshot
+/// files, no foreign dialogs. `None` = the user cancelled (Esc), which the
+/// frontend treats as silence, not an error.
+#[tauri::command]
+async fn pick_screen_color() -> Result<Option<String>, String> {
+    pick_color::pick_color().await
 }
 
 /// Read a picked image into base64 for `ArtChange.upload`. An AUDIO path
@@ -2569,6 +2643,7 @@ pub fn run() {
             save_album_tags,
             get_art_candidates,
             pick_image,
+            pick_screen_color,
             read_image
         ])
         .on_window_event(|window, event| {
@@ -2622,15 +2697,128 @@ mod tests {
     }
 
     #[test]
-    fn anison_accent_is_the_blue_hair() {
+    fn anison_pair_is_teal_water_into_amber_glow() {
+        // Supersedes the old blue-accent pin (Step 9b extraction rework):
+        // the pair holds the same two hues, but the order follows the
+        // quiet-first convention — the teal water grounds, the amber TV
+        // glow leads. (Comparisons only, no arithmetic: u8 + 20 panics in
+        // debug when the channel is hot — that overflow masked this pin's
+        // real move from blue-accent to amber-accent.)
         let out = colors::extract(std::path::Path::new(
             "../public/covers/various-artists-anison-no-kokoro.jpg",
         ))
         .expect("extraction");
+        let c1 = [out[0], out[1], out[2]];
         let c2 = [out[3], out[4], out[5]];
         assert!(
-            c2[2] > c2[0] + 20,
-            "accent should lean blue, got {c2:?}"
+            c1[2] > c1[0] && c1[1] > c1[0],
+            "anchor should be the teal water, got {c1:?}"
+        );
+        assert!(
+            c2[0] > c2[2] && c2[0] > c2[1],
+            "accent should be the amber glow, got {c2:?}"
+        );
+    }
+
+    /// Step 9b extraction contract on synthetic art (deterministic — no
+    /// owner files): the pair is two NAMED hues, never the average.
+    fn synth(paint: impl Fn(u32, u32) -> [u8; 3]) -> [u8; 6] {
+        let mut img = image::RgbImage::new(96, 96);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            let [r, g, b] = paint(x, y);
+            *p = image::Rgb([r, g, b]);
+        }
+        super::colors::extract_image(&image::DynamicImage::ImageRgb8(img))
+            .expect("synthetic extraction")
+    }
+
+    #[test]
+    fn half_red_half_blue_is_never_purple_mud() {
+        // The naive average of this art is purple (127, 0, 127) — a hue
+        // that exists nowhere in the frame. Neither stop may go near it;
+        // the pair must be the two real hues, order aside.
+        let out = synth(|x, _| if x < 48 { [255, 0, 0] } else { [0, 0, 255] });
+        let stops = [[out[0], out[1], out[2]], [out[3], out[4], out[5]]];
+        let dist = |a: [u8; 3], b: [u8; 3]| -> u32 {
+            a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| (*x as i32 - *y as i32).unsigned_abs())
+                .sum()
+        };
+        for s in &stops {
+            assert!(
+                dist(*s, [127, 0, 127]) > 70,
+                "a stop landed on the average-mud, got {stops:?}"
+            );
+        }
+        assert!(
+            stops.iter().any(|s| s[0] as u16 > s[2] as u16 + 40),
+            "one stop should be the red half, got {stops:?}"
+        );
+        assert!(
+            stops.iter().any(|s| s[2] as u16 > s[0] as u16 + 40),
+            "one stop should be the blue half, got {stops:?}"
+        );
+    }
+
+    #[test]
+    fn quiet_grounds_first_hot_leads() {
+        // Mostly steel blue, vivid red minority: the minority leads (it is
+        // the vivid one) and the blue grounds — deterministically ordered.
+        let out = synth(|x, _| {
+            if x < 67 {
+                [100, 130, 160]
+            } else {
+                [220, 60, 30]
+            }
+        });
+        let c1 = [out[0], out[1], out[2]];
+        let c2 = [out[3], out[4], out[5]];
+        assert!(c1[2] > c1[0], "anchor should lean blue, got {c1:?}");
+        assert!(
+            c2[0] as u16 > c2[2] as u16 + 40,
+            "accent should be the hot red, got {c2:?}"
+        );
+    }
+
+    #[test]
+    fn complement_beats_analogous_mud() {
+        // Moonflower shape: dark-red ground, a tan patch and a smaller
+        // teal patch. Tan is nearer in RGB and heavier — hue opposition
+        // must still elect the teal (green-leaning anchor, not red).
+        let out = synth(|x, y| {
+            if x >= 80 && y < 20 {
+                [30, 110, 100]
+            } else if x < 20 && y >= 76 {
+                [140, 125, 80]
+            } else {
+                [150, 40, 20]
+            }
+        });
+        let c1 = [out[0], out[1], out[2]];
+        let c2 = [out[3], out[4], out[5]];
+        assert!(
+            c2[0] as u16 > c2[2] as u16 + 40,
+            "accent should be the hot red ground, got {c2:?}"
+        );
+        assert!(
+            c1[1] > c1[0],
+            "anchor should be the teal complement, not the tan, got {c1:?}"
+        );
+    }
+
+    #[test]
+    fn monochrome_falls_back_to_lightened_hot() {
+        // One hue only: no far family exists, so the accent lightens the
+        // hot stop instead of inventing a hue.
+        let out = synth(|_, _| [128, 128, 128]);
+        let (c1, c2) = ([out[0], out[1], out[2]], [out[3], out[4], out[5]]);
+        let chroma = |c: [u8; 3]| c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2]);
+        assert!(chroma(c1) <= 32 && chroma(c2) <= 32, "stays gray, got {c1:?} {c2:?}");
+        assert!(
+            (c2[0] as u16 + c2[1] as u16 + c2[2] as u16)
+                > (c1[0] as u16 + c1[1] as u16 + c1[2] as u16),
+            "accent is the lightened end, got {c1:?} {c2:?}"
         );
     }
 

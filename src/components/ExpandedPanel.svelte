@@ -458,11 +458,29 @@
     // panel's art-derived background while it closes.
     const theme = resolvedTheme();
     const id = displayId;
+    // The global kill switch (Appearance → Album artwork gradient): off
+    // means plain --panel-bg, overrides included — no half-state where a
+    // custom color survives the switch its own toggle promised to kill.
+    if (!ui.albumGradient) {
+      gradient = null;
+      return;
+    }
     const album = library.albums.find((a) => a.id === id);
     const alpha = PANEL_ALPHA[theme] ?? 0.5;
 
-    // Preferred path: colors computed during the scan (Phase 2 M3) — instant,
-    // no decode round-trip on first expand.
+    // Preferred path: the user's per-album override (Step 9b), then the
+    // colors computed during the scan (Phase 2 M3) — instant, no decode
+    // round-trip on first expand.
+    const override = ui.panelGradients[id];
+    if (override) {
+      // A corrupt settings entry must not blank the panel: fall through
+      // to the artwork colors when the override won't parse.
+      const g = artGradient(override.c1, override.c2, theme, alpha);
+      if (g) {
+        gradient = g;
+        return;
+      }
+    }
     if (album?.colorC1 && album.colorC2) {
       gradient = artGradient(album.colorC1, album.colorC2, theme, alpha);
       return;
