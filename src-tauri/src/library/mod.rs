@@ -10,6 +10,32 @@ pub mod scan;
 pub mod settings;
 pub mod tags;
 
+/// Read a file's tags, tolerating the tag trivia real-world rips carry.
+///
+/// lofty's default parse still fails a WHOLE file over one bad frame —
+/// measured 2026-09-15: remaster rips whose v2.3 TYER holds two years
+/// ("2003 / 2013", original + remaster) die in `Timestamp::parse` with
+/// "non-digit characters", so all 51 tracks of such a folder refuse to
+/// scan AND import (per-file errors, nothing staged, modal empty while the
+/// sibling folders import fine). The fallback re-reads Relaxed, which skips
+/// the bad frame and keeps everything else (artist/album/title/disc/track
+/// all survive; only the ambiguous year reads empty). Reads are the wrong
+/// place to be strict: a scanner or editor must never lose a file over one
+/// frame. (Upstream fix would be lofty >= 0.23; see the write_id3v1 armor
+/// in tags.rs — same version pin.)
+pub(crate) fn read_tagged(path: &std::path::Path) -> Result<lofty::file::TaggedFile, String> {
+    lofty::read_from_path(path).or_else(|_| {
+        lofty::probe::Probe::open(path)
+            .map_err(|e| format!("{path:?}: {e}"))?
+            .options(
+                lofty::config::ParseOptions::new()
+                    .parsing_mode(lofty::config::ParsingMode::Relaxed),
+            )
+            .read()
+            .map_err(|e| format!("{path:?}: {e}"))
+    })
+}
+
 /// Stable text ID from natural keys ("ar-hex", "al-hex", "tr-hex"). Same
 /// inputs always yield the same ID, so rescans upsert instead of duplicating.
 pub fn stable_id(prefix: &str, parts: &[&str]) -> String {

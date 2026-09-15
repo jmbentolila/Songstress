@@ -111,7 +111,7 @@ fn read_file(path: &Path) -> Result<TrackTags, String> {
 /// TrackTags + the blake3 hashes of every picture the file carries (across
 /// all its tags) — the fingerprint the artwork diff compares against.
 fn read_file_full(path: &Path) -> Result<(TrackTags, Vec<String>), String> {
-    let tagged = lofty::read_from_path(path).map_err(|e| format!("{path:?}: {e}"))?;
+    let tagged = super::read_tagged(path)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
     let pics: Vec<String> = tagged
         .tags()
@@ -457,7 +457,7 @@ fn resolve_art(conn: &Connection, album_id: &str, art: &ArtChange) -> Result<Art
         ArtChange::Hash(hash) => {
             let RowPaths(rows) = album_rows(conn, album_id)?;
             for (_, p) in &rows {
-                let Ok(tagged) = lofty::read_from_path(p) else {
+                let Ok(tagged) = super::read_tagged(p) else {
                     continue;
                 };
                 for pic in tagged.tags().iter().flat_map(|t| t.pictures()) {
@@ -546,7 +546,7 @@ pub fn list_art_candidates(
     let mut files_with_art = 0usize;
 
     for (tid, path) in &rows {
-        let tagged = match lofty::read_from_path(path) {
+        let tagged = match super::read_tagged(path) {
             Ok(t) => t,
             Err(_) => continue, // unreadable file contributes no candidates (and no error: browsing is not saving)
         };
@@ -867,7 +867,7 @@ fn apply_per_track(
 }
 
 fn write_file(path: &Path, f: impl FnOnce(&mut Tag)) -> Result<(), String> {
-    let mut tagged = lofty::read_from_path(path).map_err(|e| format!("{path:?}: {e}"))?;
+    let mut tagged = super::read_tagged(path)?;
     let tag = ensure_tag(&mut tagged);
     f(tag);
     let expected = tag.clone();

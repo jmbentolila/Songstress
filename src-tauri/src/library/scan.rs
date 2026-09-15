@@ -95,7 +95,7 @@ fn walk(root: &Path) -> Result<Vec<FileEntry>, String> {
 
 /// Parse tags; wav/sparse-tag files degrade to filename-derived titles.
 fn parse_file(path: &Path) -> Result<ParsedTrack, String> {
-    let tagged = lofty::read_from_path(path).map_err(|e| format!("{path:?}: {e}"))?;
+    let tagged = super::read_tagged(path)?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
 
     let file_title = path
@@ -1135,6 +1135,105 @@ mod tests {
             titles,
             vec!["Apple", "Banana", "Zebra", "Mango"],
             "unnumbered alphabetical first, then numbered by track no"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// One ID3v2.3 text frame, UTF-16 with BOM — the spelling the remaster
+    /// rips use (verified byte-for-byte against the failing files).
+    fn v23_frame(id: &str, text: &str) -> Vec<u8> {
+        let mut utf16 = vec![0xFF, 0xFE];
+        for u in text.encode_utf16() {
+            utf16.extend_from_slice(&u.to_le_bytes());
+        }
+        let mut f = Vec::new();
+        f.extend_from_slice(id.as_bytes());
+        f.extend_from_slice(&((utf16.len() + 1) as u32).to_be_bytes());
+        f.extend_from_slice(&[0, 0]);
+        f.push(1);
+        f.extend_from_slice(&utf16);
+        f
+    }
+
+    /// An mp3 whose TYER holds TWO years ("2003 / 2013", original +
+    /// remaster): lofty's default parse rejects the frame and fails the whole
+    /// file, which is what made a 51-track folder import as nothing.
+    fn remaster_mp3(
+        dir: &Path,
+        name: &str,
+        artist: &str,
+        album: &str,
+        title: &str,
+        disc: &str,
+        track: &str,
+    ) -> PathBuf {
+        let mut tag = Vec::new();
+        for (id, text) in [
+            ("TIT2", title),
+            ("TPE1", artist),
+            ("TALB", album),
+            ("TYER", "2003 / 2013"),
+            ("TRCK", track),
+            ("TPOS", disc),
+        ] {
+            tag.extend_from_slice(&v23_frame(id, text));
+        }
+        let mut out = b"ID3\x03\x00\x00".to_vec();
+        let size = tag.len() as u32;
+        out.push(((size >> 21) & 0x7F) as u8);
+        out.push(((size >> 14) & 0x7F) as u8);
+        out.push(((size >> 7) & 0x7F) as u8);
+        out.push((size & 0x7F) as u8);
+        out.extend_from_slice(&tag);
+        // Minimal audio so properties resolve (same recipe as import.rs tiny_mp3).
+        let mut mpeg = vec![0xFFu8, 0xFB, 0x90, 0x00];
+        mpeg.resize(417, 0);
+        out.extend_from_slice(&mpeg);
+        out.extend_from_slice(&mpeg);
+        let at = dir.join(name);
+        std::fs::write(&at, out).expect("write mp3");
+        at
+    }
+
+    #[test]
+    fn dual_year_tyer_does_not_fail_the_file() {
+        // Two-disc tree in sibling folders, mirroring the remaster rips:
+        // Chapter I + Chapter II, same album title, discs 1/2 and 2/2.
+        let root = temp_dir("dual-tyer");
+        let d1 = root.join("2013 - The Phantom Agony (Expanded Edition)/Chapter I");
+        let d2 = root.join("2013 - The Phantom Agony (Expanded Edition)/Chapter II");
+        std::fs::create_dir_all(&d1).expect("mkdir");
+        std::fs::create_dir_all(&d2).expect("mkdir");
+        let f1 = remaster_mp3(
+            &d1, "01. Adyta.mp3", "Epica",
+            "The Phantom Agony (Expanded Edition)", "Adyta", "1/2", "1/12",
+        );
+        let f2 = remaster_mp3(
+            &d2, "01. Adyta (Orchestral).mp3", "Epica",
+            "The Phantom Agony (Expanded Edition)", "Adyta (Orchestral)", "2/2", "1/12",
+        );
+
+        // Import-shaped scan: walk the parents, index only the asked-for files.
+        let dbp = root.join("t.db");
+        let mut conn = crate::library::db::open(&dbp).expect("open");
+        let only: HashSet<PathBuf> = [f1, f2].into_iter().collect();
+        let counts =
+            run_scan_files(&mut conn, &[d1, d2], Some(&only), |_, _| {}, false).expect("scan");
+        assert!(
+            counts.errors.is_empty(),
+            "dual-year TYER must not error: {:?}",
+            counts.errors
+        );
+        let tracks = album_tracks(&conn, "The Phantom Agony (Expanded Edition)");
+        assert_eq!(tracks.len(), 2, "both discs land in one album");
+        assert_eq!(
+            tracks.iter().map(|(d, _, _)| *d).collect::<Vec<_>>(),
+            vec![1, 2],
+            "disc tags survive the relaxed re-read"
+        );
+        assert_eq!(
+            album_artist(&conn, "The Phantom Agony (Expanded Edition)").as_deref(),
+            Some("Epica")
         );
         let _ = std::fs::remove_dir_all(&root);
     }

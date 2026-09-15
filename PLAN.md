@@ -4526,3 +4526,21 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   rework across two rounds (vivid-significant hot stop, hue-opposition
   anchor, quiet-first ordering; v4/v5 color refills). Nine owner customs
   already in settings; anison pin rewritten, 4 synthetic color tests.
+
+### Import fix: dual-year TYER no longer fails the file (2026-09-15, owner report)
+
+  Importing `~/Desktop/Remastered Albums` staged nothing: all 51 tracks
+  failed lofty's default parse — their v2.3 TYER holds TWO years
+  ("2003 / 2013", original + remaster), which `Timestamp::parse` rejects
+  ("non-digit characters") and fails the whole file over. Sibling folders
+  with normal tags imported fine, which is why the base-directory import
+  "grabbed the other files without issues". Fix: `library::read_tagged`
+  (mod.rs) tries the default read, falls back to Relaxed (bad frame
+  skipped, everything else kept — artist/album/title/disc/track survive,
+  only the ambiguous year reads empty). Routed through it: scan
+  `parse_file`, tag-editor read + write, and the two artwork-browsing
+  skips (embedded covers in such files are now found). Regression test
+  `dual_year_tyer_does_not_fail_the_file` crafts raw v2.3 bytes and runs
+  an import-shaped scan (parents as roots + `only` set): two discs in
+  sibling folders land as one album, zero errors.
+  Gates: cargo 109, check 0, vitest 99, build OK.
