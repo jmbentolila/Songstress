@@ -192,18 +192,28 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **mpv playlist is a rolling 32-track window** (`PLAYLIST_WINDOW`), never the
   whole play order — all-artists shuffle pools are thousands of entries and
   per-entry IPC floods mpv (later commands queue past their timeout).
-- **KWin force blur** = Better Blur DX (COPR `infinality/kwin-effects-better-blur-dx`).
-  Config group is `[Effect-better-blur-dx]` — **dashes, not underscores** (plugin id
-  is `better_blur_dx`; the mismatch cost hours). `WindowClasses` must be a **single
-  line** (`songstress`); multi-entry newline lists silently never match. After config
-  changes: unload+load the effect over DBus, not just `reconfigure`:
-  `busctl --user call org.kde.KWin /Effects org.kde.kwin.Effects unloadEffect s better_blur_dx`
-  (then `loadEffect`). Stock blur must stay disabled. **Unloading the effect kills
-  blur SYSTEM-WIDE** (it's a global KWin effect) — always `loadEffect` it back
-  immediately after diagnosis; the user will notice within minutes.
+- **KWin force blur** = Better Blur DX, **now a source build of `728307f`, not the COPR
+  package** (`infinality/kwin-effects-better-blur-dx` was deliberately removed; `dnf update`
+  will not restore it, and a kwin/Plasma upgrade breaks blur until rebuilt against the exact
+  running kwin). Config group is `[Effect-better-blur-dx]` — **dashes, not underscores**
+  (plugin id is `better_blur_dx`; the mismatch cost hours). `WindowClasses` must be a
+  **single line** (`songstress`); multi-entry newline lists silently never match — a KCM
+  write preserved it on 6.7.5, verified 2026-09-19. Stock blur must stay disabled
+  (`blurEnabled=false`).
+  **Config changes need only `reconfigureEffect` — NOT unload+load** (the old advice here
+  caused avoidable blackouts): `qdbus-qt6 org.kde.KWin /Effects
+  org.kde.kwin.Effects.reconfigureEffect better_blur_dx`. Proven to re-read kwinrc. Helper:
+  `~/src/bbdx-ab.sh {show|A|B|C|D|set|unset}`.
+  **Unloading still kills blur SYSTEM-WIDE**, and it cannot swap a rebuilt `.so` anyway —
+  that needs **logout+login** (KWin holds the mapping; Wayland has no `--replace`).
+  `kwriteconfig6` wants `--key K --delete`, never `--delete K` (the latter exits 0 having
+  done nothing). Blur is **intentionally absent** in the Overview and during
+  minimize/maximize — upstream design, not a bug to chase (see PLAN.md Step 0b S3).
 - **Window resourceClass is `songstress`** (binary name, NOT the app-id). Verify with
   `qdbus-qt6 org.kde.KWin /KWin org.kde.KWin.getWindowInfo <uuid>` (uuid via
-  `/WindowsRunner` `Match`). KWin scripting console is useless on 6.7 (no output).
+  `/WindowsRunner` `Match` — which implements **`org.kde.krunner1`**, NOT
+  `org.kde.KWin.WindowsRunner`; and `Match` needs `--literal` to print its struct array).
+  KWin scripting console is useless on 6.7 (no output).
 - **Screenshots lie when the game is fullscreen.** Raise our window first:
   WindowsRunner `Match` → `Run(matchId, "activate")`. Never minimize/kill the
   user's windows or change their wallpaper without asking.
@@ -337,6 +347,39 @@ skills' defaults:
    broken desktop and the known trigger of the WebKitGTK band-clip glitch. Verify
    the UI at his size (see PLAN.md → Environment quick facts).
 6. Update PLAN.md (status table + implementation log)
+
+### Claim hygiene — from the Step 0b post-mortem (2026-09-19)
+
+A prior pass wrote a wrong fact into PLAN.md and it cost four weeks of the wrong
+investigation. The failure wasn't carelessness — it was four specific habits, and each one
+is repeatable anywhere else in this repo:
+
+1. **Never read a version string as a date.** `2.5.1-1.20260910_063354gite8475d0` was
+   *built* 2026-09-10 *from* `e8475d0`, which is the 2.5.1 release commit dated 2026-06-23.
+   The pass read the build stamp as the commit date, concluded "already contains the
+   July/Aug fixes", and closed off rebuilding from source — the single experiment that
+   eventually answered the question. Check the commit: `git log -1 --format=%cs <sha>`, and
+   for containment use `git merge-base --is-ancestor` or `compare/<a>...<b>`. Author dates
+   lie about release membership too; containment is proof, dates are not.
+2. **A check that returns 0 for everything proves nothing — run positive controls in the
+   same command.** `strings x.so | grep -c SomeKey` returns 0 for EVERY kcfg key, because
+   KConfigXT emits them as `QStringLiteral` (UTF-16; use `strings -el`). The "local proof"
+   that the build was old was therefore blind and happened to be right by luck. Same trap:
+   `nm` on a stripped binary finds no symbols at all — check `nm | wc -l` before trusting an
+   absence. If the controls read 0, the method is broken, not the artifact.
+3. **Absence of a record is not absence of a fact.** Blur being suppressed in the Overview
+   and during minimize/maximize had been observed by the owner for months and written down
+   nowhere, so on first sighting it reads as a fresh regression. When a symptom lives only
+   in his head, ask and record the provenance — "owner-observed, no prior record" is a real
+   category and it changes what you file.
+4. **Record the lever you ruled out, not just the one you used.** The pass documented
+   `unloadEffect` — which blacks out blur SYSTEM-WIDE — as *the* way to apply a config
+   change, and never looked for a narrower instrument. `reconfigureEffect` existed the whole
+   time; finding it is what made a per-key differential possible without a logout. Five
+   minutes on the interface first: `qdbus-qt6 org.kde.KWin /Effects` lists its methods.
+5. **Flag the assumption you did not verify.** The "exactly one device pixel" measurement
+   rests on the screenshot being cropped, not resized — unverified, and stated as such next
+   to the number. An unstated assumption becomes a fact in the next pass's hands.
 
 ## Versioning at commit time
 

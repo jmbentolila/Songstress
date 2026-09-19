@@ -233,7 +233,7 @@ Fedora/KDE, no package-manager integration), Flatpak stays deferred.
    To resume dev-only work later, recreate the user-level entry (Step 3
    notes: StartupWMClass=songstress).
 
-### Step 0b — Frozen border artifacts on window move — 🔶 diagnosed: upstream effect bug
+### Step 0b — Frozen border artifacts on window move — 🔶 root cause demonstrated: fractional display scale
 
 **Symptom**: fast side-to-side window moves leave a ~1px stale vertical line
 at the old window border (captured via screen recording; both left and right
@@ -241,32 +241,84 @@ borders seen). Vanishes on any forced redraw. ALSO: switching to the app
 shows stale translucency for a frame (glass backdrop shows the previous
 background until a repaint) — same BlurCache staleness family, include in
 the upstream report.
-**Diagnosis COMPLETE (2026-08-23)**:
-- ✅ Blur A/B (both directions): artifacts GONE with `better_blur_dx`
-  unloaded, back when loaded. Effect is the culprit.
-- ✅ RoundedCornersPass ruled out: `CornerRadius=0` + reload → artifacts
-  still appear. Config restored to 14.
-- User's build: kwin-effects-better-blur-dx 2.5.1 (git 20260808 e8475d0,
-  xarblu fork — taj-ny's original ARCHIVED Nov 2025). Build already contains
-  upstream's July/Aug cache+scissor+ceil fixes ("fixup glScissor for small
-  dirtyRegions", "ceil glWidth/glHeight", "expand contentsRect by 1px").
-- Leading theory: stale/short glScissor in the BlurCache draw path clips
-  the exposed-region repaint at fractional scale (1.6×) — the final
-  device-pixel column of the old window rect is never repainted. Upstream
-  territory.
-- Upstream refs: xarblu/kwin-effects-better-blur-dx #92 (blur caching stale
-  transparency — closed by adding fixes, not a toggle), #14 (move
-  artifacts, closed), taj-ny #143 (artifacts at smallest blur strength,
-  open).
+**Diagnosis RE-FRAMED 2026-09-19 — the August conclusion rested on a false premise.**
+- ✅ Blur A/B (both directions, 2026-08-23): artifacts GONE with `better_blur_dx`
+  unloaded, back when loaded. Effect is the culprit. Still true.
+- ✅ RoundedCornersPass ruled out (2026-08-23): `CornerRadius=0` → artifacts still appear.
+- ❌ **PREMISE VOID**: "Build already contains upstream's July/Aug cache+scissor+ceil
+  fixes". `e8475d0` is the *"version 2.5.1"* commit dated **2026-06-23**; the COPR NVR's
+  `20260910_063354` is the BUILD timestamp, not the commit date. The installed tree was
+  **109 commits behind** and contained NONE of `f8417452`/`23e33084`/`d453bdb8`/`728307ff`.
+  Only `85ef43b1` "scissor out painted areas only" (Jun 20) was in it — checked per commit
+  with `compare/e8475d0...<sha>`, never by author date. Local proof that survives the
+  stripped binary: `strings -el` finds `BlurStrength`…`ForceContrastParams` (10/10 controls)
+  but NOT `BlurCacheIgnore`/`BlurCacheRateLimit`. Plain `strings` finds nothing for ANY key
+  — KConfigXT emits them as `QStringLiteral`, i.e. UTF-16. `nm` is useless (COPR strips).
+- ✅ **Rebuilt from source at `728307f`** (2026-08-06; all four scissor/cache commits + the
+  `BlurCacheIgnore` killswitch). **Artifacts still appear.** The missing fixes were never it.
+- ✅ Cache REUSE ruled out: `BlurCacheIgnore=true` (pipeline engaged, never reused) → still
+  appears. Caveat: `m_ignoreCache` has ONE use site (`blur_cache.cpp:325`, a forced flush),
+  so this exonerates stale cached CONTENT only, not the cache path.
+- ✅ Expansion SIZE ruled out: `BlurStrength=1` (expandSize 10) vs 15 (up to 150) behave
+  identically.
+- ✅✅ **DECISIVE — display scale 200% (integer): NO artifacts. 160%: they return.**
+- Measured from a cropped screenshot (1 image row = 1 device row): a SINGLE row, y=35,
+  L 79-84 vs 73-75 neighbours; window's current top edge y=66 → offset 31 device px =
+  **19.375 logical px** at 1.6×. One *device* row with no partial blend either side ⇒ the
+  shortfall happens AFTER the scale multiply, at the device-space boundary. The stale row
+  carries the effect's own transform (steeper gradient, `Saturation=150`), so the effect
+  painted it and the repaint region for the vacated area was one row short — NOT "nobody
+  requested a repaint".
+
+**Mechanism, named**: on KWin ≥ 6.6.90 the whole damage/paint-region block of
+`BlurEffect::prePaintWindow` is `#else`'d out to a bare `effects->prePaintWindow(view, w,
+data)`. The pre-6.6.90 branch computed its blur area as
+`view->mapToDeviceCoordinatesAligned(QRectF(blurRegion(w).boundingRect()).translated(w->pos()))`
+— explicit device space, explicit alignment. The 6.7 path hands KWin only
+`setPixelsToExpandRepaintsBelowOpaqueRegions(m_expandSize)` (an int, no scale multiply) and
+`setEffectBoundingRect(blurRegion(w).boundingRect())` (logical, unmapped). No device-coordinate
+alignment survives anywhere in the compiled path; KWin keeps geometry in logical scene coords,
+so at 1.6× the old rect's device edge is fractional and the repaint truncates at it.
+
+**S3 — NEW TO THE RECORD, AND BY DESIGN (do not file)**: blur is absent in the Overview and
+during minimize/maximize. Owner-observed for months, never written down by any prior pass.
+`window.cpp:156` returns false while minimized ("While minimized there's no reason to blur")
+and `setIsTransformed(false)` clears the flag commenting "Needed e.g. for Magic Lamp effect
+to not draw blur." Zero upstream issues mention overview. #65 "[REQ] change/disable blur on
+window state" is the thread if the behaviour should be configurable.
+
+**Tooling built (reusable)**: `~/src/bbdx-ab.sh {show|A|B|C|D|set|unset}` flips effect config
+and reloads WITHOUT unloading, via `org.kde.kwin.Effects.reconfigureEffect` — the August
+methodology's unload killed blur SYSTEM-WIDE for no reason. Reload genuinely re-reads
+kwinrc: writing `BlitMode=7` logged `better_blur_dx: Invalid BlitMode value: 7`, and 0
+warnings after restoring. Traps: `kwriteconfig6` wants `--key K --delete`, never
+`--delete K` (exits 0, does nothing); the KCM's restore-defaults deletes keys an agent wrote;
+`Effects.debug()`/`listEffects` are useless here.
+
 **Action**:
-- ⬜ File upstream issue with the screen recording (repo is active, similar
-  issues fixed within weeks). NOTE: GitHub showed "issue creation is
-  restricted" — user may need to comment on #14/#92 or file via KDE
-  bugzilla.
-- ⬜ Re-test after `dnf update kwin-effects-better-blur-dx` (user runs dnf).
-- Cosmetic meanwhile: artifact clears on any redraw over that area.
-- App-side fix impossible: the stale pixel is outside the moved window —
-  only the compositor/effect can repaint it.
+- ⬜ Report upstream (xarblu/kwin-effects-better-blur-dx; repo active, pushed 2026-09-10).
+  The suspect line is theirs, the API that dropped the alignment step is KWin's
+  `BackgroundEffectItem` — file with Xarblu first, cross-link KWin if the conversion belongs
+  compositor-side. Issue creation was restricted in Aug; commenting on #94 (ungated re-blur)
+  or #108 (stale cached content on a **fractional-scaled** output) is the fallback.
+- ⬜ Optional strengthening, both cheap, NEITHER DONE: 150% scale → proves fractional-ness
+  rather than 1.6 specifically; a different translucent window (Konsole ~90% opacity +
+  `BlurNonMatching=true`) → proves it isn't Songstress/Tauri/WebKitGTK.
+- ⬜ Ask infinality to bump the COPR snapshot: the NVR stamps a Sept build date on a June
+  commit and reads as "already contains the fixes". No packaged path forward exists —
+  `dnf repoquery` latest == the stale 2.5.1 build, so "re-test after dnf update" is moot.
+- ⬜ Box state: running a source build of `728307f` (sha256-identical to
+  `build/src/better_blur_dx.so`); the RPM is **intentionally removed**, so `dnf update`
+  won't restore or clobber it. A kwin/Plasma upgrade WILL break blur until rebuilt
+  (README: works only for the exact KWin version built against; a rebuilt `.so` needs
+  **logout+login** — DBus reload cannot swap the library, and Wayland has no `--replace`).
+- Cosmetic meanwhile: artifact clears on any redraw over that area; integer scale avoids it.
+- App-side fix impossible: the stale pixel is outside the moved window.
+- Superseded upstream refs kept for the record: #92 (closed 2026-07-09, the day
+  `ce052e39` ADDED the `BlurCacheIgnore` toggle — the August note "closed by adding fixes,
+  not a toggle" is out of date), #14 (closed 2025-12-08, off-screen trigger, different bug),
+  taj-ny #143 (artifacts at smallest blur strength, open — we did NOT reproduce that
+  strength dependence).
 
 ### Up next (user-confirmed 2026-08-30, after the motion-audit fixes)
 
@@ -341,7 +393,11 @@ the upstream report.
 - Tile size + sidebar row size sliders drive CSS custom properties.
 - Thumbnails at ~3 sizes, never downscale full-res at render time (Phase 2).
 - Glassmorphism, light/dark; `backdrop-filter` on chrome surfaces only;
-  KWin blur-behind needs Better Blur DX (Wayland clients can't request it).
+  KWin blur-behind needs Better Blur DX. (Aug note said "Wayland clients can't request
+  it" — the reason changed, the conclusion didn't: `ext-background-effect-v1` is live in
+  KWin (MR 4890, merged 2026-01-28) and in GNOME 51's mutter, but the request path is
+  GTK/KF6-owned, so a Tauri/WebKitGTK surface still cannot reach it. Force blur remains
+  the only lever for this window.)
 - `decorations: false`, custom macOS traffic lights.
 - Build order: UI on fake data → scanner → mpv IPC → MPRIS (early).
 
