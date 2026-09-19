@@ -4600,3 +4600,13 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   an import-shaped scan (parents as roots + `only` set): two discs in
   sibling folders land as one album, zero errors.
   Gates: cargo 109, check 0, vitest 99, build OK.
+
+### RPM release bump 0.11.1-1 → -2 (2026-09-19)
+
+  Step 0b re-framing landed as `a9c013e` (docs + the Cargo.lock 0.11.0→0.11.1 sync),
+  which the release build then reproduced **byte-for-byte** — the bundled
+  `/usr/bin/songstress` hashed identical to the installed one (`0eade7e0a3fb2c56…`,
+  21,506,792 bytes). No code shipped, so the version stays 0.11.1 in all three files;
+  per the 2026-09-13 rule the rebuild bumps rpm `release` instead, because 0.11.1-1 is
+  already installed and a same-EVR RPM reads as "already installed" with no upgrade path.
+  Release is packaging revision, not content.
