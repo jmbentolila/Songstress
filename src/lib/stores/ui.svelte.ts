@@ -43,8 +43,8 @@ export const ui = $state({
   ),
   /** Accent color (Step 4) — ONE hex; null = stock purple from app.css. */
   accentColor: load<string | null>("songstress.accentColor", null),
-  /** In-sidebar menu (Step 8b, iOS Settings-style stack): gear swaps the
-   *  artist stack for the menu stack; menuDetail = pushed pane
+  /** In-sidebar menu (Step 8b, iOS Settings-style stack): the hamburger swaps
+   *  the artist stack for the menu stack; menuDetail = pushed pane
    *  ("appearance" or a Rust menu id). Session-only. */
   menuOpen: false,
   menuDetail: null as string | null,

@@ -87,8 +87,15 @@ pub fn state() -> u8 {
 
 /// Spawn the registration on its own thread: it must outlive this call (the
 /// adopted objects keep the protocol binding alive) and never block setup.
+/// GNOME-derived sessions never implement the manager protocol — skip the
+/// broadcast there instead of roundtripping a registry that cannot answer.
 pub fn register(app: &tauri::AppHandle, service: &str, object_path: &str) {
     use tauri::Manager;
+    if crate::classify_de(&crate::desktop_env()) == "gnome" {
+        eprintln!("[appmenu-wayland] GNOME session: no Global Menu, skipping");
+        STATE.store(2, Ordering::SeqCst);
+        return;
+    }
     let Some(win) = app.get_webview_window("main") else {
         eprintln!("[appmenu-wayland] no main window");
         STATE.store(2, Ordering::SeqCst);

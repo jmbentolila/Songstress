@@ -86,7 +86,7 @@
              (It used to be a font-glyph ✕ here — the objection was the glyph's
              family, not its side: a text ✕ is a third typographic voice in a
              glass surface, and this header now draws the same cross the sidebar
-             gear morphs into.) -->
+             hamburger morphs into.) -->
         <SurfaceClose label="Close" onclick={close} />
       </header>
 

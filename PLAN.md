@@ -73,6 +73,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Artist-switch bridge: every artist tab replays a fast arrival variant (130 ms sink-out, 200 ms rise-in) | ✅ 2026-09-14 |
 | Album panel gradients: per-album hex overrides (album edit modal, below the artwork) + global kill switch (Appearance + Global Menu) | ✅ 2026-09-15 |
 | Screen dropper in the gradient editor (portal PickColor crosshair, per stop) | 🔶 2026-09-15 — shipped, needs one live pick + one Esc in the app |
+| GNOME portability: portal-first pickers, Adwaita stock accent, appmenu skip, hamburger menu | ✅ 2026-09-21 · **0.12.0** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -4610,3 +4611,32 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   per the 2026-09-13 rule the rebuild bumps rpm `release` instead, because 0.11.1-1 is
   already installed and a same-EVR RPM reads as "already installed" with no upgrade path.
   Release is packaging revision, not content.
+
+### GNOME portability pass (2026-09-21, unreleased — owner is moving to Fedora GNOME)
+
+  Four changes, all verified (cargo 113, check 0, vitest 99, build OK):
+
+  1. **Portal-first pickers** (`src-tauri/src/portal_files.rs`, new): every
+     file/folder picker (add-music-folder, import files/folder, relink, cover
+     art) now opens the xdg-desktop-portal FileChooser — GTK-native on GNOME,
+     Qt-native on Plasma — with the old kdialog command kept as a fallback
+     when the portal is unreachable (`lib.rs`: shared `AUDIO_GLOBS` so both
+     backends spell the same set; portal `None` = cancel, only `Err` falls
+     back). RPM `depends` drops `kdialog` (keeps `mpv`): a fresh GNOME install
+     no longer pulls KDE Frameworks. Tests: `uri_to_path` (plain/percent/
+     non-file) + `classify_de` (gnome/kde/mixed/empty).
+  2. **Adwaita stock accent** (`app.css` + `desktop_environment` command +
+     `App.svelte` once-at-startup `html[data-de]`): GNOME sessions get
+     `--accent #3584e4` (dark) / `#1c71d8` (light) + matching `--active`
+     wash. STOCK values only — a chosen accent writes inline vars and wins,
+     and the artwork gradients (playbar/panel) never read `--accent`, so they
+     keep album colors exactly as asked. Traffic lights untouched (owner will
+     theme GNOME himself).
+  3. **Appmenu skip on GNOME** (`wayland_appmenu.rs`): `register()` returns
+     early with state=2 when `classify_de == "gnome"` — no registry
+     roundtrip against a compositor that cannot answer. In-app sidebar menu
+     is unaffected (it never branched on this).
+  4. **Hamburger menu glyph** (`Sidebar.svelte`): the Feather cog is now
+     three bars in the app's icon geometry (16-box, 1.4 stroke, round caps —
+     the ✕ morph is shape-agnostic). aria-label/tooltip say "menu", not
+     "settings". The `.gear` button class stays as the internal hook.

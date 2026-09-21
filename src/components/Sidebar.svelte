@@ -617,26 +617,24 @@
     </div>
     <button
       class="gear"
-      aria-label={ui.menuOpen ? "Close settings" : "Open settings"}
-      use:tooltip={"Settings — press s to toggle"}
+      aria-label={ui.menuOpen ? "Close menu" : "Open menu"}
+      use:tooltip={"Menu — press s to toggle"}
       aria-expanded={ui.menuOpen}
       onclick={toggleSettings}
     >
-      <!-- Feather settings cog: the old circle+8-short-rays read as a
-           lightbulb/sun at 16px (user-reported). Feather keeps it in
-           the app's icon family; the morph is shape-agnostic. -->
+      <!-- Hamburger: GNOME's menu glyph (three bars), in the app's icon
+           family (16-unit box, 1.4 stroke, round caps — the ✕ geometry).
+           Morphs into the ✕ while the menu stack is open. -->
       <svg
-        class="icon icon-gear"
+        class="icon icon-burger"
         class:show={!ui.menuOpen}
-        viewBox="0 0 24 24"
+        viewBox="0 0 16 16"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"
+        stroke-width="1.4"
         stroke-linecap="round"
-        stroke-linejoin="round"
       >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        <path d="M3 4.5 H13 M3 8 H13 M3 11.5 H13" />
       </svg>
       <svg class="icon icon-x" class:show={ui.menuOpen} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
         <path d="M4 4 L12 12 M12 4 L4 12" />
@@ -1354,7 +1352,7 @@
     background: var(--active);
   }
 
-  /* Icon morph: gear and ✕ crossfade while rotating — a state change,
+  /* Icon morph: hamburger and ✕ crossfade while rotating — a state change,
      not a swap. 160ms ease-out (fast, purposeful). */
   .gear .icon {
     position: absolute;
@@ -1372,7 +1370,7 @@
     opacity: 0;
   }
 
-  .gear .icon-gear:not(.show) {
+  .gear .icon-burger:not(.show) {
     transform: translate(-50%, -50%) rotate(90deg);
   }
 

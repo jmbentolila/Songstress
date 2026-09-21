@@ -80,6 +80,21 @@ html[data-theme="light"] {
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
 }
 
+/* GNOME stock fallbacks: Adwaita-ish accent when the compositor is GNOME
+   (App.svelte sets html[data-de] from `desktop_environment`). STOCK values
+   only — a chosen accent writes inline --accent/--active on <html> and
+   beats these outright, and the artwork gradients (playbar/panel, when
+   enabled) never read --accent at all, so they keep their album colors. */
+html[data-de="gnome"][data-theme="dark"] {
+  --accent: #3584e4;
+  --active: rgba(53, 132, 228, 0.18);
+}
+
+html[data-de="gnome"][data-theme="light"] {
+  --accent: #1c71d8;
+  --active: rgba(28, 113, 216, 0.14);
+}
+
 * {
   box-sizing: border-box;
 }

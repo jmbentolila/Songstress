@@ -29,7 +29,7 @@
      verb it cannot honour (dismissing the queue does not quit the app). So the dot
      lives only where the window's controls live (the sidebar header), and every
      surface dismisses with this box, which is already the app's "put this away"
-     glyph: the sidebar gear morphs into the same ✕, same stroke, same geometry.
+     glyph: the sidebar hamburger morphs into the same ✕, same stroke, same geometry.
 
      WHY TOP-RIGHT: dismissal joins the far edge, so a head reads as
      "what this is" → "what to do about it" left to right, and a destructive action
