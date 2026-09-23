@@ -4761,3 +4761,17 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   ours dominating calculator/terminal/settings). Tile stays edge to edge;
   the stencil artwork scales 0.85 about center instead (mic 253×283 → 215×240
   of 512, ~42×47% of tile). Corners untouched. PNGs regenerated, RPM rebuilt.
+
+### Icon tile measured, not eyeballed (2026-09-23, 0.12.1, owner screenshots)
+
+  The mic shrinks were chasing the wrong variable: measuring the screenshots'
+  rendered pixels showed neighbors at 63px and ours at 72px — the dash renders
+  our hicolor PNG larger per canvas px than Hatter SVGs, so full-bleed overshot
+  by exactly the old margin (63/72 = 0.875 ≈ the original 0.86, which had been
+  accidentally right all along). Tile scale set to measured 0.875, mic back to
+  filling the tile 1:1 (predicted render: 63px = neighbors). Lesson, logged
+  for the next icon-size complaint: measure RENDERED pixels (screenshot), never
+  the asset — compositor/theme scaling is part of the system, and the first
+  two rounds "fixed" a tile that PNG-math said was small without ever checking
+  the screen. If the mic reads small now, that's glyph contrast — different
+  lever, do not touch the 0.875 without re-measuring.
