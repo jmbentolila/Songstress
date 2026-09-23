@@ -18,11 +18,11 @@
     <clipPath id="tile"><rect width="512" height="512" rx="115"/></clipPath>
     <mask id="stencil">
       <rect width="512" height="512" fill="black"/>
-      <!-- 0.85 mic scale (2026-09-23): full-bleed tile matched Hatter's size
-           but the near-white mic filled it edge to edge and read oversize in
-           the dash next to Hatter's aired-out glyphs. The tile stays edge to
-           edge; the artwork breathes instead. -->
-      <g transform="translate(256 256) scale(0.85) translate(-256 -256)">
+      <!-- 0.7 mic scale (2026-09-23, second pass): 0.85 still read oversize
+           next to the Hatter gear (~60% of tile) — the arcs + stand span the
+           full tile height and near-white on dark pops harder than the
+           theme's mid-tone glyphs. The tile stays edge to edge. -->
+      <g transform="translate(256 256) scale(0.7) translate(-256 -256)">
       <g transform="translate(252 268) rotate(40) translate(-252 -268)">
         <rect x="192" y="222" width="120" height="180" rx="60" fill="white"/>
         <path d="M 156 312 a 96 96 0 0 0 192 0" fill="none" stroke="white" stroke-width="30" stroke-linecap="round"/>
