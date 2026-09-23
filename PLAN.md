@@ -4741,3 +4741,15 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   restores ellipsis. Caveats found while probing: none of his 66 artist rows
   overflow at 260px/15px (verified synthetically), and the first `.row` is the
   "All Artists" button (different template) — future probes must skip index 0.
+
+### Full-bleed app icon for the Hatter dash (2026-09-23, 0.12.1)
+
+  Owner: our dash tile reads small next to Hatter's. Measured at 48px: Hatter
+  tiles are full-bleed (ink 0,0→48,48 on all 5 sampled), ours floated at
+  (3,3)→(45,45) — the 86% ratio from the 2026-09-05 KRunner tuning (full-bleed
+  printed over KDE's tiled rows). GNOME+Hatter is the daily driver now, so the
+  margin group is out of `assets/app-icon.svg` and PNGs regenerated via
+  `npx tauri icon`: new ink bbox is full 48. Same squircle language, same size
+  now. If KDE tiling complains later, the SVG comment names the lever. RPM
+  rebuilt from the merged tree (the earlier 0.12.1-1 was cut from the zenity
+  tree — stale, never installed, same EVR reused).
