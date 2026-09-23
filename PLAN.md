@@ -4753,3 +4753,11 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   now. If KDE tiling complains later, the SVG comment names the lever. RPM
   rebuilt from the merged tree (the earlier 0.12.1-1 was cut from the zenity
   tree — stale, never installed, same EVR reused).
+
+### Icon glyph airs out (2026-09-23, 0.12.1, owner screenshot)
+
+  Full-bleed overshot the other way: the near-white mic filled the tile edge
+  to edge and read oversize next to Hatter's aired-out glyphs (screenshot:
+  ours dominating calculator/terminal/settings). Tile stays edge to edge;
+  the stencil artwork scales 0.85 about center instead (mic 253×283 → 215×240
+  of 512, ~42×47% of tile). Corners untouched. PNGs regenerated, RPM rebuilt.
