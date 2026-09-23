@@ -4643,3 +4643,101 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   logged-and-swallowed by design). Open question: the portal FileChooser path
   was never clicked on this box — owner to test file import against it.
 
+### GNOME portability pass (2026-09-21, unreleased — owner is moving to Fedora GNOME)
+
+  Four changes, all verified (cargo 113, check 0, vitest 99, build OK):
+
+  1. **Portal-first pickers** (`src-tauri/src/portal_files.rs`, new): every
+     file/folder picker (add-music-folder, import files/folder, relink, cover
+     art) now opens the xdg-desktop-portal FileChooser — GTK-native on GNOME,
+     Qt-native on Plasma — with the old kdialog command kept as a fallback
+     when the portal is unreachable (`lib.rs`: shared `AUDIO_GLOBS` so both
+     backends spell the same set; portal `None` = cancel, only `Err` falls
+     back). RPM `depends` drops `kdialog` (keeps `mpv`): a fresh GNOME install
+     no longer pulls KDE Frameworks. Tests: `uri_to_path` (plain/percent/
+     non-file) + `classify_de` (gnome/kde/mixed/empty).
+  2. **Adwaita stock accent** (`app.css` + `desktop_environment` command +
+     `App.svelte` once-at-startup `html[data-de]`): GNOME sessions get
+     `--accent #3584e4` (dark) / `#1c71d8` (light) + matching `--active`
+     wash. STOCK values only — a chosen accent writes inline vars and wins,
+     and the artwork gradients (playbar/panel) never read `--accent`, so they
+     keep album colors exactly as asked. Traffic lights untouched (owner will
+     theme GNOME himself).
+  3. **Appmenu skip on GNOME** (`wayland_appmenu.rs`): `register()` returns
+     early with state=2 when `classify_de == "gnome"` — no registry
+     roundtrip against a compositor that cannot answer. In-app sidebar menu
+     is unaffected (it never branched on this).
+  4. **Hamburger menu glyph** (`Sidebar.svelte`): the Feather cog is now
+     three bars in the app's icon geometry (16-box, 1.4 stroke, round caps —
+     the ✕ morph is shape-agnostic). aria-label/tooltip say "menu", not
+     "settings". The `.gear` button class stays as the internal hook.
+
+### GNOME opaque chrome (2026-09-23, unreleased 0.12.1)
+
+  Owner decision: embrace GNOME instead of forcing glass — translucency goes on
+  GNOME, KDE keeps the tuned 0.8/0.7 glass untouched. Single binary: 0.12.0's
+  `desktop_environment` command feeds `html[data-de]` ("gnome" on GNOME-derived
+  sessions — everything else stays glass, the reference look). app.css pins the four backdrop-revealing
+  tokens (--bg-grid, --bg-chrome, --panel-bg, --panel-bg-strong) to their solid
+  hues in both themes + solid fill for floating pills (.app-tip, .vol-tip);
+  hairlines/washes/scrims/shadows sit ON surfaces and are untouched. Coverage by
+  token census: every structural surface (stage, sidebar, playbar, pops, all
+  modals, panel) goes through those tokens; component-level rgba is scrims over
+  artwork/content (still correct opaque). Panel art gradient needs nothing
+  (layers over the token base → becomes a tint). Window keeps transparent(true)
+  — opaque content composites opaque. DOM probe (no screenshot):
+  dataset.de="gnome", --bg-grid computes rgb(22, 22, 28). Gates: cargo 109,
+  check 0. Owner to eyeball the result (he drives UI).
+
+### Sidebar traffic lights → system spec, both desktops (2026-09-23, 0.12.1)
+
+  Owner: read ~/.config/gtk-{3.0,4.0}/gtk.css + windows-assets (system traffic
+  lights, gtk3/gtk4 sets identical) and wear their dot + glyph colors in-app.
+  Scope verified before building: the sidebar trio is the ONLY in-app traffic
+  light (tb-* classes and --tb-dot have no other consumers) — the owner's
+  read was right, no correction needed. Applied to BOTH desktops (Klassy
+  mirror bypassed for the sidebar): #FF5F57/#FEBD2E/#28C840, hover = rest
+  (glyph appearance is the feedback), pressed #E04C44/#DC9E22/#1FAA33, glyphs
+  rgba(0,0,0,.62). Geometry left alone (15px/11px vs system's 16px/6px —
+  colors were the ask). --tb-* vars now serve only the SurfaceClose family.
+  Hamburger + modal ✕ stay white per owner (different families from traffic
+  glyphs): hamburger already --text, SurfaceClose --text-dim → --text (plus a
+  stale gear comment fixed). Probe: close/max/glyph computed values match the
+  SVG spec. Gates: check 0. Hover/pressed need owner eyes. (Follow-up: glyphs
+  8→9→10px at owner request; 10px overshoots the system 60% proportion
+  deliberately — owner-approved.)
+
+### Bundled Inter as the standard font (2026-09-23, 0.12.1)
+
+  The stack said Inter but the box rendered Noto Sans (never bundled, never
+  installed). Owner call: bundle it, standard on both desktops (a GNOME
+  variant only if he asks later). `@fontsource-variable/inter` (one variable
+  file covers the used 400/600/700), imported in main.ts, stack leads with
+  "Inter Variable". Offline-safe, no dnf. Probe: 600-weight check true,
+  body computes "Inter Variable". Gates: check 0, build OK (woff2 subsets
+  in dist).
+
+### Global +2px type scale (2026-09-23, 0.12.1)
+
+  Owner: +2pt everywhere. Mechanical pass: all 120 `font-size: Npx`
+  declarations across 17 files (src .svelte + app.css only — no .ts) bumped
+  by script, diff-verified pure (no other line touched). .5 steps preserved
+  (11.5→13.5). Fixed heights/rows/gaps untouched: 15px rows and tight
+  microcopy spots may clip — owner eyeballing (he drives UI). Gates:
+  check 0.
+
+### Sidebar artist marquee + loop dwell (2026-09-23, 0.12.1)
+
+  Owner: overlong artist names slide on hover (playbar behavior), and EVERY
+  text marquee dwells at the loop point before restarting. PlayBar's `marquee`
+  action extracted to src/lib/marquee.ts unchanged + `hover` mode (measure on
+  mouseenter, teardown on leave; rest state stays pure ellipsis). Strip +
+  keyframes moved to app.css as the shared language; per-consumer triggers stay
+  scoped (playbar: always-on w/ 1.2s first-loop delay + paused-park; sidebar:
+  hover-gated, no delay). Dwell: keyframes hold the last 25% at the loop point
+  (twin makes the jump invisible); duration = travel/0.75 so travel keeps the
+  37.5px/s device-pixel speed and the rest scales with the journey. Live-row probe:
+  is-over + twin + dur 18.49s for a 520px run (math checks), teardown on leave
+  restores ellipsis. Caveats found while probing: none of his 66 artist rows
+  overflow at 260px/15px (verified synthetically), and the first `.row` is the
+  "All Artists" button (different template) — future probes must skip index 0.
