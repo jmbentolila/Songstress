@@ -73,8 +73,8 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Artist-switch bridge: every artist tab replays a fast arrival variant (130 ms sink-out, 200 ms rise-in) | ✅ 2026-09-14 |
 | Album panel gradients: per-album hex overrides (album edit modal, below the artwork) + global kill switch (Appearance + Global Menu) | ✅ 2026-09-15 |
 | Screen dropper in the gradient editor (portal PickColor crosshair, per stop) | 🔶 2026-09-15 — shipped, needs one live pick + one Esc in the app |
-| Lost 0.12.0 source reconstructed (neutral descriptions + appmenu GNOME skip, journal-verified) | ✅ 2026-09-23 |
-| GNOME support: single RPM + runtime fallbacks (zenity pickers, rich dep) | ✅ 2026-09-23 · **0.12.1** |
+| GNOME portability: portal-first pickers, Adwaita stock accent, appmenu skip, hamburger menu | ✅ 2026-09-21 · **0.12.0** |
+| GNOME follow-ups: opaque chrome, system-spec traffic lights, Inter, +2px type, marquee + dwell (rebased onto 0.12.0, zenity detour reverted) | ✅ 2026-09-23 · **0.12.1** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -4619,125 +4619,27 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   already installed and a same-EVR RPM reads as "already installed" with no upgrade path.
   Release is packaging revision, not content.
 
-### GNOME support: single RPM + runtime fallbacks (2026-09-23, **0.12.1**)
+### Fresh-box setup + the 0.12.0 surprise (2026-09-23, **0.12.1**)
 
-  Fresh Fedora Workstation (GNOME, Wayland, GNOME-only box); owner confirmed the
-  app runs after the KDE→GNOME move. The 0.12.0 reinstall RPM was built from a
-  tree whose source was lost in the format — this checkout was clean at 0.11.1.
-  Reconstructed 0.12.0's known delta from the installed artifact: neutral
-  descriptions (`rpm -qi` reads "for Fedora / Plasma and GNOME") and the appmenu
-  GNOME skip (`[appmenu-wayland] GNOME session: no Global Menu, skipping` in the
-  journal) — both re-applied here. Claim hygiene: the binary proves the BEHAVIOR
-  shipped, not the exact code; the skip is a faithful reconstruction, and it is
-  behavior-preserving anyway (the existing path already fails fast with STATE=2
-  where the KWin protocol is absent — the skip just avoids the thread+roundtrip).
-  Single-RPM decision (owner-approved, over two DE packages): the DE surface is
-  two picker call sites + one dep + description strings, so fallbacks win over a
-  packaging matrix. `pick_directory`/`pick_image` (lib.rs) try kdialog with
-  byte-identical argv, fall to zenity (`--file-selection --directory` /
-  `--file-filter=…`) only on spawn-NotFound; cancel stays Ok(None) on either;
-  neither-installed errors name what to install. New `run_zenity` helper shared by
-  both. RPM `depends` is now `["mpv", "(zenity or kdialog)"]` (boolean dep — the
-  KDE spin already satisfies it via kdialog, bare GNOME pulls small zenity) and
-  `release` resets to `"1"` under the new version. Menu side needed nothing else.
-  GNOME-only: the kdialog branch is verified by argv-identity, never a live pick.
-  README greeting + AGENTS.md (desktop matrix, scoped KDE-only gotchas, GNOME
-  verification note) updated. Gates: check 0, vitest 99, build OK; `cargo
-  test --lib` was BLOCKED (no toolchain/sudo on the fresh box) until the owner
-  ran the dnf line, then: **109 passed, 0 failed** — the full gate set is green
-  and the uncompiled-Rust flag is lifted. Dev loop restored on GNOME: rustup
-  stable-minimal in ~/.cargo + recreated `~/.config/systemd/user/songstress-dev.service`
-  (wiped by the format) + `systemctl --user start songstress-dev` → 0.12.1 debug
-  binary running, webview booted, watcher live. First live proof of the new code:
-  the journal shows the reconstructed `[appmenu-wayland] GNOME session: no Global
-  Menu, skipping`. Prod 0.12.0 kept running alongside (MPRIS/bus-name conflicts
-  are logged-and-swallowed by design). The first *release* build from a toolchain
-  box must still verify `rpm -qpR` — DONE 2026-09-23: release build green
-  (3m29s), `rpm -qpR` shows `mpv` + `(zenity or kdialog)` (rich dep survived
-  tauri-bundler — assumption closed), descriptions neutral, EVR 0.12.1-1 cleanly
-  upgrades installed 0.12.0-1. RPM: src-tauri/target/release/bundle/rpm/
-  Songstress-0.12.1-1.x86_64.rpm (12MB). Committed eb03759 (31 files,
-  quantified message); push pending — no gh creds agent-side, owner to run
-  `git push origin main`.
-  (tauri-bundler passthrough of rich-dep parens is assumed, not proven). UI
-  nuances from the DE change are next, per owner.
-  Same-evening follow-up (owner-tested: file import broken, folder import fine) —
-  the first pass converted only pick_directory/pick_image and missed the other two
-  kdialog call sites (choose_import_files, choose_relink_file). The binary-strings
-  probe HAD counted 4 kdialog refs; the fix covered 2. Lesson: enumerate dialog
-  call sites from SOURCE (`Command::new`), never from binary strings. Both now
-  route through run_zenity (multi-file uses --multiple with a newline --separator
-  so its output parses through the same lines path). Folded into unreleased
-  0.12.1, no extra bump. Gates re-run: cargo 109 green, dev restarted, owner to
-  verify the live dialog.
+  Fresh Fedora Workstation (GNOME, Wayland, GNOME-only box); this checkout was
+  clean at 0.11.1 with no toolchain, so the evening opened with rustup
+  stable-minimal + the owner-run dnf line (Tauri Fedora prereqs) + a recreated
+  `songstress-dev.service` (wiped by the format) + an SSH deploy key so the
+  agent can push. Wrong turn, honestly logged: assuming 0.12.0's source was
+  lost in the format, the session "reconstructed" it from the installed binary
+  (descriptions + appmenu skip matched) and built a kdialog→zenity fallback
+  stack with a `(zenity or kdialog)` rich dep — including a real miss (only 2
+  of 4 kdialog call sites converted at first; the binary-strings probe HAD
+  counted 4 — enumerate dialog sites from SOURCE, never from strings). The
+  first push attempt then failed on a moved remote: 0.12.0 (`ce17612`) had been
+  pushed from the old machine all along — portal-first pickers, Adwaita stock
+  accents, the same appmenu skip, the hamburger. The zenity stack was REVERTED
+  (portal-first is the approved architecture: compositor-native on both DEs,
+  zero picker deps in the RPM) and tonight's UI batch merged onto origin/main.
+  Read the superseded details below as the detour, not the design. Gates after
+  the dnf line: cargo 109, check 0, vitest 99, build OK; pre-rebase release
+  build green (3m29s — its rich-dep verification is moot after the revert).
+  Prod 0.12.0 kept running alongside throughout (MPRIS/bus-name conflicts are
+  logged-and-swallowed by design). Open question: the portal FileChooser path
+  was never clicked on this box — owner to test file import against it.
 
-### GNOME opaque chrome (2026-09-23, unreleased 0.12.1)
-
-  Owner decision: embrace GNOME instead of forcing glass — translucency goes on
-  GNOME, KDE keeps the tuned 0.8/0.7 glass untouched. Single binary: new
-  `desktop_session` command (lowercased XDG_CURRENT_DESKTOP) + App-shell boot
-  invoke sets html[data-de="gnome"] on positive match only (everything else
-  stays glass, the reference look). app.css pins the four backdrop-revealing
-  tokens (--bg-grid, --bg-chrome, --panel-bg, --panel-bg-strong) to their solid
-  hues in both themes + solid fill for floating pills (.app-tip, .vol-tip);
-  hairlines/washes/scrims/shadows sit ON surfaces and are untouched. Coverage by
-  token census: every structural surface (stage, sidebar, playbar, pops, all
-  modals, panel) goes through those tokens; component-level rgba is scrims over
-  artwork/content (still correct opaque). Panel art gradient needs nothing
-  (layers over the token base → becomes a tint). Window keeps transparent(true)
-  — opaque content composites opaque. DOM probe (no screenshot):
-  dataset.de="gnome", --bg-grid computes rgb(22, 22, 28). Gates: cargo 109,
-  check 0. Owner to eyeball the result (he drives UI).
-
-### Sidebar traffic lights → system spec, both desktops (2026-09-23, 0.12.1)
-
-  Owner: read ~/.config/gtk-{3.0,4.0}/gtk.css + windows-assets (system traffic
-  lights, gtk3/gtk4 sets identical) and wear their dot + glyph colors in-app.
-  Scope verified before building: the sidebar trio is the ONLY in-app traffic
-  light (tb-* classes and --tb-dot have no other consumers) — the owner's
-  read was right, no correction needed. Applied to BOTH desktops (Klassy
-  mirror bypassed for the sidebar): #FF5F57/#FEBD2E/#28C840, hover = rest
-  (glyph appearance is the feedback), pressed #E04C44/#DC9E22/#1FAA33, glyphs
-  rgba(0,0,0,.62). Geometry left alone (15px/11px vs system's 16px/6px —
-  colors were the ask). --tb-* vars now serve only the SurfaceClose family.
-  Hamburger + modal ✕ stay white per owner (different families from traffic
-  glyphs): hamburger already --text, SurfaceClose --text-dim → --text (plus a
-  stale gear comment fixed). Probe: close/max/glyph computed values match the
-  SVG spec. Gates: check 0. Hover/pressed need owner eyes. (Follow-up: glyphs
-  8→9→10px at owner request; 10px overshoots the system 60% proportion
-  deliberately — owner-approved.)
-
-### Bundled Inter as the standard font (2026-09-23, 0.12.1)
-
-  The stack said Inter but the box rendered Noto Sans (never bundled, never
-  installed). Owner call: bundle it, standard on both desktops (a GNOME
-  variant only if he asks later). `@fontsource-variable/inter` (one variable
-  file covers the used 400/600/700), imported in main.ts, stack leads with
-  "Inter Variable". Offline-safe, no dnf. Probe: 600-weight check true,
-  body computes "Inter Variable". Gates: check 0, build OK (woff2 subsets
-  in dist).
-
-### Global +2px type scale (2026-09-23, 0.12.1)
-
-  Owner: +2pt everywhere. Mechanical pass: all 120 `font-size: Npx`
-  declarations across 17 files (src .svelte + app.css only — no .ts) bumped
-  by script, diff-verified pure (no other line touched). .5 steps preserved
-  (11.5→13.5). Fixed heights/rows/gaps untouched: 15px rows and tight
-  microcopy spots may clip — owner eyeballing (he drives UI). Gates:
-  check 0.
-
-### Sidebar artist marquee + loop dwell (2026-09-23, 0.12.1)
-
-  Owner: overlong artist names slide on hover (playbar behavior), and EVERY
-  text marquee dwells at the loop point before restarting. PlayBar's `marquee`
-  action extracted to src/lib/marquee.ts unchanged + `hover` mode (measure on
-  mouseenter, teardown on leave; rest state stays pure ellipsis). Strip +
-  keyframes moved to app.css as the shared language; per-consumer triggers stay
-  scoped (playbar: always-on w/ 1.2s first-loop delay + paused-park; sidebar:
-  hover-gated, no delay). Dwell: keyframes hold the last 25% at the loop point
-  (twin makes the jump invisible); duration = travel/0.75 so travel keeps the
-  37.5px/s device-pixel speed and the rest scales with the journey. Live-row probe:
-  is-over + twin + dur 18.49s for a 520px run (math checks), teardown on leave
-  restores ellipsis. Caveats found while probing: none of his 66 artist rows
-  overflow at 260px/15px (verified synthetically), and the first `.row` is the
-  "All Artists" button (different template) — future probes must skip index 0.

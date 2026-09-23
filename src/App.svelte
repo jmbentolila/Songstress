@@ -19,21 +19,26 @@
   import { announcer } from "./lib/stores/announcer.svelte";
   import { playback, initEq } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { invoke } from "@tauri-apps/api/core";
+  import { invoke } from "@tauri-apps/api/core";
+  import { isTauri } from "./lib/window";
 
   startViewportGuard();
   void initSettings();
-  // Per-DE chrome (0.12.x): GNOME has no compositor blur, so it gets opaque
-  // surfaces via html[data-de="gnome"] (app.css); KDE keeps the glass.
-  // Positive GNOME detection only — everything else stays glass (reference).
-  void invoke<string>("desktop_session")
-    .then((d) => {
-      if (d.includes("gnome")) document.documentElement.dataset.de = "gnome";
-    })
-    .catch(() => undefined);
   void initEq();
   initScanner();
   void initMenu();
+
+  // Desktop environment for DE-gated stock styling (GNOME Adwaita
+  // fallbacks in app.css). Runs once: a chosen accent writes inline vars
+  // and beats the stock values outright, and the artwork gradients never
+  // read --accent, so they keep their album colors on every DE.
+  if (isTauri) {
+    invoke<string>("desktop_environment")
+      .then((de) => {
+        document.documentElement.dataset.de = de;
+      })
+      .catch(() => {});
+  }
 
   // Keep the Rust-owned menu model's dynamic bits (playing/scanning/staged/
   // theme/gradient) in sync so the Global Menu re-render. The MODE (ui.theme),
@@ -53,7 +58,7 @@ import { invoke } from "@tauri-apps/api/core";
   });
 
   // Drag-and-drop = the second import path (Step 2a): dropped files/folders
-  // go through the exact same staging flow as the kdialog pickers.
+  // go through the exact same staging flow as the portal pickers.
   $effect(() => {
     if (!library.live) return;
     void getCurrentWebview().onDragDropEvent((event) => {

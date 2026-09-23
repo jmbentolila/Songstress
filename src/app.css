@@ -88,8 +88,8 @@ html[data-theme="light"] {
    pills (.app-tip, .vol-tip) get the solid panel fill so they stay legible
    over busy rows. Everything else (hairlines, washes, scrims, shadows) sits
    ON surfaces and is untouched. Engaged by html[data-de="gnome"], which the
-   App shell sets from the `desktop_session` command (positive GNOME match
-   only — every other desktop stays glass). */
+   App shell sets from `desktop_environment` ("gnome" on GNOME-derived
+   sessions — every other desktop stays glass). */
 html[data-de="gnome"][data-theme="dark"] {
   --bg-grid: rgb(22, 22, 28);
   --bg-chrome: rgb(22, 22, 28);
@@ -132,6 +132,20 @@ html[data-de="gnome"] .vol-tip {
   100% {
     transform: translateX(var(--mq-to));
   }
+}
+/* GNOME stock fallbacks: Adwaita-ish accent when the compositor is GNOME
+   (App.svelte sets html[data-de] from `desktop_environment`). STOCK values
+   only — a chosen accent writes inline --accent/--active on <html> and
+   beats these outright, and the artwork gradients (playbar/panel, when
+   enabled) never read --accent at all, so they keep their album colors. */
+html[data-de="gnome"][data-theme="dark"] {
+  --accent: #3584e4;
+  --active: rgba(53, 132, 228, 0.18);
+}
+
+html[data-de="gnome"][data-theme="light"] {
+  --accent: #1c71d8;
+  --active: rgba(28, 113, 216, 0.14);
 }
 
 * {

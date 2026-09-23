@@ -618,24 +618,24 @@
     </div>
     <button
       class="gear"
-      aria-label={ui.menuOpen ? "Close settings" : "Open settings"}
-      use:tooltip={"Settings — press s to toggle"}
+      aria-label={ui.menuOpen ? "Close menu" : "Open menu"}
+      use:tooltip={"Menu — press s to toggle"}
       aria-expanded={ui.menuOpen}
       onclick={toggleSettings}
     >
-      <!-- Hamburger: the settings toggle. The ✕ morph below is
-           shape-agnostic. -->
+      <!-- Hamburger: GNOME's menu glyph (three bars), in the app's icon
+           family (16-unit box, 1.4 stroke, round caps — the ✕ geometry).
+           Morphs into the ✕ while the menu stack is open. -->
       <svg
-        class="icon icon-menu"
+        class="icon icon-burger"
         class:show={!ui.menuOpen}
-        viewBox="0 0 24 24"
+        viewBox="0 0 16 16"
         fill="none"
         stroke="currentColor"
-        stroke-width="2"
+        stroke-width="1.4"
         stroke-linecap="round"
-        stroke-linejoin="round"
       >
-        <path d="M3 6h18 M3 12h18 M3 18h18" />
+        <path d="M3 4.5 H13 M3 8 H13 M3 11.5 H13" />
       </svg>
       <svg class="icon icon-x" class:show={ui.menuOpen} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
         <path d="M4 4 L12 12 M12 4 L4 12" />
@@ -1359,7 +1359,7 @@
     background: var(--active);
   }
 
-  /* Icon morph: menu and ✕ crossfade while rotating — a state change,
+  /* Icon morph: hamburger and ✕ crossfade while rotating — a state change,
      not a swap. 160ms ease-out (fast, purposeful). */
   .gear .icon {
     position: absolute;
@@ -1377,7 +1377,7 @@
     opacity: 0;
   }
 
-  .gear .icon-menu:not(.show) {
+  .gear .icon-burger:not(.show) {
     transform: translate(-50%, -50%) rotate(90deg);
   }
 

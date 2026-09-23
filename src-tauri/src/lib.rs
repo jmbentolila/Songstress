@@ -11,6 +11,7 @@ mod menu_dbus;
 mod mpris;
 mod mpv;
 mod pick_color;
+mod portal_files;
 mod wayland_appmenu;
 mod watcher;
 mod window_state;
@@ -23,6 +24,42 @@ struct AppState {
     db_path: PathBuf,
     db: Mutex<rusqlite::Connection>,
 }
+
+/// Lowercased `XDG_CURRENT_DESKTOP:XDG_SESSION_DESKTOP` pair for
+/// compositor-specific behavior (Global Menu registration, stock palette,
+/// picker choice). Read live — tests pass their own strings in.
+pub(crate) fn desktop_env() -> String {
+    let cur = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let sess = std::env::var("XDG_SESSION_DESKTOP").unwrap_or_default();
+    format!("{cur}:{sess}").to_lowercase()
+}
+
+/// gnome/pantheon/cinnamon sessions never implement
+/// `org_kde_kwin_appmenu_manager` and ship no kwinrc/klassyrc — the Global
+/// Menu broadcast and the KWin decoration read are dead ends there.
+pub(crate) fn classify_de(de: &str) -> &'static str {
+    if (de.contains("gnome") || de.contains("pantheon") || de.contains("cinnamon"))
+        && !(de.contains("kde") || de.contains("plasma"))
+    {
+        "gnome"
+    } else if de.contains("kde") || de.contains("plasma") {
+        "kde"
+    } else {
+        "other"
+    }
+}
+
+/// Stock-palette + capability gate for the frontend (`html[data-de]`).
+#[tauri::command]
+fn desktop_environment() -> String {
+    classify_de(&desktop_env()).to_string()
+}
+
+/// Shared audio globs: portal filters AND the kdialog fallback spell the
+/// same set, so switching backends never changes what is pickable.
+const AUDIO_GLOBS: &[&str] = &[
+    "*.mp3", "*.flac", "*.m4a", "*.aif", "*.aiff", "*.ogg", "*.opus", "*.wav",
+];
 
 /// Handle to the MPV playback engine (Phase 3), spawned once at setup.
 pub struct Engine(pub std::sync::Arc<mpv::Mpv>);
@@ -1103,17 +1140,6 @@ fn config_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(home).join(".config")
 }
 
-/// Desktop id for the frontend's per-DE chrome (opaque surfaces on GNOME —
-/// Mutter has no compositor blur, so translucency only shows sharp wallpaper;
-/// KDE keeps the glass). Lowercased XDG_CURRENT_DESKTOP; the frontend matches
-/// `gnome` as a substring (the var is a colon list: `ubuntu:GNOME`).
-#[tauri::command]
-fn desktop_session() -> String {
-    std::env::var("XDG_CURRENT_DESKTOP")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-}
-
 #[tauri::command]
 fn kde_window_decoration() -> WindowDecoration {
     let kwin = read_ini(&config_dir().join("kwinrc"));
@@ -1366,67 +1392,108 @@ fn init_settings(
 
 // --- Library dump (Phase 2 M4) ----------------------------------------------
 
-/// Native folder picker — kdialog on Plasma, zenity everywhere else.
-/// Single-RPM rule (0.12.1): GNOME ships no kdialog, so a MISSING kdialog
-/// binary falls through to zenity; the kdialog argv stays byte-identical so
-/// the Plasma path renders exactly as before. A cancel (nonzero exit / empty
-/// output) is Ok(None) on EITHER dialog — a spawned dialog is never followed
-/// by the other one. `start` seeds the dialog location.
+/// Folder picker: portal-native dialog first (GTK on GNOME, Qt on Plasma),
+/// kdialog fallback when the portal is unreachable — so no session ever
+/// needs a foreign toolkit installed just to pick a folder. Cancel or empty
+/// output → None. `start` seeds the dialog location.
 async fn pick_directory(start: PathBuf, title: &str) -> Result<Option<String>, String> {
+    match portal_files::open_directory(title, &start).await {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            eprintln!("[portal] directory picker unavailable, kdialog fallback: {e}");
+            kdialog_pick_directory(start, title).await
+        }
+    }
+}
+
+async fn kdialog_pick_directory(start: PathBuf, title: &str) -> Result<Option<String>, String> {
     let title = title.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let start_arg = start.to_string_lossy().to_string();
-        match std::process::Command::new("kdialog")
-            .args(["--getexistingdirectory", &start_arg, "--title", &title])
+        let out = std::process::Command::new("kdialog")
+            .args([
+                "--getexistingdirectory",
+                &start.to_string_lossy(),
+                "--title",
+                &title,
+            ])
             .output()
-        {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let filename = format!("--filename={start_arg}");
-                let ztitle = format!("--title={title}");
-                run_zenity(&["--file-selection", "--directory", &filename, &ztitle])
-            }
-            Err(e) => Err(format!("kdialog: {e}")),
-            Ok(out) => {
-                if !out.status.success() || out.stdout.is_empty() {
-                    return Ok(None);
-                }
-                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                Ok(if path.is_empty() { None } else { Some(path) })
-            }
+            .map_err(|e| format!("kdialog: {e}"))?;
+        if !out.status.success() || out.stdout.is_empty() {
+            return Ok(None);
         }
+        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(if path.is_empty() { None } else { Some(path) })
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// zenity runner shared by both pickers (the GNOME half of the single-RPM
-/// rule). Cancel exits nonzero with empty stdout → Ok(None), same contract
-/// as kdialog. A missing zenity HERE means neither picker exists — the RPM's
-/// `(zenity or kdialog)` dep should make that unreachable, so the error says
-/// exactly what to install instead of a bare "No such file".
-fn run_zenity(args: &[&str]) -> Result<Option<String>, String> {
-    let out = std::process::Command::new("zenity")
-        .args(args)
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "neither kdialog nor zenity is installed (install one of them)".to_string()
-            } else {
-                format!("zenity: {e}")
-            }
-        })?;
-    if !out.status.success() || out.stdout.is_empty() {
-        return Ok(None);
+/// File picker: portal first, kdialog fallback (same contract as
+/// pick_directory). `portal_filters` and `kdialog_filter` spell the same
+/// set in each backend's syntax. `multiple` splits lines for --multiple.
+async fn open_files(
+    title: &str,
+    start: PathBuf,
+    portal_filters: &[(&str, &[&str])],
+    kdialog_filter: &str,
+    multiple: bool,
+) -> Result<Option<Vec<String>>, String> {
+    match portal_files::open_files(title, &start, portal_filters, multiple).await {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            eprintln!("[portal] file picker unavailable, kdialog fallback: {e}");
+            kdialog_open_files(title, start, kdialog_filter, multiple).await
+        }
     }
-    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    Ok(if path.is_empty() { None } else { Some(path) })
 }
 
-/// Native image picker (the artwork strip's "from disk" door) — kdialog on
-/// Plasma, zenity elsewhere (same single-RPM rule as `pick_directory`).
-/// Starts in ~/Pictures, which is where a downloaded cover realistically
-/// waits. AUDIO files are pickable too (owner ask 2026-09-05): the picker's
-/// own mp3/flac is often the only carrier of the artwork — `read_image`
+fn kdialog_open_files(
+    title: &str,
+    start: PathBuf,
+    kdialog_filter: &str,
+    multiple: bool,
+) -> impl std::future::Future<Output = Result<Option<Vec<String>>, String>> {
+    let title = title.to_string();
+    let start_str = start.to_string_lossy().to_string();
+    let filter = kdialog_filter.to_string();
+    async move {
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut args = vec![
+                "--getopenfilename".to_string(),
+                start_str,
+                filter,
+                "--title".to_string(),
+                title,
+            ];
+            if multiple {
+                args.push("--multiple".to_string());
+                args.push("--separate-output".to_string());
+            }
+            let out = std::process::Command::new("kdialog")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("kdialog: {e}"))?;
+            if !out.status.success() || out.stdout.is_empty() {
+                return Ok(None);
+            }
+            let text = String::from_utf8_lossy(&out.stdout);
+            let files: Vec<String> = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect();
+            Ok(if files.is_empty() { None } else { Some(files) })
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+}
+
+/// Cover-art picker (the artwork strip's "from disk" door). Starts in
+/// ~/Pictures, which is where a downloaded cover realistically waits.
+/// AUDIO files are pickable too (owner ask 2026-09-05): the picker's own
+/// mp3/flac is often the only carrier of the artwork — `read_image`
 /// extracts the embedded picture from such a path.
 #[tauri::command]
 async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
@@ -1435,41 +1502,20 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
         .map(|h| h.join("Pictures"))
         .unwrap_or_else(|_| music_root(&state));
     let start = if pictures.is_dir() { pictures } else { music_root(&state) };
-    let start_str = start.to_string_lossy().to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        match std::process::Command::new("kdialog")
-            .args([
-                "--getopenfilename",
-                &start_str,
-                "Images (*.png *.jpg *.jpeg *.webp *.gif *.tiff);;Audio files (*.mp3 *.flac *.m4a *.aiff *.aif *.ogg *.oga *.opus *.wav);;All files (*)",
-                "--title",
-                "Choose Cover Image or Audio File",
-            ])
-            .output()
-        {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let filename = format!("--filename={start_str}");
-                run_zenity(&[
-                    "--file-selection",
-                    &filename,
-                    "--title=Choose Cover Image or Audio File",
-                    "--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif *.tiff",
-                    "--file-filter=Audio files | *.mp3 *.flac *.m4a *.aiff *.aif *.ogg *.oga *.opus *.wav",
-                    "--file-filter=All files | *",
-                ])
-            }
-            Err(e) => Err(format!("kdialog: {e}")),
-            Ok(out) => {
-                if !out.status.success() || out.stdout.is_empty() {
-                    return Ok(None);
-                }
-                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                Ok(if path.is_empty() { None } else { Some(path) })
-            }
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let image_globs: &[&str] = &["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.tiff"];
+    Ok(open_files(
+        "Choose Cover Image or Audio File",
+        start,
+        &[
+            ("Images", image_globs),
+            ("Audio files", AUDIO_GLOBS),
+            ("All files", &["*"]),
+        ],
+        "Images (*.png *.jpg *.jpeg *.webp *.gif *.tiff);;Audio files (*.mp3 *.flac *.m4a *.aiff *.aif *.ogg *.oga *.opus *.wav);;All files (*)",
+        false,
+    )
+    .await?
+    .and_then(|mut v| v.pop()))
 }
 
 /// Screen color picker (Step 9b: the dropper in the panel-gradient editor).
@@ -1596,7 +1642,7 @@ fn get_music_folders(state: tauri::State<'_, AppState>) -> Result<Vec<String>, S
         .collect())
 }
 
-/// Add a music folder and rescan. `path: None` opens the kdialog picker
+/// Add a music folder and rescan. `path: None` opens the system picker
 /// (starting at the most recent root). Returns the updated folder list, or
 /// None when the user cancelled the picker.
 #[tauri::command]
@@ -1674,67 +1720,23 @@ async fn remove_music_folder(
 // the rows; discard_imports forgets the rows and touches no file the app did not
 // write itself. What is pending lives in tracks.staged — not in a folder.
 
-/// Native multi-file picker (kdialog --getopenfilename --multiple on Plasma,
-/// zenity --multiple elsewhere — same single-RPM rule as `pick_directory`).
-/// Returns None on cancel. kdialog separates multiple hits with " \n"? —
-/// it actually emits one path per line when --multiple is used with a
-/// trailing newline; we split on newlines and tolerate spaces. zenity gets
-/// `--separator` set to a newline so its output parses through the same path.
+/// Multi-file picker for IMPORT staging. Returns None on cancel.
 #[tauri::command]
 async fn choose_import_files(state: tauri::State<'_, AppState>) -> Result<Option<Vec<String>>, String> {
     let start = music_root(&state);
-    tauri::async_runtime::spawn_blocking(move || {
-        let start_arg = start.to_string_lossy().to_string();
-        let text = match std::process::Command::new("kdialog")
-            .args([
-                "--getopenfilename",
-                &start_arg,
-                // KDE filter syntax "globs|Label"; MIME globs (audio/*) miss
-                // files whose mime info is missing, extensions never do.
-                "*.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav|Audio Files\n*|All Files",
-                "--multiple",
-                "--title",
-                "Add Music Files",
-                "--separate-output",
-            ])
-            .output()
-        {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let filename = format!("--filename={start_arg}");
-                match run_zenity(&[
-                    "--file-selection",
-                    "--multiple",
-                    "--separator=\n",
-                    &filename,
-                    "--title=Add Music Files",
-                    "--file-filter=Audio Files | *.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav",
-                    "--file-filter=All Files | *",
-                ])? {
-                    None => return Ok(None),
-                    Some(t) => t,
-                }
-            }
-            Err(e) => return Err(format!("kdialog: {e}")),
-            Ok(out) => {
-                if !out.status.success() || out.stdout.is_empty() {
-                    return Ok(None);
-                }
-                String::from_utf8_lossy(&out.stdout).into_owned()
-            }
-        };
-        let files: Vec<String> = text
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect();
-        Ok(if files.is_empty() { None } else { Some(files) })
-    })
+    // KDE filter syntax "globs|Label"; MIME globs (audio/*) miss files
+    // whose mime info is missing, extensions never do.
+    open_files(
+        "Add Music Files",
+        start,
+        &[("Audio Files", AUDIO_GLOBS), ("All Files", &["*"])],
+        "*.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav|Audio Files\n*|All Files",
+        true,
+    )
     .await
-    .map_err(|e| e.to_string())?
 }
 
-/// Native KDE folder picker for IMPORT staging (unlike add_music_folder
+/// Folder picker for IMPORT staging (unlike add_music_folder
 /// this does NOT touch the music folders setting). Returns None on cancel.
 #[tauri::command]
 async fn choose_import_folder(state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
@@ -1742,8 +1744,7 @@ async fn choose_import_folder(state: tauri::State<'_, AppState>) -> Result<Optio
     pick_directory(start, "Choose Import Folder").await
 }
 
-/// Native file picker for re-linking a missing track (Step 2a follow-up) —
-/// kdialog on Plasma, zenity elsewhere (same single-RPM rule as `pick_image`).
+/// File picker for re-linking a missing track (Step 2a follow-up).
 #[tauri::command]
 async fn choose_relink_file(start: String) -> Result<Option<String>, String> {
     let start = if start.is_empty() || !Path::new(&start).exists() {
@@ -1751,39 +1752,15 @@ async fn choose_relink_file(start: String) -> Result<Option<String>, String> {
     } else {
         PathBuf::from(start)
     };
-    tauri::async_runtime::spawn_blocking(move || {
-        let start_arg = start.to_string_lossy().to_string();
-        match std::process::Command::new("kdialog")
-            .args([
-                "--getopenfilename",
-                &start_arg,
-                "*.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav|Audio Files",
-                "--title",
-                "Locate the missing track",
-            ])
-            .output()
-        {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let filename = format!("--filename={start_arg}");
-                run_zenity(&[
-                    "--file-selection",
-                    &filename,
-                    "--title=Locate the missing track",
-                    "--file-filter=Audio Files | *.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav",
-                ])
-            }
-            Err(e) => Err(format!("kdialog: {e}")),
-            Ok(out) => {
-                if !out.status.success() || out.stdout.is_empty() {
-                    return Ok(None);
-                }
-                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                Ok(if path.is_empty() { None } else { Some(path) })
-            }
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    Ok(open_files(
+        "Locate the missing track",
+        start,
+        &[("Audio Files", AUDIO_GLOBS)],
+        "*.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav|Audio Files",
+        false,
+    )
+    .await?
+    .and_then(|mut v| v.pop()))
 }
 
 /// Point a missing track's row at a file the user located. Files outside the
@@ -2690,8 +2667,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             album_colors,
             fix_viewport,
+            desktop_environment,
             kde_window_decoration,
-            desktop_session,
             staged_import_plan,
             get_settings,
             set_menu_state,
@@ -2769,8 +2746,20 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{colors, klassy_button, opacity_percent, parse_ini};
+    use super::{classify_de, colors, klassy_button, opacity_percent, parse_ini};
     use super::{DEFAULT_CLOSE, DEFAULT_MAXIMIZE, DEFAULT_MINIMIZE};
+
+    #[test]
+    fn desktop_sessions_classify() {
+        assert_eq!(classify_de("gnome:gnome"), "gnome");
+        assert_eq!(classify_de("ubuntu:ubuntu"), "other");
+        assert_eq!(classify_de("kde:plasma"), "kde");
+        assert_eq!(classify_de("plasma:plasma"), "kde");
+        // Mixed strings (e.g. a kde app on gnome) stay kde — the
+        // appmenu skip only fires when no kde/plasma token is present.
+        assert_eq!(classify_de("gnome:kde"), "kde");
+        assert_eq!(classify_de(":"), "other");
+    }
 
     #[test]
     fn extracts_from_every_cover_without_overflow() {

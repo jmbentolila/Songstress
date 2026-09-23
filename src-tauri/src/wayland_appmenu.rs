@@ -85,30 +85,17 @@ pub fn state() -> u8 {
     STATE.load(Ordering::SeqCst)
 }
 
-/// Positive GNOME detection only — every other desktop keeps the existing
-/// path, which already fails fast (STATE=2) when the compositor lacks the
-/// KWin appmenu protocol. `XDG_CURRENT_DESKTOP` is a colon list
-/// (`ubuntu:GNOME`), hence `contains`, not `==`.
-fn is_gnome_session() -> bool {
-    std::env::var("XDG_CURRENT_DESKTOP")
-        .map(|d| d.to_ascii_lowercase().contains("gnome"))
-        .unwrap_or(false)
-}
-
 /// Spawn the registration on its own thread: it must outlive this call (the
 /// adopted objects keep the protocol binding alive) and never block setup.
+/// GNOME-derived sessions never implement the manager protocol — skip the
+/// broadcast there instead of roundtripping a registry that cannot answer.
 pub fn register(app: &tauri::AppHandle, service: &str, object_path: &str) {
-    // GNOME fast path (0.12.0 behavior, reconstructed 2026-09-23 — the
-    // journal on the GNOME box proves the line: "no Global Menu, skipping").
-    // Mutter never advertises org_kde_kwin_appmenu, so skip the bind thread
-    // entirely and report failure NOW: the frontend shows the in-titlebar
-    // menu bar from the first frame instead of after a wasted roundtrip.
-    if is_gnome_session() {
+    use tauri::Manager;
+    if crate::classify_de(&crate::desktop_env()) == "gnome" {
         eprintln!("[appmenu-wayland] GNOME session: no Global Menu, skipping");
         STATE.store(2, Ordering::SeqCst);
         return;
     }
-    use tauri::Manager;
     let Some(win) = app.get_webview_window("main") else {
         eprintln!("[appmenu-wayland] no main window");
         STATE.store(2, Ordering::SeqCst);

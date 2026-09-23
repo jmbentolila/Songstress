@@ -109,7 +109,7 @@ export async function initMenu() {
   });
   // The registration races the webview load (retry loop takes seconds).
   // Poll until it resolves: 1 = keep assuming the Global Menu, 2 = failed →
-  // fall back: the sidebar gear menu is the in-app fallback from now on.
+  // fall back: the sidebar hamburger menu is the in-app fallback from now on.
   const poll = setInterval(() => {
     void invoke<number>("appmenu_state")
       .then((state) => {
