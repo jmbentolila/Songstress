@@ -6,12 +6,23 @@ before changing anything. The roadmap + full implementation record lives in
 
 ## What this is
 
-Songstress — a local music player for Fedora 44 / KDE Plasma 6.7 (Wayland).
+Songstress — a local music player for Fedora 44 (Plasma 6.7 and GNOME, Wayland).
 Album-grid-centric, MusicBee-style browsing, glassmorphism UI. Personal use first.
 
 Stack: **Tauri 2 (Rust) + Svelte 5 + TypeScript** frontend, **MPV via JSON IPC** as
 audio engine (Phase 3), **SQLite + lofty** for the library (Phase 2). No router, no
 CSS framework — hand-rolled CSS with custom properties.
+
+Single RPM, both desktops (2026-09-23): one package serves Plasma and GNOME —
+DE differences are runtime fallbacks, never build variants. Plasma is the
+reference desktop (kdialog pickers, Global Menu, KWin force-blur); on GNOME the
+app takes the zenity pickers, the in-titlebar menu bar (`wayland_appmenu` skips
+with STATE=2), and OPAQUE chrome (`html[data-de="gnome"]` pins the glass tokens
+solid — KDE keeps the glass). RPM deps: `mpv` + `(zenity or kdialog)`
+— boolean dep, dnf installs the first missing alternative (zenity: small, native
+on GNOME; on the KDE spin kdialog is already present). GNOME-only box right now:
+the kdialog branch is verified by argv-identity (byte-identical args), never by
+a live pick — say so, don't claim it.
 
 ## Commands
 
@@ -158,9 +169,14 @@ public/covers/            album art for the fake library (real folder.jpg files)
   gets character ops, char boundaries, and temp+rename — always.
 - **mpv must be spawned with `--no-config`** — the user's `~/.config/mpv/mpv.conf`
   is a broken Windows config (d3d11, C:\ fonts).
-- **No GTK dialogs.** File/folder pickers must go through `kdialog` (see the
+- **No GTK dialogs on Plasma.** File/folder pickers must go through `kdialog` (see the
   `choose_music_folder` command) so they render native KDE style. Don't reintroduce
   tauri-plugin-dialog / rfd — its GTK chooser looks GNOME-ish (user rejected it).
+  On GNOME there IS no kdialog: `pick_directory`/`pick_image` fall back to `zenity`
+  (single-RPM rule, 0.12.1) — kdialog first with byte-identical argv, zenity only
+  on spawn-NotFound, cancel stays Ok(None) on either. The RPM's `(zenity or
+  kdialog)` dep should make "neither installed" unreachable; the error names
+  what to install if it happens anyway.
 - **A cancelled kdialog folder pick stores JSON `null` as musicDir.** `music_root`
   must treat null/empty as unset (→ ~/Music) — the old `unwrap_or(v)` made the
   scan root a RELATIVE path `null`, so every scan failed instantly and silently
@@ -192,7 +208,8 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **mpv playlist is a rolling 32-track window** (`PLAYLIST_WINDOW`), never the
   whole play order — all-artists shuffle pools are thousands of entries and
   per-entry IPC floods mpv (later commands queue past their timeout).
-- **KWin force blur** = Better Blur DX, **now a source build of `728307f`, not the COPR
+- **KWin force blur** (Plasma only — no Mutter equivalent; on GNOME the glass
+  simply loses its wallpaper blur) = Better Blur DX, **now a source build of `728307f`, not the COPR
   package** (`infinality/kwin-effects-better-blur-dx` was deliberately removed; `dnf update`
   will not restore it, and a kwin/Plasma upgrade breaks blur until rebuilt against the exact
   running kwin). Config group is `[Effect-better-blur-dx]` — **dashes, not underscores**
@@ -229,7 +246,8 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **WebKitGTK backdrop-filter does NOT blur in-window content** (verified
   2026-08-27, 2.52/DMABUF): a 32px-bold probe element under the playbar
   stayed pixel-sharp through `blur(80px)` — radius changes are invisible.
-  All the visible frost is KWin's force blur on the wallpaper. Consequence:
+  All the visible frost is KWin's force blur on the wallpaper (on GNOME there is
+  no compositor blur at all — the glass is unblurred translucency). Consequence:
   don't try to make scrolling content blur under the playbar via
   backdrop-filter; dim it with the `.grid-fade` veil in App.svelte instead.
   If you ever test backdrop-filter again, probe with content UNDER the glass,
@@ -346,6 +364,12 @@ skills' defaults:
    left column, browser in the right) at **1200×660**, and a size change is both a
    broken desktop and the known trigger of the WebKitGTK band-clip glitch. Verify
    the UI at his size (see PLAN.md → Environment quick facts).
+   GNOME (2026-09-23, current box): no `songstress-dev` unit, no spectacle/qdbus —
+   equivalents are `gnome-screenshot` + `gdbus`, and the focus-then-shoot rule is
+   UNVERIFIED under Mutter (the WebKit-stale-frame behavior was measured on KWin;
+   re-probe before trusting a GNOME screenshot). The restart protocol above is
+   KWin-specific; Mutter centers new windows — re-measure placement/size behavior
+   before writing a GNOME protocol here.
 6. Update PLAN.md (status table + implementation log)
 
 ### Claim hygiene — from the Step 0b post-mortem (2026-09-19)

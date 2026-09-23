@@ -580,7 +580,7 @@
   .mi-head h2 {
     flex: 1;
     margin: 0;
-    font-size: 15px;
+    font-size: 17px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -622,7 +622,7 @@
      inset, then the 6px hug to the first row, with no divider — a divider would
      separate the artist from the albums it owns. */
   .mi-glabel {
-    font-size: 11.5px;
+    font-size: 13.5px;
     font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -724,7 +724,7 @@
     flex: none;
     width: 14px;
     color: var(--text-dim);
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1;
   }
 
@@ -738,7 +738,7 @@
 
   .mi-title {
     min-width: 0;
-    font-size: 13.5px;
+    font-size: 15.5px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -747,7 +747,7 @@
 
   .mi-meta {
     flex: none;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
@@ -764,7 +764,7 @@
     min-width: 0;
     /* Lines up with the album title, not with the caret. */
     padding-left: 20px;
-    font-size: 11.5px;
+    font-size: 13.5px;
     /* Declared for the same reason as the title row's: the decision column's band is
        measured in these two line heights, so they cannot be left to the engine. */
     line-height: 15px;
@@ -817,7 +817,7 @@
     align-items: baseline;
     gap: 8px;
     padding: 3px 0 3px 8px;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
   }
 
@@ -868,7 +868,7 @@
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
     transition: background 140ms var(--ease-out), color 140ms var(--ease-out),
       border-color 140ms var(--ease-out);
@@ -929,20 +929,20 @@
      looks like here, and a heading in that voice under the last artist card reads
      as one more artist called "Already in your library". */
   .mi-said-label {
-    font-size: 12.5px;
+    font-size: 14.5px;
     font-weight: 600;
     color: var(--text);
   }
 
   .mi-said-line {
     margin: 0;
-    font-size: 12.5px;
+    font-size: 14.5px;
     color: var(--text-dim);
   }
 
   .mi-said-note {
     margin: 2px 0 0;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     opacity: 0.85;
   }
@@ -965,7 +965,7 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
   }
 
@@ -994,7 +994,7 @@
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
   }
 
@@ -1020,7 +1020,7 @@
     border-radius: 8px;
     background: var(--accent);
     color: var(--accent-text, #fff);
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
   }

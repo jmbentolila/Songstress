@@ -137,7 +137,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
     cursor: pointer;
     white-space: nowrap;
   }

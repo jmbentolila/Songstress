@@ -218,7 +218,7 @@
   }
 
   .pg-title {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
   }
 
@@ -280,7 +280,7 @@
     flex: 1;
     min-width: 0;
     padding: 6px 8px;
-    font-size: 13px;
+    font-size: 15px;
     font-family: ui-monospace, monospace;
     text-align: center;
     color: var(--text);
@@ -345,7 +345,7 @@
     background: none;
     padding: 0;
     font: inherit;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--accent);
     cursor: pointer;
   }
@@ -356,13 +356,13 @@
 
   .pg-note {
     margin: 0;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
 
   .pg-error {
     margin: 0;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--caution);
   }
 

@@ -271,7 +271,7 @@
   }
 
   .te-label {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
     white-space: nowrap;
   }
@@ -337,7 +337,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .te-field input:focus {
@@ -415,7 +415,7 @@
   }
 
   .te-field i {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     font-style: normal;
   }
@@ -439,7 +439,7 @@
     border-radius: 999px;
     background: none;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: 13px;
     cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
@@ -448,7 +448,7 @@
 
   .te-chip i {
     font-style: normal;
-    font-size: 9.5px;
+    font-size: 11.5px;
     opacity: 0.7;
   }
 

@@ -166,7 +166,7 @@
   .mf-head h2 {
     flex: 1;
     margin: 0;
-    font-size: 15px;
+    font-size: 17px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -180,7 +180,7 @@
   .mf-empty {
     margin: 0;
     padding: 14px 6px;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text-dim);
     text-align: center;
   }
@@ -206,7 +206,7 @@
   .mf-path {
     flex: 1;
     min-width: 0;
-    font-size: 13px;
+    font-size: 15px;
     font-family:
       "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     white-space: nowrap;
@@ -225,7 +225,7 @@
     background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1;
   }
 
@@ -243,7 +243,7 @@
   .mf-ask {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.35;
     color: var(--text-dim);
   }
@@ -256,7 +256,7 @@
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
   }
 
@@ -293,7 +293,7 @@
     /* --accent-text, not #fff: with a light accent ("White") white text on a
        white fill is no text at all. */
     color: var(--accent-text, #fff);
-    font-size: 13px;
+    font-size: 15px;
     cursor: pointer;
   }
 

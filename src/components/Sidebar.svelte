@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ui, resolvedTheme, openAbout, resetAppearance } from "../lib/stores/ui.svelte";
+  import { marquee } from "../lib/marquee";
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { openContextMenu } from "../lib/stores/contextMenu.svelte";
   import { invoke } from "@tauri-apps/api/core";
@@ -622,11 +623,10 @@
       aria-expanded={ui.menuOpen}
       onclick={toggleSettings}
     >
-      <!-- Feather settings cog: the old circle+8-short-rays read as a
-           lightbulb/sun at 16px (user-reported). Feather keeps it in
-           the app's icon family; the morph is shape-agnostic. -->
+      <!-- Hamburger: the settings toggle. The ✕ morph below is
+           shape-agnostic. -->
       <svg
-        class="icon icon-gear"
+        class="icon icon-menu"
         class:show={!ui.menuOpen}
         viewBox="0 0 24 24"
         fill="none"
@@ -635,8 +635,7 @@
         stroke-linecap="round"
         stroke-linejoin="round"
       >
-        <circle cx="12" cy="12" r="3" />
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        <path d="M3 6h18 M3 12h18 M3 18h18" />
       </svg>
       <svg class="icon icon-x" class:show={ui.menuOpen} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
         <path d="M4 4 L12 12 M12 4 L4 12" />
@@ -720,7 +719,7 @@
             onclick={() => select(artist.id)}
             oncontextmenu={(e) => artistMenu(e, artist.id)}
           >
-            <span class="name">{artist.name}</span>
+            <span class="name mq" use:marquee={{ key: artist.id, hover: true }}><span class="mq-in">{artist.name}</span></span>
             <span
               class="count"
               class:pending={stagedCounts.has(artist.id)}
@@ -1306,23 +1305,29 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 8px;
-    height: 8px;
-    stroke: rgba(255, 255, 255, 0.9);
+    width: 10px;
+    height: 10px;
+    stroke: rgba(0, 0, 0, 0.62);
     stroke-width: 1.4;
     stroke-linecap: round;
     fill: none;
     opacity: 0;
   }
 
-  /* Palette comes from the user's KWin decoration via --tb-* custom props
-     (set on .head from kde_window_decoration). */
-  .tb-close { background: var(--tb-x); }
-  .tb-close:hover { background: var(--tb-x-hover); }
-  .tb-min   { background: var(--tb-i); }
-  .tb-min:hover { background: var(--tb-i-hover); }
-  .tb-max   { background: var(--tb-a); }
-  .tb-max:hover { background: var(--tb-a-hover); }
+  /* System traffic-light spec, BOTH desktops (owner call 2026-09-23): the GTK
+     theme at ~/.config/gtk-{3.0,4.0}/gtk.css + windows-assets/*.svg — NOT the
+     Klassy mirror (--tb-* vars now serve only the SurfaceClose family).
+     Hover never darkens the dot: glyph appearance IS the feedback. Pressed
+     has its own fill per button. Glyphs are dark, matching the system. */
+  .tb-close { background: #FF5F57; }
+  .tb-close:hover { background: #FF5F57; }
+  .tb-close:active { background: #E04C44; }
+  .tb-min   { background: #FEBD2E; }
+  .tb-min:hover { background: #FEBD2E; }
+  .tb-min:active { background: #DC9E22; }
+  .tb-max   { background: #28C840; }
+  .tb-max:hover { background: #28C840; }
+  .tb-max:active { background: #1FAA33; }
 
   /* Glyph appears only on the button actually hovered (Klassy behavior). */
   .tb-light:hover svg {
@@ -1334,10 +1339,10 @@
     flex: none;
     border: none;
     background: transparent;
-    color: var(--text-dim);
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
+    color: var(--text);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
     display: grid;
     place-items: center;
     cursor: pointer;
@@ -1354,14 +1359,14 @@
     background: var(--active);
   }
 
-  /* Icon morph: gear and ✕ crossfade while rotating — a state change,
+  /* Icon morph: menu and ✕ crossfade while rotating — a state change,
      not a swap. 160ms ease-out (fast, purposeful). */
   .gear .icon {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     transform: translate(-50%, -50%);
     transition:
       opacity 160ms ease-out,
@@ -1372,7 +1377,7 @@
     opacity: 0;
   }
 
-  .gear .icon-gear:not(.show) {
+  .gear .icon-menu:not(.show) {
     transform: translate(-50%, -50%) rotate(90deg);
   }
 
@@ -1491,7 +1496,7 @@
   }
 
   .navtitle {
-    font-size: 15px;
+    font-size: 17px;
     font-weight: 700;
     letter-spacing: 0.01em;
     color: var(--text);
@@ -1554,7 +1559,7 @@
     border: 1px solid var(--border);
     background: var(--hover);
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
     outline: none;
   }
 
@@ -1640,7 +1645,7 @@
     border-radius: 8px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
     cursor: default;
     text-align: left;
   }
@@ -1652,7 +1657,7 @@
   .mrow,
   .irow {
     height: var(--sidebar-row-size);
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .row:hover,
@@ -1697,8 +1702,17 @@
     text-overflow: ellipsis;
   }
 
+  /* Hover marquee for overlong artist names (same action + strip as the
+     playbar title/artist): the row rests at plain ellipsis; hovering an
+     overflowing name slides it. No animation delay — hover already states
+     intent. The :global(.is-over) escape hatch is the same one the playbar
+     uses: the class is JS-owned, the compiler never sees it. */
+  .row .mq:global(.is-over) .mq-in {
+    animation: mq-scroll var(--mq-dur, 8s) linear infinite;
+  }
+
   .count {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     flex: none;
   }
@@ -1811,7 +1825,7 @@
     padding: 4px 0;
     border: none;
     background: transparent;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
     text-align: left;
     cursor: pointer;
@@ -1831,7 +1845,7 @@
   .scan-note {
     flex: none;
     margin: -8px 12px 4px;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
 
@@ -1898,7 +1912,7 @@
   }
 
   .glabel {
-    font-size: 11.5px;
+    font-size: 13.5px;
     font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -1932,7 +1946,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text);
   }
 
@@ -1972,7 +1986,7 @@
   }
 
   .val {
-    font-size: 11px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
   }
@@ -2000,7 +2014,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 14px;
     cursor: pointer;
     transition: background 140ms var(--ease-out), color 140ms var(--ease-out);
   }
@@ -2055,7 +2069,7 @@
   }
 
   .panebody .curname {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
 
@@ -2082,7 +2096,7 @@
     background: transparent;
     color: var(--text);
     opacity: 0.82;
-    font-size: 13px;
+    font-size: 15px;
     text-align: left;
     cursor: pointer;
   }
@@ -2107,7 +2121,7 @@
     flex-direction: column;
     gap: 2px;
     padding: 6px 10px 2px;
-    font-size: 11px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
   }
@@ -2140,7 +2154,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text);
     cursor: pointer;
   }

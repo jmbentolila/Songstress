@@ -680,7 +680,7 @@
     padding: 4px 0;
     border: none;
     background: transparent;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text-dim);
     text-align: left;
     cursor: pointer;
@@ -697,7 +697,7 @@
 
   .section-label {
     margin: 8px 2px -8px;
-    font-size: 11.5px;
+    font-size: 13.5px;
     font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
@@ -907,7 +907,7 @@
     border-radius: 999px;
     background: rgba(0, 0, 0, 0.62);
     color: var(--on-cover);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -930,7 +930,7 @@
   }
 
   .caption .t {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text);
     white-space: nowrap;
@@ -939,7 +939,7 @@
   }
 
   .caption .sub {
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;

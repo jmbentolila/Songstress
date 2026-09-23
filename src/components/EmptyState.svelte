@@ -62,7 +62,7 @@
 
   h2 {
     margin: 0;
-    font-size: 22px;
+    font-size: 24px;
     letter-spacing: -0.01em;
     color: var(--text);
   }
@@ -74,7 +74,7 @@
 
   .dim {
     color: var(--text-dim);
-    font-size: 13px;
+    font-size: 15px;
   }
 
   /* The scanner's own words — a path plus an io error, long and unbroken. Same
@@ -82,7 +82,7 @@
      the system's ONE caution hue: the tag editor's failed SAVE already speaks
      that colour, so a failed scan must not invent a second error tint. */
   .why {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--caution);
     overflow-wrap: anywhere;
   }
@@ -91,7 +91,7 @@
     cursor: pointer;
     border-radius: 8px;
     padding: 9px 18px;
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .primary {

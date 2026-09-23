@@ -34,6 +34,7 @@
   import StencilMark from "./StencilMark.svelte";
   import { ui, resolvedTheme } from "../lib/stores/ui.svelte";
   import { tooltip } from "../lib/tooltip";
+  import { marquee } from "../lib/marquee";
   import {
     setEqEnabled,
     setEqPreamp,
@@ -97,71 +98,7 @@
   // overflow check (track switch, rescan rename, Full-Rescan backfill).
   let mqKey = $derived(`${track?.id ?? "none"}|${titleText}|${subText}`);
 
-  // Seamless marquee, ONLY on overflow. The viewport (node) keeps the old
-  // ellipsis rules as the no-JS/reduced-motion fallback; when the single
-  // copy is wider than the viewport a hidden twin is appended and the inner
-  // strip loops by exactly one copy + gap, so the wrap point is invisible.
-  // CSS animation (off the main thread, linear = constant speed), duration
-  // scaled to distance at a device-pixel-aligned speed (see SPEED) — whole
-  // device pixels per frame read smoother than fractional ones, which shimmer. Pausing (music
-  // paused, hover to read) is animation-play-state in the stylesheet — the
-  // animation itself is never torn down, so resume continues mid-flight.
-  function marquee(node: HTMLElement, _key: string) {
-    const MQ_GAP = 48; // px between copy and twin — mirrors [data-clone] margin
-    // 37.5px/s = exactly 1 DEVICE pixel per frame on a 60Hz panel at scale 1.6
-    // (his setup): fractional device steps shimmer, whole ones don't. If his
-    // panel isn't 60Hz this won't help — then we switch technique (fade-paging).
-    const SPEED = 37.5; // px/s — ~1px/frame at 60fps (see above)
-    let ro: ResizeObserver | null = null;
-    let raf = 0;
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-    function run() {
-      const inner = node.querySelector<HTMLElement>(".mq-in");
-      if (!inner) return;
-      // Strip last run's twin (text may have changed) and stop the loop so
-      // the single-copy measure is honest. Forced reflow restarts the
-      // animation below — without it re-adding the class is a no-op.
-      inner.querySelectorAll("[data-clone]").forEach((c) => c.remove());
-      node.classList.remove("is-over");
-      inner.style.removeProperty("--mq-to");
-      inner.style.removeProperty("--mq-dur");
-      void node.offsetWidth;
-      if (reduce.matches) return;
-      const single = inner.scrollWidth;
-      const view = node.clientWidth;
-      if (single <= view + 2) return;
-      const twin = document.createElement("span");
-      twin.setAttribute("data-clone", "");
-      twin.setAttribute("aria-hidden", "true");
-      twin.textContent = inner.textContent;
-      twin.style.marginLeft = `${MQ_GAP}px`;
-      inner.appendChild(twin);
-      const dist = single + MQ_GAP;
-      inner.style.setProperty("--mq-to", `${-dist}px`);
-      const dur = Math.min(24, Math.max(4, dist / SPEED));
-      inner.style.setProperty("--mq-dur", `${dur.toFixed(2)}s`);
-      node.classList.add("is-over");
-    }
-    function schedule() {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(run);
-    }
-    schedule();
-    ro = new ResizeObserver(schedule);
-    ro.observe(node);
-    const onReduce = () => schedule();
-    reduce.addEventListener?.("change", onReduce);
-    return {
-      update() {
-        schedule();
-      },
-      destroy() {
-        cancelAnimationFrame(raf);
-        ro?.disconnect();
-        reduce.removeEventListener?.("change", onReduce);
-      },
-    };
-  }
+  // Marquee lives in ../lib/marquee (shared with the sidebar artist rows).
 
   // Step 2b: optional artwork-gradient playbar backdrop at chrome alpha 0.7.
   // Shows whenever a track is loaded (paused included); stopped = plain chrome.
@@ -799,7 +736,7 @@
   }
 
   .text .t {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text);
     white-space: nowrap;
@@ -808,7 +745,7 @@
   }
 
   .text .sub {
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -824,12 +761,6 @@
      only, then the cycle runs). Hover pauses so a line can be read;
      .paused (music paused/stopped) parks it — cycling while nothing plays
      is motion with no job. Reduced motion: no twin, no loop, ellipsis. */
-  .mq-in {
-    display: inline-block;
-    white-space: nowrap;
-    will-change: transform;
-  }
-
   /* :global(.is-over): added by the action via classList (overflow measured
      at runtime), so the compiler never sees it — same escape hatch as
      ArtSelector's as-load. Scoping stays on .mq; only the JS-owned class
@@ -837,15 +768,6 @@
   .mq:global(.is-over) .mq-in {
     animation: mq-scroll var(--mq-dur, 8s) linear infinite;
     animation-delay: 1.2s;
-  }
-
-  @keyframes mq-scroll {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(var(--mq-to));
-    }
   }
 
   .playbar.paused .mq-in {
@@ -955,7 +877,7 @@
   }
 
   .time {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     flex: none;
@@ -1031,7 +953,7 @@
     position: absolute;
     right: 2px;
     bottom: 1px;
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 700;
     line-height: 1;
     letter-spacing: 0.02em;
@@ -1041,7 +963,7 @@
   .mode-btn .badge.one {
     right: 4px;
     bottom: 2px;
-    font-size: 9px;
+    font-size: 11px;
   }
 
   .vol-btn {
@@ -1064,8 +986,8 @@
   }
 
   .vol-btn svg {
-    width: 15px;
-    height: 15px;
+    width: 20px;
+    height: 20px;
     flex: none;
   }
 
@@ -1124,7 +1046,7 @@
     backdrop-filter: blur(14px) saturate(160%);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
     color: var(--text);
-    font-size: 11px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     /* content-box: the app is border-box globally, under which min-width
        caps padding INCLUDED — "100%" overflowed the 4ch floor and grew.
@@ -1203,7 +1125,7 @@
     background: transparent;
     color: var(--text);
     opacity: 0.82;
-    font-size: 12.5px;
+    font-size: 14.5px;
     cursor: pointer;
     padding: 4px 6px;
     margin: 0;
@@ -1263,7 +1185,7 @@
      when the curve diverged) without pretending to be a picker. */
   .eq-pop .preset {
     margin-left: auto;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
 
@@ -1306,7 +1228,7 @@
   }
 
   .db {
-    font-size: 9.5px;
+    font-size: 11.5px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     line-height: 1;
@@ -1314,7 +1236,7 @@
   }
 
   .hz {
-    font-size: 9.5px;
+    font-size: 11.5px;
     color: var(--text-dim);
     line-height: 1;
   }
@@ -1352,13 +1274,13 @@
   }
 
   .q-title {
-    font-size: 12.5px;
+    font-size: 14.5px;
     font-weight: 700;
     color: var(--text);
   }
 
   .q-count {
-    font-size: 10.5px;
+    font-size: 12.5px;
     font-weight: 700;
     color: var(--accent);
     background: var(--active);
@@ -1374,7 +1296,7 @@
     border: none;
     background: transparent;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     padding: 2px 6px;
@@ -1391,7 +1313,7 @@
   }
 
     .q-empty {
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     margin: 2px 0 4px;
     line-height: 1.45;
@@ -1440,7 +1362,7 @@
   }
 
   .q-name {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text);
     white-space: nowrap;
@@ -1449,7 +1371,7 @@
   }
 
   .q-sub {
-    font-size: 10.5px;
+    font-size: 12.5px;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -1473,7 +1395,7 @@
   .q-next-h {
     margin: 6px 0 0;
     padding-right: 8px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -1487,6 +1409,6 @@
   .mode-btn .badge.count {
     right: 1px;
     bottom: 0;
-    font-size: 8.5px;
+    font-size: 10.5px;
   }
 </style>

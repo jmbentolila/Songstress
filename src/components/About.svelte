@@ -126,7 +126,7 @@
 
   .ab h2 {
     margin: 0 0 4px;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--text);
@@ -134,14 +134,14 @@
 
   .ver {
     margin: 0 0 12px;
-    font-size: 11px;
+    font-size: 13px;
     font-variant-numeric: tabular-nums;
     color: var(--text-dim);
   }
 
   .tag {
     margin: 0;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text-dim);
   }
 

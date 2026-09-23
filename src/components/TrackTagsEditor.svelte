@@ -592,7 +592,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text-dim);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1;
     padding: 6px 8px;
     cursor: pointer;
@@ -613,7 +613,7 @@
   }
 
   .te-step-pos {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     min-width: 40px;
     text-align: center;
@@ -627,7 +627,7 @@
   .te-file-name {
     flex: none;
     max-width: 45%;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -637,7 +637,7 @@
   .te-file-dir {
     flex: 1;
     min-width: 0;
-    font-size: 11.5px; /* the SAME measure as the name beside it (owner
+    font-size: 13.5px; /* the SAME measure as the name beside it (owner
                          ruling): one caption, not a caption and a heading */
     color: var(--text-dim);
     white-space: nowrap;
@@ -696,7 +696,7 @@
   /* A caption for the column, the exact sibling of ArtSelector's
      "Artwork": same size, same hue, same 6px breath below. */
   .te-col-title {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
     margin: 0 0 6px;
   }
@@ -708,7 +708,7 @@
      modal's errors. A retag that splits a folder must not be a surprise. */
   .te-stay {
     margin: 10px 0 0;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--caution);
   }
 
@@ -729,7 +729,7 @@
      diverges retires it honestly). */
   .te-join-promise {
     flex: 1 1 100%;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
   }
 
@@ -760,7 +760,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .te-pop-q:focus {
@@ -802,7 +802,7 @@
   .te-pop-t {
     grid-row: 1;
     grid-column: 1;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
@@ -813,7 +813,7 @@
     grid-row: 1 / span 2;
     grid-column: 2;
     align-self: center;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     white-space: nowrap;
   }
@@ -821,7 +821,7 @@
   .te-pop-m {
     grid-row: 2;
     grid-column: 1;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -830,7 +830,7 @@
 
   .te-pop-none {
     margin: 4px 8px;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
   }
 </style>

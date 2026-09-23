@@ -6,7 +6,7 @@
 
 **A local-first music player for Linux desktops.**
 Album-grid centric, MusicBee-style browsing, glassmorphism chrome —
-built for Fedora KDE Plasma (Wayland), shaped by one very deafeningly opinionated listener.
+built for Fedora (Plasma and GNOME on Wayland), shaped by one very deafeningly opinionated listener.
 
 *Tauri 2 · Svelte 5 · Rust · MPV · SQLite · lofty*
 
@@ -23,8 +23,9 @@ built for Fedora KDE Plasma (Wayland), shaped by one very deafeningly opinionate
 - **A tag editor that respects you** — album + track editors, art picker,
   disputed-tag awareness, and an import flow that *moves* your files where
   they belong and shows you the receipt
-- **KDE-native integration** — Global Menu over DBus (with live transport
-  glyphs), MPRIS, inotify library watching, blur via KWin, dialogs via kdialog
+- **Desktop-native integration** — Global Menu over DBus on Plasma (with live
+  transport glyphs), MPRIS, inotify library watching, blur via KWin, dialogs via
+  kdialog — with zenity + in-titlebar fallbacks on GNOME
 - **Glass, not frameworks** — hand-rolled CSS with theme tokens; two-tier
   translucency tuned to the compositor, zero CSS dependencies
 
@@ -32,7 +33,7 @@ built for Fedora KDE Plasma (Wayland), shaped by one very deafeningly opinionate
 
 ```sh
 npm install
-npm run tauri dev      # the full app (needs mpv + kdialog)
+npm run tauri dev      # the full app (needs mpv + kdialog/zenity)
 npm run check          # svelte-check
 npm test               # vitest
 cd src-tauri && cargo test --lib

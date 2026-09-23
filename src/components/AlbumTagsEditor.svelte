@@ -417,7 +417,7 @@
   }
 
   .te-col-title {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
     margin: 0 0 6px;
   }
@@ -425,7 +425,7 @@
   .te-foot-files {
     flex: 1;
     min-width: 0;
-    font-size: 11.5px; /* the track modal's footer caption measure */
+    font-size: 13.5px; /* the track modal's footer caption measure */
     color: var(--text-dim);
     letter-spacing: 0.02em;
     white-space: nowrap;
@@ -436,7 +436,7 @@
   .te-blast {
     flex: 1;
     min-width: 0;
-    font-size: 11.5px;
+    font-size: 13.5px;
     color: var(--text-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -450,7 +450,7 @@
   .te-receipt-lines {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     text-align: right;
     white-space: nowrap;

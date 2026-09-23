@@ -1,7 +1,7 @@
 :root {
   --tile-size: 180px;
   --sidebar-row-size: 36px;
-  --sidebar-width: 236px;
+  --sidebar-width: 260px;
   --playbar-h: 84px;
   --gap: 20px;
   /* The window rung exists so the modal scrim can be clipped to it: `.app`
@@ -80,6 +80,60 @@ html[data-theme="light"] {
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
 }
 
+/* ── GNOME opaque chrome ────────────────────────────────────────────────────
+   Mutter has no force-blur and this WebKitGTK's backdrop-filter is a measured
+   no-op, so translucency only shows sharp wallpaper (the washed-out look).
+   On GNOME the shell pins every backdrop-revealing token to its solid hue —
+   same colors, alpha 1 — while KDE keeps the tuned glass above. Floating
+   pills (.app-tip, .vol-tip) get the solid panel fill so they stay legible
+   over busy rows. Everything else (hairlines, washes, scrims, shadows) sits
+   ON surfaces and is untouched. Engaged by html[data-de="gnome"], which the
+   App shell sets from the `desktop_session` command (positive GNOME match
+   only — every other desktop stays glass). */
+html[data-de="gnome"][data-theme="dark"] {
+  --bg-grid: rgb(22, 22, 28);
+  --bg-chrome: rgb(22, 22, 28);
+  --panel-bg: rgb(32, 32, 40);
+  --panel-bg-strong: rgb(26, 26, 33);
+}
+html[data-de="gnome"][data-theme="light"] {
+  --bg-grid: rgb(246, 246, 249);
+  --bg-chrome: rgb(246, 246, 249);
+  --panel-bg: rgb(255, 255, 255);
+  --panel-bg-strong: rgb(252, 252, 254);
+}
+html[data-de="gnome"] .app-tip,
+html[data-de="gnome"] .vol-tip {
+  background: var(--panel-bg-strong);
+}
+
+/* ── Shared marquee strip ───────────────────────────────────────────────────
+   ONE sliding language: the `marquee` action (src/lib/marquee.ts) serves the
+   playbar title/artist and the sidebar artist rows. .mq-in is the strip that
+   travels (twin gap = MQ_GAP in the action); each consumer owns only its
+   trigger rule (playbar: always-on + hover-pause + paused-park; sidebar:
+   hover-gated). transform-only, linear: constant speed, GPU path. */
+.mq-in {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+@keyframes mq-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  /* End-of-loop dwell: the last quarter of every cycle holds the loop
+     point (the twin sits exactly where the head was, so this reads as the
+     head at rest) before the invisible jump back starts the next rotation. */
+  75% {
+    transform: translateX(var(--mq-to));
+  }
+  100% {
+    transform: translateX(var(--mq-to));
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -94,9 +148,9 @@ body {
 
 body {
   font-family:
-    "Inter", "Segoe UI", system-ui,
+    "Inter Variable", "Inter", "Segoe UI", system-ui,
     -apple-system, "Noto Sans", sans-serif;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text);
   overflow: hidden;
   /* This app is chrome, not a document: dragging across the grid, the
@@ -167,7 +221,7 @@ button {
   backdrop-filter: blur(14px) saturate(160%);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   color: var(--text);
-  font-size: 11px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   text-align: center;
   white-space: normal;

@@ -402,7 +402,7 @@
     gap: 12px;
   }
   .as-title {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
   }
   .as-link {
@@ -410,7 +410,7 @@
     background: none;
     padding: 0;
     font: inherit;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--accent);
     cursor: pointer;
   }
@@ -503,7 +503,7 @@
   .as-cap {
     display: block;
     padding: 3px 4px 4px;
-    font-size: 9.5px;
+    font-size: 11.5px;
     line-height: 1.2;
     color: var(--text-dim);
     text-align: center;
@@ -544,12 +544,12 @@
   }
   .as-note {
     margin: 0;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
   .as-error {
     margin: 0;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--caution);
   }
 
@@ -565,7 +565,7 @@
     border: 1.5px solid rgba(255, 255, 255, 0.85);
     background: rgba(0, 0, 0, 0.35);
     color: var(--on-cover);
-    font-size: 12px;
+    font-size: 14px;
     line-height: 17px;
     text-align: center;
     cursor: pointer;
@@ -599,7 +599,7 @@
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.45);
     color: var(--on-cover);
-    font-size: 11px;
+    font-size: 13px;
     line-height: 19px;
     text-align: center;
     cursor: pointer;
@@ -664,7 +664,7 @@
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
   }
   .as-lbfig figcaption span {
@@ -681,7 +681,7 @@
     border-radius: 8px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
     cursor: pointer;
   }
   .as-btn:hover {

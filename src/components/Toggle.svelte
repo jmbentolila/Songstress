@@ -44,14 +44,14 @@
     align-items: center;
     gap: 8px;
     min-height: var(--sidebar-row-size);
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text);
     cursor: pointer;
   }
 
   .toggle.small {
     min-height: 0;
-    font-size: 12.5px;
+    font-size: 14.5px;
     font-weight: 600;
     gap: 7px;
   }

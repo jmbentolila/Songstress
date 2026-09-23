@@ -901,7 +901,7 @@
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--text);
@@ -926,7 +926,7 @@
     border-radius: 999px;
     background: transparent;
     color: var(--text-dim);
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -1004,7 +1004,7 @@
     flex: none;
     text-align: right;
     padding: 8px 10px 2px;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
   }
@@ -1046,7 +1046,7 @@
   .disc-title {
     margin: 0;
     padding: 6px 10px 2px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -1063,7 +1063,7 @@
     border-radius: 7px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
     text-align: left;
     /* Clickable (select / play) — same cursor + :active wash as the other
      * pressable families in the chrome. */
@@ -1112,7 +1112,7 @@
     text-align: right;
     color: var(--text-dim);
     font-variant-numeric: tabular-nums;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   /* Missing file: alert triangle in place of the track number. */
@@ -1139,7 +1139,7 @@
   .dur {
     flex: none;
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 14px;
     font-variant-numeric: tabular-nums;
   }
 </style>

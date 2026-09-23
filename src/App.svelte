@@ -19,9 +19,18 @@
   import { announcer } from "./lib/stores/announcer.svelte";
   import { playback, initEq } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { invoke } from "@tauri-apps/api/core";
 
   startViewportGuard();
   void initSettings();
+  // Per-DE chrome (0.12.x): GNOME has no compositor blur, so it gets opaque
+  // surfaces via html[data-de="gnome"] (app.css); KDE keeps the glass.
+  // Positive GNOME detection only — everything else stays glass (reference).
+  void invoke<string>("desktop_session")
+    .then((d) => {
+      if (d.includes("gnome")) document.documentElement.dataset.de = "gnome";
+    })
+    .catch(() => undefined);
   void initEq();
   initScanner();
   void initMenu();

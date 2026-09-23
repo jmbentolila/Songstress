@@ -182,7 +182,7 @@
     flex: 1;
     min-width: 0;
     margin: 0;
-    font-size: 15px;
+    font-size: 17px;
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
@@ -205,7 +205,7 @@
   .te-note {
     margin: 0;
     padding: 20px 2px;
-    font-size: 13px;
+    font-size: 15px;
     color: var(--text-dim);
   }
   /* The footer family is SHARED: an editor renders its footer content in its
@@ -227,7 +227,7 @@
      away). 11px dim: present, not loud. */
   :global(.te-topline) {
     margin: 0 0 12px;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     letter-spacing: 0.02em;
   }
@@ -244,7 +244,7 @@
     border: 0;
     background: none;
     color: var(--text-dim);
-    font-size: 11.5px;
+    font-size: 13.5px;
     cursor: pointer;
   }
 
@@ -291,7 +291,7 @@
   :global(.te-error) {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
+    font-size: 14px;
     /* The system's one caution hue — the same token a missing-file glyph and
        a discard mark wear. One hue, named. */
     color: var(--caution);
@@ -301,7 +301,7 @@
   }
 
   :global(.te-ok) {
-    font-size: 12.5px;
+    font-size: 14.5px;
     color: var(--accent);
     font-weight: 600;
   }
@@ -312,7 +312,7 @@
     border-radius: 8px;
     background: transparent;
     color: var(--text);
-    font-size: 13px;
+    font-size: 15px;
     cursor: pointer;
   }
 
