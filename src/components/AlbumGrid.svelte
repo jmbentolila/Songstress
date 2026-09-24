@@ -232,6 +232,20 @@
     }
   });
 
+  // Post-import landing: the import flow sets the artist tab first and
+  // fires this after the switch bridge, so the album is in the list when
+  // this reads it. Consumed on read; an unknown id is a stale request and
+  // is ignored (the caller already waited for the dump to carry it, so a
+  // miss means the tab genuinely does not list it).
+  $effect(() => {
+    const r = ui.gridReveal;
+    if (!r) return;
+    ui.gridReveal = null;
+    if (albumList.some((a) => a.id === r.albumId)) {
+      toggleExpand(r.albumId, "albums", true);
+    }
+  });
+
   function setHost(section: "songs" | "albums", id: string | null) {
     if (section === "songs") songHostId = id;
     else albumHostId = id;
@@ -479,9 +493,13 @@
     return a.title.localeCompare(b.title);
   }
 
-  function toggleExpand(id: string, section: "songs" | "albums") {
+  function toggleExpand(id: string, section: "songs" | "albums", onlyOpen = false) {
     const cur = ui.expandedAlbum[section];
-    const next = cur === id ? null : id;
+    // onlyOpen (the post-import landing): never collapse. An id that is
+    // already open re-enters the fresh-open branch below — same host,
+    // glide travels back to it — which is exactly the behavior the
+    // landing wants for a re-import onto the open album.
+    const next = onlyOpen ? id : cur === id ? null : id;
     if (cur !== id) {
       // Warm the image cache before the panel needs to paint this cover,
       // otherwise a multi-megabyte decode stalls the switch frame.

@@ -482,14 +482,41 @@
     return m;
   });
 
+  /** Pending songs behind the filter row: staged albums' track counts.
+   *  (Whole-album staging is the rule — a staged album's rows are the
+   *  pending songs; the count answers "how much music is waiting".) */
+  const pendingSongs = $derived.by(() => {
+    let n = 0;
+    for (const a of library.albums) {
+      if (a.staged) n += library.tracksOf(a.id).length;
+    }
+    return n;
+  });
+
   // One field drives both surfaces: the artist list here and the
   // Songs/Albums sections in the grid. Diacritic-insensitive via fold()
   // — same matching rule as the grid ("bjork" finds Björk in both).
   const filtered = $derived.by(() => {
     const q = ui.search.trim();
-    if (q === "") return library.artists;
-    const fq = fold(q);
-    return library.artists.filter((a) => fold(a.name).includes(fq));
+    let list = library.artists;
+    if (q !== "") {
+      const fq = fold(q);
+      list = list.filter((a) => fold(a.name).includes(fq));
+    }
+    // The pending filter ANDs with search, and only while the pile exists
+    // (the auto-clear below can lag a frame behind an emptied pile — a
+    // lagging flag must never blank the list).
+    if (ui.pendingOnly && stagedCounts.size > 0) {
+      return list.filter((a) => stagedCounts.has(a.id));
+    }
+    return list;
+  });
+
+  // The pile can empty under an active filter (saved/discarded from the
+  // modal or the panel): an invisible true would re-filter the next pile
+  // by surprise, so the flag follows the pile.
+  $effect(() => {
+    if (ui.pendingOnly && stagedCounts.size === 0) ui.pendingOnly = false;
   });
 
   function select(id: string) {
@@ -497,6 +524,9 @@
     ui.activeArtistId = id;
     ui.expandedAlbum.songs = null;
     ui.expandedAlbum.albums = null;
+    // Navigating clears list filters (search is cleared below for the same
+    // reason): the filter found the artist; the selection shows it.
+    ui.pendingOnly = false;
     ui.search = "";
     // Back to the top, every time — including re-clicking the artist you're
     // already on. Collapsing the panel shrinks the content under the
@@ -683,6 +713,20 @@
 
       {#if scanNote}
         <p class="scan-note" aria-live="polite">Updating library…</p>
+      {/if}
+
+      <!-- Pending filter caption: the quiet `.empty` voice, not a tab.
+           Gated on the song count itself (not just a non-empty pile), so a
+           zero can never render. Selecting any artist clears the filter. -->
+      {#if pendingSongs > 0}
+        <button
+          class="pending-link"
+          aria-pressed={ui.pendingOnly}
+          use:tooltip={ui.pendingOnly ? "Show all artists" : "Show only artists with music awaiting import"}
+          onclick={() => (ui.pendingOnly = !ui.pendingOnly)}
+        >
+          Music still pending import · {pendingSongs}
+        </button>
       {/if}
 
       <nav
@@ -1842,6 +1886,36 @@
 
   /* Transient scanning state for a populated library — an empty one has nothing
      to announce but itself, so it shows the skeleton instead (loadingState). */
+  /* Pending filter caption: the quiet `.empty` voice (not a tab), pinned
+     to the search it filters with — tight above (the search's own margin
+     does most of the work), breathing room below so it reads nearer the
+     search than the list. */
+  .pending-link {
+    flex: none;
+    display: block;
+    margin: -6px 12px 8px;
+    padding: 2px 0;
+    border: none;
+    background: transparent;
+    font-size: 13.5px;
+    color: var(--text-dim);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .pending-link:hover {
+    color: var(--text);
+  }
+
+  .pending-link[aria-pressed="true"] {
+    color: var(--accent);
+  }
+
+  .pending-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
   .scan-note {
     flex: none;
     margin: -8px 12px 4px;

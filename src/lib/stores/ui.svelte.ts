@@ -55,6 +55,11 @@ export const ui = $state({
   /** Single library search (session-only): filters the sidebar artist list
    *  AND switches the grid to Songs/Albums match sections when non-empty. */
   search: "",
+  /** Pending-only artist filter (session-only): the "Music still pending
+   *  import" caption toggles it, showing just the artists with staged
+   *  (dotted) albums. Cleared on navigation like search — the filter finds,
+   *  the selection shows. */
+  pendingOnly: false,
   /** One expanded panel PER grid section: "songs" (library search, shows
    *  matching tracks only) and "albums" (title/artist matches + the normal
    *  grid, full album). The same album can be open in both at once. */
@@ -62,6 +67,11 @@ export const ui = $state({
     songs: null as string | null,
     albums: null as string | null,
   },
+  /** Post-import landing request ({ albumId, seq } or null). AlbumGrid
+   *  consumes it (expand + travel) — a store flag, not a component call,
+   *  because the grid owns the choreography the landing must ride (switch
+   *  bridge, ghosts, glide). `seq` retriggers the same album twice. */
+  gridReveal: null as { albumId: string; seq: number } | null,
   /** Library roots (Step 7c) — musicDirs, hydrated from the DB settings. */
   musicFolders: [] as string[],
   /** Epoch ms of the last completed scan (DB-backed settings) — the Library

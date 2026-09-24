@@ -318,7 +318,16 @@
   .te-field.nums input.of {
     flex: 1 1 0;
     width: auto;
-    min-width: 56px;
+    /* 48px, not 56: the four boxes' minimums plus labels/ofs/gaps must
+       fit the field column on ONE line — at 56 the +2px type scale of
+       0.12.1 pushed the row a hair over, the disc total wrapped
+       full-width, the cluster mirror measured the WRAPPED boxes into
+       --cluster, and the year row concretized it (giant Year box +
+       x-scroll). 48 still clears 3 digits at 17px with air, and flex
+       grows the boxes whenever room exists, so healthy layouts render
+       identically. Tripwire: if type scales again and the total wraps,
+       THIS is the cliff — same cascade. */
+    min-width: 48px;
   }
 
   .te-field {

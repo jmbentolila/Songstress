@@ -12,6 +12,7 @@ mod mpris;
 mod mpv;
 mod pick_color;
 mod portal_files;
+pub mod profile;
 mod wayland_appmenu;
 mod watcher;
 mod window_state;
@@ -2391,6 +2392,25 @@ async fn get_art_candidates(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single instance FIRST (plugin docs: a second launch must be
+        // detected before any other setup runs). The second process never
+        // reaches our setup: no DB open, no mpv spawn, no socket steal.
+        // This fixes the second-desktop launch stealing the first
+        // instance's engine (reap killed its mpv, socket rebound, first
+        // window warned and stayed silent until restarted). The singleton
+        // key defaults to the bundle identifier, so dev (.dev) and the RPM
+        // stay separate singletons and still coexist.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // A second launch means "show yourself" (we have no file-open
+            // UX). Best-effort: Wayland may decline the raise, but this is
+            // still strictly better than the silent engine theft it replaces.
+            eprintln!("[single-instance] second launch, focusing existing window");
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .register_uri_scheme_protocol("thumb", |ctx, request| {
             // thumb://<album_id>/<size>.webp — served from the app cache dir
@@ -2527,6 +2547,15 @@ pub fn run() {
                 db_path: db_dir.join("songstress.db"),
                 db: Mutex::new(conn),
             });
+            // Dev/prod separation: the dev overlay changes the identifier,
+            // which re-roots the dirs above; the socket/MPRIS/appmenu names
+            // follow it via `profile`. One journal line so a mixed-up
+            // instance is greppable instead of mysterious.
+            let identifier = app.config().identifier.clone();
+            eprintln!(
+                "[profile] identifier={identifier} data_dir={}",
+                db_dir.display()
+            );
 
             // Phase 3: spawn the mpv engine once; commands talk to it through
             // the managed handle. Events reach the frontend via APP handle.
@@ -2535,6 +2564,7 @@ pub fn run() {
             let engine = match tauri::async_runtime::block_on(mpv::Mpv::spawn(
                 play_state.clone(),
                 volume,
+                &identifier,
             )) {
                 Ok(e) => e,
                 Err(e) => {
@@ -2735,11 +2765,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
+        .run(|app, event| {
             // mpv is a detached child — without this it keeps playing after
             // the window closes.
             if let tauri::RunEvent::Exit = event {
-                mpv::kill_engine();
+                mpv::kill_engine(&app.config().identifier);
             }
         });
 }

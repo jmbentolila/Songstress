@@ -18,6 +18,10 @@ initDevtools();
 // retry dies with "scan already running". Without this hook, reviewing the
 // placeholder costs a Rust rebuild (and a window drag) per look.
 if (import.meta.env.DEV) {
+  // Dev instance marker: `tauri dev` runs the .dev identifier (mono icon,
+  // isolated library) — suffix the title so tiled windows are
+  // distinguishable without checking the dock.
+  document.title = "Songstress — dev";
   (window as unknown as { __skel?: (on: boolean) => boolean }).__skel = (on: boolean) => {
     library.devLoading = on !== false;
     return library.devLoading;

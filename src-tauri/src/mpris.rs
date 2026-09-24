@@ -1,7 +1,8 @@
 //! MPRIS D-Bus control (Phase 4).
 //!
 //! Serves `org.mpris.MediaPlayer2` + `.Player` on the session bus as
-//! `org.mpris.MediaPlayer2.songstress`, backed by the same engine state the
+//! `org.mpris.MediaPlayer2.songstress` — the dev instance (`.dev`
+//! identifier) claims the `.dev` sibling so both can run at once — backed by the same engine state the
 //! frontend mirrors. Rust owns `{albumId, trackIndex}` (Phase 3), so external
 //! controllers (playerctl, KDE media widget) and the UI stay in lockstep via
 //! the shared `PlayState`.
@@ -22,6 +23,7 @@ use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
 use crate::library;
 use crate::mpv;
+use crate::profile;
 
 /// Handle for emitting Seeked from mpv.rs (registered once the server is up).
 static PLAYER_REF: OnceLock<InterfaceRef<Player>> = OnceLock::new();
@@ -49,13 +51,15 @@ impl Root {
 
     #[zbus(property)]
     fn identity(&self) -> String {
-        "Songstress".into()
+        profile::mpris_identity(&self.app.config().identifier).into()
     }
 
-    // No .desktop file yet (deferred); the name is still what clients expect.
+    // Prod still has no .desktop file (deferred); the name is still what
+    // clients expect. Dev installs its own file (mono icon), so it reports
+    // the real basename there.
     #[zbus(property)]
     fn desktop_entry(&self) -> String {
-        "songstress".into()
+        profile::mpris_desktop_entry(&self.app.config().identifier).into()
     }
 
     #[zbus(property)]
@@ -445,9 +449,10 @@ pub fn serve(
     thumbs_dir: PathBuf,
     app: tauri::AppHandle,
 ) {
+    let bus = profile::mpris_bus_name(&app.config().identifier);
     tauri::async_runtime::spawn(async move {
         match serve_inner(engine, db_path, thumbs_dir, app).await {
-            Ok(()) => eprintln!("[mpris] serving org.mpris.MediaPlayer2.songstress"),
+            Ok(()) => eprintln!("[mpris] serving {bus}"),
             Err(e) => eprintln!("[mpris] unavailable: {e}"),
         }
     });
@@ -465,7 +470,7 @@ async fn serve_inner(
         thumbs_dir,
     };
     let conn = zbus::connection::Builder::session()?
-        .name("org.mpris.MediaPlayer2.songstress")?
+        .name(profile::mpris_bus_name(&app.config().identifier))?
         .serve_at("/org/mpris/MediaPlayer2", Root { app })?
         .serve_at("/org/mpris/MediaPlayer2", player)?
         .build()

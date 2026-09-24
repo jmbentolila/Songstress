@@ -75,6 +75,9 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Screen dropper in the gradient editor (portal PickColor crosshair, per stop) | 🔶 2026-09-15 — shipped, needs one live pick + one Esc in the app |
 | GNOME portability: portal-first pickers, Adwaita stock accent, appmenu skip, hamburger menu | ✅ 2026-09-21 · **0.12.0** |
 | GNOME follow-ups: opaque chrome, system-spec traffic lights, Inter, +2px type, marquee + dwell (rebased onto 0.12.0, zenity detour reverted) | ✅ 2026-09-23 · **0.12.1** |
+| Dev/prod instance separation: dev overlay identifier (isolated library, socket, MPRIS, appmenu) + mono dev icon + — dev title | ✅ 2026-09-24 (dev-only, no version bump) |
+| Empty-state app mark: master icon SVG above the welcome headline at 75% | ✅ 2026-09-24 |
+| Track modal Genre→Track# cascade after the +2px scale (wrap + mirror + x-scroll, one-number fix) | ✅ 2026-09-24 |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -4775,3 +4778,206 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   two rounds "fixed" a tile that PNG-math said was small without ever checking
   the screen. If the mic reads small now, that's glyph contrast — different
   lever, do not touch the 0.875 without re-measuring.
+
+### Dev/prod instance separation (2026-09-24, dev-only — no version bump)
+
+  Owner ask: use the RPM for listening while the dev instance restarts under
+  it. Both builds shared `com.yossi.songstress`, hence one DB, one mpv
+  socket, one MPRIS name, one appmenu name. Fix is the dev overlay
+  `src-tauri/tauri.dev.conf.json` (merged via `tauri dev --config`, a
+  documented flavors mechanism): identifier `com.yossi.songstress.dev`,
+  productName `Songstress (dev)`. Tauri derives data/config/cache dirs from
+  the identifier, so the DB, window-size, thumbs and import staging isolate
+  with zero code — verified in the journal (`data_dir=...
+  .com.yossi.songstress.dev`) and on the bus (both
+  `org.mpris.MediaPlayer2.songstress` AND `...songstress.dev` claimed at
+  once, prod untouched). What is NOT derived lives in the new
+  `profile.rs` (one `is_dev(identifier)` predicate, `!= PROD` so unknown
+  flavors isolate rather than collide): mpv socket dir (`songstress-dev`,
+  threaded through spawn/reap/kill/socket_path), MPRIS bus/identity/
+  desktop_entry, Global Menu service name (this one would have stolen prod's
+  menu slot on Plasma — the hardcoded `SERVICE_NAME` const is gone).
+  Dev unit ExecStart now passes the overlay; plain `tauri dev` without it
+  keeps the old shared behavior, so dev runs go through the unit. Dev library
+  starts EMPTY — add a small test folder once (re-do after DB migrations).
+  Frontend: `document.title = "Songstress — dev"` under `import.meta.env.DEV`
+  so tiled windows are distinguishable without checking the dock.
+  No version bump: prod behavior is byte-identical unless the identifier
+  differs, and the RPM build never sees the overlay.
+
+### Mono dev icon (2026-09-24, dev-only)
+
+  `src-tauri/icons/icon-dev.png`: `magick icon.png -colorspace Gray` —
+  grayscale, same squircle+mic, unmistakable next to prod purple. Deliberately
+  OUTSIDE the SVG → `npx tauri icon` pipeline (dev-only; regenerating icons
+  will not refresh it — re-run the magick line if icon.png changes). Referenced
+  only by the user-local `~/.local/share/applications/
+  com.yossi.songstress.dev.desktop` (`Icon=` absolute path, `Exec=systemctl
+  --user start songstress-dev` so the dash tile boots the unit,
+  `StartupWMClass=` the dev id). Runtime icon setting was not an option:
+  Wayland has no per-window icon protocol, the compositor looks it up from
+  the app-id — which is why the icon needed the identifier overlay, and why
+  the overlay doubles as the isolation mechanism.
+
+### Dev dock entry, second half (2026-09-24, dev-only)
+
+  The overlay identifier alone did NOT separate the dock tile: dev showed as
+  a second window under the prod icon. Root cause, read from the sources
+  (not guessed): Tauri only sets the GTK/Wayland app-id when
+  `app.enableGTKAppId` is true, and it defaults to FALSE (tauri-utils
+  config.rs) — so both instances reported the same fallback id and Mutter
+  grouped them. Fix: `"app": { "enableGTKAppId": true }` in the DEV overlay
+  only (schema key is `enableGTKAppId`, all-caps GTK). Prod untouched — its
+  dash matching works as before. Follow-on collision, caught by reading tao
+  0.35.3 (it `app.register()`s the id): the dev GTK application now owns
+  `com.yossi.songstress.dev` on the bus, which is exactly the name the
+  appmenu claimed — so the dev menu service moved to the `.menu` sibling
+  (`profile::appmenu_service_name`; KWin is handed the pair explicitly, the
+  name itself is arbitrary). Proof without a screenshot: the bus now shows
+  `com.yossi.songstress` (prod GTK), `com.yossi.songstress.dev` (dev GTK —
+  nothing else claims it anymore), `...dev.menu` (dev menu object), and both
+  MPRIS names. Compositor has a distinct app-id + a basename-matching desktop
+  file with the mono icon, which is the full recipe for a separate entry.
+  Known quirk: a lingering dev process now holds its GTK name, so a second
+  dev launch may attach to the old instance instead of opening fresh — kill
+  the old one first (the unit restart already does).
+
+### Dev dock entry, root cause + fix (2026-09-24, dev-only)
+
+  enableGTKAppId alone did NOT separate the dock: still one purple icon,
+  two dots. Root cause, read from gnome-shell's `shell-window-tracker.c`
+  (fetched, not guessed): `get_app_for_window` checks WM_CLASS *first* —
+  "canonical if it does" — and only then sandbox id, app-id, pid,
+  startup-notification, group. The class defaults to the binary basename,
+  "songstress" for BOTH builds, and the RPM desktop claims
+  `StartupWMClass=songstress`, so the dev window matched prod before the
+  (correct) app-id was ever consulted. Proven by elimination, not just
+  code-reading: the bus showed the dev GTK id correctly claimed while the
+  dock stayed grouped, and the pid/startup/group paths cannot return prod's
+  app for a systemd-launched foreign binary — WM_CLASS was the only path
+  that could produce what the screenshots showed.
+  Fix: `glib::set_prgname(Some("songstress-dev"))` in `main.rs`, gated on
+  the TAURI_CONFIG identifier (the merged JSON the CLI injects — same
+  object the app boots from, no second mechanism; RPM environ verified to
+  carry zero TAURI_ vars, missing/unparseable defaults to prod). Must run
+  before GTK init. New `glib = "0.18"` dep (already in the tree via the GTK
+  stack — ~zero build cost; note its `set_prgname` takes Option, E0308 on
+  the first try). Dev desktop's StartupWMClass restored as
+  `songstress-dev` — now descriptive, belt-and-suspenders with the app-id
+  path, which finally gets its turn and resolves the mono-icon desktop.
+  Both entries confirmed separated in the dock; bus shows prod GTK, dev
+  GTK, dev `.menu` object, both MPRIS names.
+
+### Empty-state app mark (2026-09-24, owner ask, two rounds)
+
+  The welcome screen gets the stencil mic above "Welcome to Songstress"
+  at 75% opacity — glyph only, no squircle (then bumped 96px → 144px on
+  request). Geometry mirrors the #stencil mask group in assets/app-icon.svg
+  (white = paint, black = knockout); if the mic ever changes there, mirror
+  it in EmptyState.svelte. Two gotchas, both caught before shipping: the
+  first cut referenced a standalone asset file via <img>, which died twice —
+  currentColor cannot cross the image-document boundary (the glyph would
+  have fallen back to CanvasText, near-invisible on the dark glass), so the
+  SVG is INLINED and the asset file deleted; and the paint is currentColor
+  (via `color: var(--text)`) rather than the tile's fixed near-white, which
+  would wash out on the light theme. Error branch untouched: a failed scan
+  is a different state with its own screen.
+  Buttons share one width: measured live (177 vs 94px), `min-width: 180px`
+  on the shared rule equalizes by construction — verified 180/180 via the
+  devctl bridge.
+  Ink rhythm + italic path: the 10px box gaps were uniform but the
+  headline's line slack + descender read ~4px airier, so `.primary` carries
+  `margin-top: 4px` (measured live: 14px below vs 10px above); the
+  single-folder path renders in `<em>` via a split branch, with
+  `break-word` (not `anywhere`, which would rewrap the sentence) so long
+  paths wrap instead of overflowing.
+
+### Track modal Genre→Track# cascade after the +2px scale (2026-09-24, owner screenshot)
+
+  Symptom (screenshot): disc-total box wrapped full-width onto its own
+  line, Year box giant, horizontal scrollbar in the modal body. One root,
+  three symptoms in cascade: the +2px scale pushed the Track# row's minimum
+  (four 56px-min boxes + wider labels + ofs + gaps) a hair past the field
+  column, so the disc total wrapped; the --cluster mirror then measured the
+  WRAPPED boxes and concretized that width; the year row rendered it (giant
+  box) and overflowed the column (x-scroll). Fix is one number in
+  FieldGrid.svelte: nums boxes `min-width: 56px → 48px`. 48 still clears 3
+  digits at 17px with air, and flex grows the boxes whenever room exists, so
+  healthy layouts render pixel-identically — the change only moves the wrap
+  cliff 32px further out, with a tripwire comment naming the cascade for the
+  next scale bump. Gaps untouched (ruled measures). Heals live over HMR: the
+  ResizeObserver re-fires on the reflow and re-measures the healthy row.
+
+### Music folders modal: narrower + centered Add (2026-09-24, owner ask)
+
+  Width 560px → 440px (a path list + one button never earned the wide
+  box; long paths ellipsize either way). The footer already SAID
+  `justify-content: flex-end` but had no `display: flex`, so the button
+  sat left — now a real flex row, centered per the ask.
+
+### Modal pass (2026-09-24, owner-driven)
+
+  Track tag editor: +2px cascade fixed (one number, see entry above).
+  Music folders: 560px → 440px, Add centered (footer's justify-content was
+  dead without display:flex). Remaining modals (album editor, imports,
+  About) + settings stack reviewed by owner on screen — fine, no changes.
+
+### Single instance (2026-09-24, owner report from KDE, **0.12.2**)
+
+  Report: opening the app on a second desktop/activities while one ran did
+  not crash the first, but mpv warned and stayed silent until restart.
+  Mechanism (no guessing needed): no singleton existed, so the second
+  process ran full setup — `reap_previous` killed the FIRST instance's mpv
+  (pid guard passes: same cmdline shape), rebound the SAME socket path,
+  and the first engine's reader died on the closed socket. Every later
+  playback command failed; only a restart re-spawned its engine.
+  Fix: first-party `tauri-plugin-single-instance` (v2.4.5), registered FIRST
+  per the plugin docs — the second process exits in plugin setup, before our
+  DB/mpv setup ever runs, after handing off; the first focuses its window
+  (unminimize+show+focus, best-effort under Wayland focus rules). Singleton
+  key defaults to the bundle identifier, so dev (.dev) and RPM stay separate
+  singletons and coexist — verified dev boots clean; prod gets it with the
+  0.12.2 RPM rebuild. No live second-launch test here: it would steal his
+  focus mid-session. Verify by launching a second copy (should focus, never
+  duplicate) — on this GNOME box now, on KDE/d second desktop later.
+
+### Post-import landing replaces the auto modal (2026-09-24, owner ask)
+
+  Importing no longer opens Manage Imports by itself: the app switches to
+  the first imported album's artist tab and expands that album in the grid
+  (staged badge + per-album doors are the receipt now). Modal opens only on
+  direct invocation (menu, badge, album menu), where the report band still
+  renders. Mechanics: `importMusic` reads the staged plan (exact albumIds,
+  plan order = "first on the list"), waits for the post-scan dump to carry
+  the row (the scan finished inside the invoke but the dump refresh races
+  our return — 15s poll, quiet give-up), then `revealInGrid` replicates the
+  sidebar tab switch (menu layers closed, search cleared, expansions
+  collapsed) and fires `ui.gridReveal` 260ms later — after the tab's 160ms
+  switch bridge — guarded so it never yanks the user back if they moved on.
+  The grid consumes the request through `toggleExpand(id, "albums", true)`:
+  an open-only flag reusing the full choreography (ghosts, glide, cover
+  warm) instead of duplicating it; a re-import onto the open album just
+  travels. Pure "already own this" imports land on the existing album with
+  the sentence heard via the announcer. No live end-to-end test here (needs
+  real files + driving his window) — verify by importing: tab switch,
+  expanded album, modal stays shut.
+
+### Sidebar pending-imports filter row (2026-09-24, owner ask)
+
+  "Songs pending import" row between search and All Artists, only while the
+  staged pile exists: name + pending-song count (staged albums' tracks) with
+  the same accent dot the dotted rows wear. Click toggles `ui.pendingOnly`
+  (session-only, aria-pressed, tooltip both ways), ANDing with search; the
+  filter gates on pile non-emptiness AND an auto-clear effect follows the
+  pile, so an emptied pile can neither blank the list for a frame nor
+  re-filter the next pile by surprise. Selecting any artist clears it (the
+  filter finds, the selection shows — same contract as search), and the
+  post-import landing clears it too. No new CSS: .row/.name/.count/.pending.
+
+### Pending filter: tab → caption (2026-09-24, owner correction)
+
+  First cut was a full `.row` tab; owner: not a tab — the quiet `.empty`
+  voice, pinned under the search it filters with (margin borrows scanNote's
+  negative-top idiom: nearer the search than the list). Same behavior
+  (toggle, aria-pressed, tooltips, auto-clear, select-clears), accent text
+  for the ON state instead of the row wash.

@@ -6,6 +6,10 @@ import {
   type SaveReport,
   type StagedAlbum,
 } from "../importPlan";
+import { announcer } from "./announcer.svelte";
+import { library } from "./library.svelte";
+import type { Album } from "../types";
+import { ui } from "./ui.svelte";
 import { discardImports, runImport, saveImports, scanner } from "./scanner.svelte";
 
 /**
@@ -202,14 +206,72 @@ export async function applyImportDecisions(): Promise<void> {
   if (imports.plan.length === 0 && !needsReport) closeImportManager();
 }
 
-/** Import, then show what it did. The window opens itself because the
- *  alternative is a progress ring that ends with nothing visibly changed. */
+/** Import, then LAND on what it did: the artist tab switches to the first
+ *  imported album's artist and that album expands in the grid. The modal no
+ *  longer opens itself (owner ruling 2026-09-24: it interrupted; the landing
+ *  IS the receipt for staged files) — it opens only on direct invocation
+ *  (menu, badge, album menu), where `report` still renders. */
 export async function importMusic(paths: string[]): Promise<void> {
   const report = await runImport(paths);
   if (!report) return;
   imports.report = report;
   imports.applied = null;
-  await openImportManager();
+  await refreshImportPlan();
+  // First of the imported, staged preferred: the plan order is the pile's
+  // order, which is what "first on the list" means.
+  const first = imports.plan[0]?.albumId ?? null;
+  if (first) {
+    const album = await waitForAlbum(first);
+    if (album) revealInGrid(album.id, album.artistId);
+    return;
+  }
+  // Nothing staged (pure "already own this"): land on the existing album
+  // instead of ending the ring on an unchanged screen — with the sentence
+  // the modal band used to say, heard.
+  const known = report.already[0];
+  if (!known) return;
+  const hit =
+    library.albums.find(
+      (a) => a.title === known.title && library.artistOf(a)?.name === known.artist,
+    ) ?? library.albums.find((a) => a.title === known.title);
+  if (!hit) return;
+  announcer.say(`Already in your library: ${known.artist} — ${known.title}`);
+  revealInGrid(hit.id, hit.artistId);
+}
+
+/** Wait for the post-import dump to carry the album: the scan finished
+ *  inside the invoke, but the dump refresh it triggers races our return.
+ *  Gives up quietly — a failed scan leaves its own error state behind. */
+async function waitForAlbum(albumId: string): Promise<Album | null> {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    const hit = library.albums.find((a) => a.id === albumId);
+    if (hit) return hit;
+    if (Date.now() > deadline) return null;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
+/** Switch context to one album: drop any menu layer (it would hide the
+ *  landing), clear search (it would hide the album in match sections),
+ *  switch the tab exactly the way the sidebar does — then ask the grid to
+ *  expand + travel AFTER the tab's switch bridge (160ms exit), when the
+ *  album is actually listed. Skipped if the user moved on meanwhile: the
+ *  landing must never yank them back. One tick — Svelte batches. */
+function revealInGrid(albumId: string, artistId: string): void {
+  ui.menuOpen = false;
+  ui.menuDetail = null;
+  ui.menuSub = null;
+  ui.search = "";
+  ui.pendingOnly = false;
+  ui.activeArtistId = artistId;
+  ui.expandedAlbum.songs = null;
+  ui.expandedAlbum.albums = null;
+  const seq = (ui.gridReveal?.seq ?? 0) + 1;
+  setTimeout(() => {
+    if (ui.activeArtistId !== artistId) return;
+    ui.gridReveal = { albumId, seq };
+  }, 260);
 }
 
 /** kdialog multi-file picker → import. */

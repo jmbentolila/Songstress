@@ -143,7 +143,7 @@
 
 <style>
   .mf-modal {
-    width: min(560px, calc(100vw - 80px));
+    width: min(440px, calc(100vw - 80px));
     max-height: calc(100vh - 140px);
     display: flex;
     flex-direction: column;
@@ -279,10 +279,11 @@
   }
 
   .mf-foot {
+    display: flex;
+    justify-content: center;
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
-    justify-content: flex-end;
   }
 
   .mf-add {

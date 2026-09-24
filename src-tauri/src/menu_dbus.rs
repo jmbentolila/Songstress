@@ -16,8 +16,8 @@ use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::zvariant::{OwnedValue, Value};
 
 use crate::menu::{self, MenuItem};
+use crate::profile;
 
-pub const SERVICE_NAME: &str = "com.yossi.songstress";
 pub const OBJECT_PATH: &str = "/org/songstress/Menu";
 
 static REVISION: AtomicU32 = AtomicU32::new(1);
@@ -374,17 +374,19 @@ pub fn notify_changed() {
 /// Failures are logged and swallowed: the Global Menu is best-effort and the
 /// titlebar menu bar always works.
 pub fn serve(engine: Arc<crate::mpv::Mpv>, app: tauri::AppHandle) {
+    let service = profile::appmenu_service_name(&app.config().identifier);
     tauri::async_runtime::spawn(async move {
         match serve_inner(engine, app).await {
-            Ok(()) => eprintln!("[appmenu] serving {SERVICE_NAME}{OBJECT_PATH}"),
+            Ok(()) => eprintln!("[appmenu] serving {service}{OBJECT_PATH}"),
             Err(e) => eprintln!("[appmenu] unavailable: {e}"),
         }
     });
 }
 
 async fn serve_inner(engine: Arc<crate::mpv::Mpv>, app: tauri::AppHandle) -> zbus::Result<()> {
+    let service = profile::appmenu_service_name(&app.config().identifier);
     let conn = zbus::connection::Builder::session()?
-        .name(SERVICE_NAME)?
+        .name(service)?
         .serve_at(
             OBJECT_PATH,
             Dbusmenu {
@@ -402,6 +404,6 @@ async fn serve_inner(engine: Arc<crate::mpv::Mpv>, app: tauri::AppHandle) -> zbu
     let _ = MENU_REF.set(iref.clone());
 
     // The bus object exists now — KWin may be told about it.
-    crate::wayland_appmenu::register(&app, SERVICE_NAME, OBJECT_PATH);
+    crate::wayland_appmenu::register(&app, service, OBJECT_PATH);
     Ok(())
 }

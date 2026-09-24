@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.yossi.songstress.dev",
+  "productName": "Songstress (dev)",
+  "app": {
+    "enableGTKAppId": true
+  }
+}

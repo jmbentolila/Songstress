@@ -211,15 +211,15 @@ struct QueueEvent<'a> {
     up_next: Vec<QueueEntry<'a>>,
 }
 
-fn socket_path() -> PathBuf {
-    runtime_dir().join("mpv.sock")
+fn socket_path(identifier: &str) -> PathBuf {
+    runtime_dir(identifier).join("mpv.sock")
 }
 
-fn runtime_dir() -> PathBuf {
+fn runtime_dir(identifier: &str) -> PathBuf {
     let dir = std::env::var("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir())
-        .join("songstress");
+        .join(crate::profile::socket_dir_name(identifier));
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -227,8 +227,8 @@ fn runtime_dir() -> PathBuf {
 /// Reap an orphaned engine from a previous app session (idle=yes keeps mpv
 /// alive after its parent dies, and each launch would otherwise stack
 /// another silent instance).
-fn reap_previous() {
-    let pidfile = runtime_dir().join("mpv.pid");
+fn reap_previous(identifier: &str) {
+    let pidfile = runtime_dir(identifier).join("mpv.pid");
     if let Ok(txt) = std::fs::read_to_string(&pidfile) {
         if let Ok(pid) = txt.trim().parse::<u32>() {
             kill_pid_guarded(pid);
@@ -238,8 +238,8 @@ fn reap_previous() {
 
 /// Kill the running engine — called on app exit, since mpv is a detached
 /// child that would otherwise keep playing after the window closes.
-pub fn kill_engine() {
-    if let Ok(txt) = std::fs::read_to_string(runtime_dir().join("mpv.pid")) {
+pub fn kill_engine(identifier: &str) {
+    if let Ok(txt) = std::fs::read_to_string(runtime_dir(identifier).join("mpv.pid")) {
         if let Ok(pid) = txt.trim().parse::<u32>() {
             kill_pid_guarded(pid);
         }
@@ -363,9 +363,10 @@ impl Mpv {
     pub async fn spawn(
         state: Arc<Mutex<PlayState>>,
         initial_volume: f64,
+        identifier: &str,
     ) -> Result<Arc<Self>, String> {
-        reap_previous();
-        let sock = socket_path();
+        reap_previous(identifier);
+        let sock = socket_path(identifier);
         let _ = std::fs::remove_file(&sock);
 
         let child = tokio::process::Command::new("mpv")
@@ -387,7 +388,7 @@ impl Mpv {
             .spawn()
             .map_err(|e| format!("spawn mpv: {e}"))?;
         if let Some(pid) = child.id() {
-            let _ = std::fs::write(runtime_dir().join("mpv.pid"), pid.to_string());
+            let _ = std::fs::write(runtime_dir(identifier).join("mpv.pid"), pid.to_string());
         }
 
         // Retry while mpv gets around to creating the socket.
@@ -1397,9 +1398,13 @@ mod tests {
         // SAFETY-ish: tests run multi-threaded, but no other test reads this
         // var concurrently; worst case the fallback branch is exercised.
         std::env::set_var("XDG_RUNTIME_DIR", "/tmp/opencode");
-        let p = socket_path();
-        assert!(p.starts_with("/tmp/opencode"));
-        assert!(p.ends_with("songstress/mpv.sock"));
+        let prod = socket_path(crate::profile::PROD_ID);
+        assert!(prod.starts_with("/tmp/opencode"));
+        assert!(prod.ends_with("songstress/mpv.sock"));
+        // The dev instance must never share the prod socket.
+        let dev = socket_path(crate::profile::DEV_ID);
+        assert!(dev.starts_with("/tmp/opencode"));
+        assert!(dev.ends_with("songstress-dev/mpv.sock"));
     }
 
     // --- Step 7a: eof_advance queue choreography (pure fn) -------------------
