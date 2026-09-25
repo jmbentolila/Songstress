@@ -4981,3 +4981,26 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   negative-top idiom: nearer the search than the list). Same behavior
   (toggle, aria-pressed, tooltips, auto-clear, select-clears), accent text
   for the ON state instead of the row wash.
+
+### 0.13.0 shipped (2026-09-24): commit bfefb8a, RPM built
+
+  Minor (not patch): import landing + pending filter are user-visible
+  features; single instance the fix; dev isolation rides along (prod
+  behavior identical). Committed + pushed to main; note GitHub moved the
+  repo to jmbentolila/Songstress (capital S) — local remote still points
+  at the lowercase URL, pushes land via redirect, update it when convenient.
+  RPM: src-tauri/target/release/bundle/rpm/Songstress-0.13.0-1.x86_64.rpm
+  (built, NOT installed — install is his call; it carries the singleton,
+  so first launch after install owns the name).
+
+### Cold-press play: context-aware start (2026-09-25, owner ask)
+
+  Cold play (nothing current: Space / playbar / MPRIS-less press) always
+  started `library.albums[0]` — the oldest album overall, Bat Out of Hell
+  (1977) — whatever the tab. Now `coldStart()` in playback.svelte.ts:
+  shuffle on (any stage) → uniform random track across the visible context
+  (All Artists = whole library, artist tab = that artist; the backend still
+  anchors it and builds the stage pool behind it); shuffle off → track 1 of
+  the first album on the grid (All Artists = `globalAlbumOrder`, verified
+  identical to the grid comparator; artist tab = that artist's oldest).
+  Frontend-only, single call site, hot-reloads — no restart, no Rust.

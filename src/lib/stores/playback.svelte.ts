@@ -2,9 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { library, LIVE_LIBRARY } from "./library.svelte";
 import { notifyError, locateMissingTrack } from "./scanner.svelte";
-import { adjacentAlbum } from "../albumOrder";
+import { adjacentAlbum, globalAlbumOrder } from "../albumOrder";
 import { defaultEq, matchingPreset, clampDb, EQ_PRESETS } from "../eq";
 import type { PlaybackContext, Track } from "../types";
+import { ui } from "./ui.svelte";
 
 /**
  * Dual playback engine:
@@ -205,8 +206,7 @@ export async function playTrack(albumId: string, trackIndex: number) {
 
 export async function togglePlay() {
   if (!playback.current) {
-    const first = library.albums[0];
-    if (first) await playTrack(first.id, 0);
+    await coldStart();
     return;
   }
   if (LIVE_LIBRARY && library.live) {
@@ -220,6 +220,30 @@ export async function togglePlay() {
     return;
   }
   playback.isPlaying = !playback.isPlaying;
+}
+
+/** Cold press (nothing playing): shuffle on → a random track from the
+ *  visible context; shuffle off → track 1 of the first album on the grid
+ *  (All Artists = global artist/year order, artist tab = that artist's
+ *  oldest). Previously this always started library.albums[0] — the oldest
+ *  album overall (Bat Out of Hell, 1977) — whatever the tab. */
+async function coldStart() {
+  const artistId = ui.activeArtistId;
+  const albums =
+    artistId === "all"
+      ? globalAlbumOrder(library.albums, library.artists)
+      : library.albums.filter((a) => a.artistId === artistId);
+  if (albums.length === 0) return;
+  if (playback.shuffle !== "off") {
+    const pool = albums.flatMap((a) =>
+      library.tracksOf(a.id).map((_, i) => ({ albumId: a.id, index: i })),
+    );
+    if (pool.length === 0) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    await playTrack(pick.albumId, pick.index);
+    return;
+  }
+  await playTrack(albums[0].id, 0);
 }
 
 export async function stop() {
