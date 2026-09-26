@@ -6,6 +6,7 @@
   import { currentTrack } from "../lib/stores/playback.svelte";
   import { tooltip } from "../lib/tooltip";
   import { extractArtColors } from "../lib/artColors";
+  import { artSrc } from "../lib/artSrc";
   import { buildRows, columnCount } from "../lib/buildRows";
   import { skeletonRows, libraryLoading } from "../lib/loadingState";
   import { scanner } from "../lib/stores/scanner.svelte";
@@ -507,7 +508,7 @@
       if (cover) {
         const warm = new Image();
         warm.decoding = "async";
-        warm.src = cover;
+        warm.src = artSrc(cover);
         warm.decode().catch(() => {});
         // Warm the color cache too so the panel gradient is ready on arrival.
         extractArtColors(cover);
@@ -605,7 +606,7 @@
                       <!-- no loading="lazy": WebKit re-evaluates lazy images on
                            repaint and evicts decoded data when idle, flashing a
                            blank frame on hover/return; 246 thumbs are cheap -->
-                      <img src={album.cover} alt="" draggable="false" loading="lazy" decoding="async" />
+                      <img src={artSrc(album.cover)} alt="" draggable="false" loading="lazy" decoding="async" />
                     {:else}
                       <span class="noart"><StencilMark /></span>
                     {/if}

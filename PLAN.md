@@ -78,6 +78,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Dev/prod instance separation: dev overlay identifier (isolated library, socket, MPRIS, appmenu) + mono dev icon + — dev title | ✅ 2026-09-24 (dev-only, no version bump) |
 | Empty-state app mark: master icon SVG above the welcome headline at 75% | ✅ 2026-09-24 |
 | Track modal Genre→Track# cascade after the +2px scale (wrap + mirror + x-scroll, one-number fix) | ✅ 2026-09-24 |
+| WebKitGTK 2.54: dev-thumb bridge + compositor-stutter verdict | ✅ 2026-09-26 (artwork fixed; stutter = upstream, riding it) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5004,3 +5005,64 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   the first album on the grid (All Artists = `globalAlbumOrder`, verified
   identical to the grid comparator; artist tab = that artist's oldest).
   Frontend-only, single call site, hot-reloads — no restart, no Rust.
+
+## WebKitGTK 2.54: the artwork outage, the stutter, and the apple-design audit (2026-09-26)
+
+Two unrelated regressions shipped in the same Fedora update (`webkit2gtk41/-6.0
+2.52.x → 2.54.0-2`, **installed Fri 2026-09-25 12:11** — the RPM instance that
+"behaved normally" had been running since Sep 24 and therefore on 2.52; every
+Songstress process started after the update sees both bugs).
+
+**1. Custom-scheme subresources are blocked from web origins.** A page loaded
+from `http://` (the vite dev server) can no longer load `thumb://…` into an
+`<img>`: the registered `register_uri_scheme_protocol` handler is NEVER called
+(instrumented with eprintln — zero hits; fetch() from the page dies with
+"Load failed"). Top-level navigation to a custom scheme still fires the
+handler, and from a custom-scheme page (production's `tauri://localhost`)
+cross-scheme subresources still work — so **the RPM's artwork never broke**;
+only dev did. Proven with a standalone WebKit2GTK-4.1 Python probe
+(`/tmp/thumb_probe*.py`, disposable): base `http://localhost:1420/` → 0 hits
+for any flag combo of `secure/display_isolated/local/cors_enabled`; base
+`otherprobe://self/page` → handler fires. This is the request-path/security
+layer, not the compositor. **Fix:** `src/lib/artSrc.ts` rewrites
+`thumb://… → /thumb-http/…` in DEV only, served by the vite middleware
+`vite.thumb-dev.js` from the same cache dir with the same size-fallback rules
+as the Rust handler (hashed `512-<h>.webp` parsed, `art-` strict, album chain
+512→256→96). Wired at all 7 `<img>`/warm-Image sites (AlbumGrid, ExpandedPanel,
+PlayBar, ArtSelector). Permanent insurance: legal on 2.52 AND 2.54.
+
+**2. The new Skia compositor stutters on this GPU/desktop** (radeonsi Phoenix1
+780M, GNOME/Mutter, Wayland). Measured with `WEBKIT_DRAW_FPS=1`: 60 at rest,
+**3–47 during tooltip hover, typing, grid populate** — in the dev instance AND
+in the freshly-restarted RPM (owner confirmed the release app regressed too,
+and is 100% sure it wasn't happening before the update). The main thread is
+clean (rAF sampler during hover: 520/520 frames, 0 gaps >25ms) — the drops are
+compositor/presentation-side. Every env lever into the old paths MISPAINTS
+worse: `WEBKIT_DISABLE_DMABUF_RENDERER=1` and `WEBKIT_DISABLE_COMPOSITING_MODE=1`
+paint only the damage rect around the pointer (black everywhere else);
+`WEBKIT_USE_SKIA_FOR_COMPOSITION=0` reproduces the band-clip black bands;
+`WEBKIT_DISABLE_DMABUF_ATLAS=1` doesn't help. The 2.54 release notes describe
+exactly this subsystem (Skia compositor replacing TextureMapper, damage-aware
+compositing on by default, `DamageRectangleThreshold` preference that is NOT
+exposed as a WebKitSettings property in the 4.1/6.0 typelibs — nothing to tune
+from our side). **Decision (owner, 2026-09-26): do NOT downgrade** (2.52.5 is
+off the mirrors; 2.52.1 would work but pins security fixes behind it). Ride
+2.54, keep the dev instance's `WEBKIT_DRAW_FPS` drop-in OUT (removed), and
+revisit on 2.54.1. Upstream report is welcome-but-not-yet-filed; the minimal
+repro is any 250-image grid + hover tooltips on this box.
+
+Diagnostics worth keeping: `rpm -q --last` is the smoking-gun command (the
+"nothing changed but it broke" answer usually changed in the system, not the
+app); a long-running GUI process is a fossil of the library set at its start
+time; and two visually-identical instances (RPM + dev) were both in play
+mid-debug — check `pgrep -af songstress` before trusting which window a
+screenshot shows.
+
+**Same session, before the regression hunt:** apple-design audit of the UI
+(record in the session log): interruptibility/spatial-consistency/motion
+discipline graded strong; two fixes shipped — (a) `prefers-reduced-transparency`
++ `prefers-contrast` blocks in app.css reusing the GNOME solid tokens, (b)
+`:active` press washes on playbar transport/mode/volume buttons (house
+`--active`, no scale). DESIGN.md body token corrected 14→16px (code was
+canonical, docs drifted). `docs/performance-cheatsheet.md` saved from
+emilkowalski/skills (7-row table, dev reference).

@@ -1,12 +1,16 @@
 import { defineConfig } from "vitest/config";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { songstressDevTools } from "./vite.songstress.devtools.js";
+import { songstressThumbDev } from "./vite.thumb-dev.js";
 
 export default defineConfig({
   // songstressDevTools: DEV-ONLY bridge for the agent visual loop
   // (sink at POST /__songstress, commands at /__songstress_cmd, log at
   // logs/devtools.log). No-op outside dev. See tools/devctl.mjs.
-  plugins: [svelte(), songstressDevTools()],
+  // songstressThumbDev: DEV-ONLY thumb:// -> /thumb-http/ bridge, needed
+  // since WebKitGTK 2.54 blocks custom-scheme subresources from http pages
+  // (see src/lib/artSrc.ts).
+  plugins: [svelte(), songstressDevTools(), songstressThumbDev()],
   clearScreen: false,
   server: {
     port: 1420,

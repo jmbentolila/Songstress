@@ -251,7 +251,23 @@ public/covers/            album art for the fake library (real folder.jpg files)
   don't try to make scrolling content blur under the playbar via
   backdrop-filter; dim it with the `.grid-fade` veil in App.svelte instead.
   If you ever test backdrop-filter again, probe with content UNDER the glass,
-  never with the wallpaper.
+  never with the wallpaper. **Re-verify on 2.54**: the Skia compositor notes
+  claim filters no longer need offscreen surfaces, so in-window blur may now
+  be real (this claim was measured on 2.52 only).
+- **WebKitGTK 2.54 (installed 2026-09-25) broke two things, unrelated to each
+  other.** (1) `thumb://` subresources from `http://` pages: the Rust handler
+  is never called (probe-verified; `tauri://` origins are fine, so the RPM
+  never lost artwork). Dev fix: `src/lib/artSrc.ts` + the `vite.thumb-dev.js`
+  middleware (`/thumb-http/…` served from the cache dir) — never "fix" this
+  by touching the Rust protocol handler. (2) The new Skia compositor stutters
+  on this box (radeonsi + GNOME/Mutter): FPS 3–47 on hover/populate in BOTH
+  dev and the RPM, main thread clean (rAF probe). Every env lever
+  (`WEBKIT_DISABLE_DMABUF_RENDERER`, `…_COMPOSITING_MODE`,
+  `WEBKIT_USE_SKIA_FOR_COMPOSITION=0`) MISPAINTS worse — black window except
+  the damage rect around the pointer. Do not chase these; the fix is upstream
+  (2.54.1) and the owner declined the 2.52 downgrade. See PLAN.md 2026-09-26.
+  A long-running instance is a fossil: `rpm -q --last webkit2gtk4.1` dated
+  the outage; "the RPM was fine yesterday" meant a process started Sep 24.
 - **UI alphas** (user-tuned): grid backdrop 0.8 (`--bg-grid`), chrome 0.7
   (`--bg-chrome`), expanded panel gradient alpha 0.36 dark / 0.30 light. Don't
   drift from these without being asked.

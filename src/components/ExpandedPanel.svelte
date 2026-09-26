@@ -6,6 +6,7 @@
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { playback, playTrack, currentTrack, queueTracks } from "../lib/stores/playback.svelte";
   import { extractArtColors } from "../lib/artColors";
+  import { artSrc } from "../lib/artSrc";
   import { artGradient, gradientFromColors } from "../lib/gradient";
   import { tooltip } from "../lib/tooltip";
   import { SPLIT_MIN, discSplitPlan } from "../lib/discSplit";
@@ -640,7 +641,7 @@
           : undefined}
       >
         {#if displayAlbum.cover}
-          <img class="art" src={displayAlbum.cover} alt="" draggable="false" decoding="async" />
+          <img class="art" src={artSrc(displayAlbum.cover)} alt="" draggable="false" decoding="async" />
         {:else}
           <div class="art noart"><StencilMark /></div>
         {/if}

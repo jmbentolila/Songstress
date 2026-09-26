@@ -107,6 +107,46 @@ html[data-de="gnome"] .vol-tip {
   background: var(--panel-bg-strong);
 }
 
+/* ── Reduced transparency + higher contrast ───────────────────────────────
+   apple-design §14: reduced motion is not the only signal. The GNOME block
+   above owns the same solid tokens per-DE; these own them per-USER — a KDE
+   user asking for less transparency gets the identical solid hues, and a
+   higher-contrast ask gets stronger hairlines + brighter secondary text.
+   Washes/scrims/shadows sit ON surfaces and are untouched. */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme="dark"] {
+    --bg-grid: rgb(22, 22, 28);
+    --bg-chrome: rgb(22, 22, 28);
+    --panel-bg: rgb(32, 32, 40);
+    --panel-bg-strong: rgb(26, 26, 33);
+  }
+  html[data-theme="light"] {
+    --bg-grid: rgb(246, 246, 249);
+    --bg-chrome: rgb(246, 246, 249);
+    --panel-bg: rgb(255, 255, 255);
+    --panel-bg-strong: rgb(252, 252, 254);
+  }
+  .app-tip,
+  .vol-tip {
+    background: var(--panel-bg-strong);
+  }
+  .glass,
+  .app-tip {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  html[data-theme="dark"] {
+    --border: rgba(255, 255, 255, 0.28);
+    --text-dim: rgba(244, 244, 246, 0.85);
+  }
+  html[data-theme="light"] {
+    --border: rgba(30, 30, 40, 0.3);
+    --text-dim: rgba(35, 35, 41, 0.85);
+  }
+}
+
 /* ── Shared marquee strip ───────────────────────────────────────────────────
    ONE sliding language: the `marquee` action (src/lib/marquee.ts) serves the
    playbar title/artist and the sidebar artist rows. .mq-in is the strip that

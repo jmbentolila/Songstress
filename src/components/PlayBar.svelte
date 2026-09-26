@@ -12,6 +12,7 @@
     albumSkip,
   } from "../lib/stores/playback.svelte";
   import { library } from "../lib/stores/library.svelte";
+  import { artSrc } from "../lib/artSrc";
   import { cubicOut } from "svelte/easing";
 
   /** The popovers unfold UP from their anchor button and fold back down
@@ -299,7 +300,7 @@
   </div>
   <div class="now">
     {#if album?.cover}
-      <img class="art" src={album.cover} alt="" draggable="false" />
+      <img class="art" src={artSrc(album.cover)} alt="" draggable="false" />
     {:else}
       <div class="art placeholder"><StencilMark /></div>
     {/if}
@@ -823,6 +824,13 @@
     background: var(--hover);
   }
 
+  /* Press feedback: instant accent wash, distinct from hover (house rule:
+     sidebar .mrow/:active, gear, folder rows all answer with --active). */
+  .transport button:active:not(:disabled) {
+    color: var(--text);
+    background: var(--active);
+  }
+
   .transport button:disabled {
     opacity: 0.35;
     cursor: default;
@@ -939,6 +947,12 @@
     background: var(--hover);
   }
 
+  .mode-btn:active {
+    background: var(--active);
+    color: var(--text);
+    opacity: 1;
+  }
+
   .mode-btn svg {
     width: 16px;
     height: 16px;
@@ -983,6 +997,12 @@
 
   .vol-btn:hover {
     color: var(--text);
+  }
+
+  .vol-btn:active {
+    color: var(--text);
+    background: var(--active);
+    border-radius: 8px;
   }
 
   .vol-btn svg {

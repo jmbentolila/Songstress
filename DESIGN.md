@@ -47,7 +47,7 @@ typography:
     lineHeight: 1.2
   body:
     fontFamily: "Inter, 'Segoe UI', system-ui, sans-serif"
-    fontSize: "14px"
+    fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.4
   list:
@@ -238,7 +238,7 @@ alpha), not from size drama. Nothing is set in a face you can't blame.
 - **Title** (700, 15px, +0.01em): nav-row titles ("Settings", pane names).
 - **Menu** (400, 13.5px): sidebar menu rows — slightly above list size to
   mark the menu as its own cadence.
-- **Body** (400, 14px, 1.4): base UI text.
+- **Body** (400, 16px, 1.4): base UI text.
 - **List** (400, 13px): artist rows, captions, track titles, search fields.
 - **Label** (600, 11.5px, +0.09em, UPPERCASE): section labels ("Songs",
   "Albums"), badges ("Imported"), disc titles.

@@ -12,6 +12,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type { ArtChange, ArtInventory } from "../lib/artChange";
+  import { artSrc } from "../lib/artSrc";
   import { sniffMime, toBase64 } from "../lib/artChange";
   import { tooltip } from "../lib/tooltip";
 
@@ -251,7 +252,7 @@
           onclick={() => expand({ src: a.url, label: "New image" })}
           use:tooltip={"Click to see the full image"}
         >
-          <img src={a.url} alt="" decoding="async" use:reveal />
+          <img src={artSrc(a.url)} alt="" decoding="async" use:reveal />
           <span
             class="as-badge as-sel-badge"
             role="checkbox"
@@ -296,7 +297,7 @@
             })}
           use:tooltip={"Click to see the full image"}
         >
-          <img src={c.preview} alt="" decoding="async" use:reveal />
+          <img src={artSrc(c.preview)} alt="" decoding="async" use:reveal />
           <!-- selection: the corner dot (iOS photo-picker language) -->
           <span
             class="as-badge"
@@ -362,7 +363,7 @@
     <div class="as-lb" role="presentation" onclick={closeLb} transition:fade|local={LB_FADE}>
       <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
       <figure class="as-lbfig" role="dialog" aria-modal="true" aria-label={view.label} onclick={(e) => e.stopPropagation()}>
-        <img src={view.src} alt={view.label} />
+        <img src={artSrc(view.src)} alt={view.label} />
         <figcaption>
           <span>{view.label}</span>
           {#if cleared}
