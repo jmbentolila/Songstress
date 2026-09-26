@@ -5165,6 +5165,11 @@ restart, no window move. Owner to judge the strength on screen (dev unit is live
 on GNOME; DOM probes confirmed the three layers, the opaque colors, and the
 garnish at opacity 0).
 
+**Shipped as 0.13.3** (commit e842f8c, pushed to GitHub; no RPM on purpose —
+the owner wants to wait until the WebKitGTK 2.54 compositor stutter is fixed
+upstream before building one). Version bumped in all three files together
+(`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`).
+
 Also corrected here: AGENTS.md's 2026-09-23 "no `songstress-dev` unit on GNOME"
 note is stale — the unit is loaded and running, and `tools/devctl.mjs` bridges
 into the page on GNOME. `spectacle`, `qdbus-qt6` and `gnome-screenshot` are all
