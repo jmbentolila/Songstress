@@ -632,13 +632,17 @@
            accented Of Time and Parallels cover; reddest exactly where
            the 135deg ramp is reddest). The shorthand also dropped the
            --panel-bg base the .panel class declares. (owner: "that
-           solid line of red looks a bit weird", 2026-09-05) -->
+           solid line of red looks a bit weird", 2026-09-05)
+           The GNOME grain has to be in HERE rather than in app.css with the other
+           fields: this element always writes an inline `background`, and an inline
+           shorthand beats any stylesheet, so no global rule can reach it.
+           `var(--tex)`/`var(--tex-blend)` default to `none`/`normal` at :root, so
+           KDE renders this byte-identically to before; layer 2 gets `normal`
+           explicitly so the album gradient is not blended with the base. -->
       <section
         class="panel"
         bind:this={panelEl}
-        style:background={gradient
-          ? `${gradient} padding-box padding-box, var(--panel-bg) border-box`
-          : undefined}
+        style={`background: var(--tex) padding-box, ${gradient ? `${gradient} padding-box padding-box, ` : ""}var(--panel-bg) border-box; background-blend-mode: var(--tex-blend), normal, normal;`}
       >
         {#if displayAlbum.cover}
           <img class="art" src={artSrc(displayAlbum.cover)} alt="" draggable="false" decoding="async" />

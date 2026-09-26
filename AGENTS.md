@@ -18,7 +18,21 @@ DE differences are runtime fallbacks, never build variants. Plasma is the
 reference desktop (kdialog pickers, Global Menu, KWin force-blur); on GNOME the
 app takes the zenity pickers, the in-titlebar menu bar (`wayland_appmenu` skips
 with STATE=2), and OPAQUE chrome (`html[data-de="gnome"]` pins the glass tokens
-solid — KDE keeps the glass). RPM deps: `mpv` + `(zenity or kdialog)`
+solid — KDE keeps the glass; GNOME gets GRAIN instead of glass on every opaque
+field: the grid backdrop, the sidebar, the playbar, EVERY `.glass` (that one
+class is the chrome/popover/modal tier: EQ + queue popovers, context menu, the
+four scrim panels), and the expanded album panel. One fine-grain SVG-noise
+background layer per field, soft-light in dark / multiply in light, tiles and
+text untouched on top. Two traps here: `.glass::after` cannot do this (it paints
+over text), and the expanded panel sets its background INLINE (album gradient +
+base) — an inline `background` shorthand beats every stylesheet, so its grain
+lives in ExpandedPanel's own layer stack, not in the app.css rule.
+One noise scale only: a second, low-frequency layer was tried twice and removed
+(tiles read as "grain pictures", finer mottling read as DIRT — the tooth alone
+is the material).
+`--tex` lives in app.css next to the GNOME block, with "The Matte Rule" in
+DESIGN.md; the tile's SVG filter needs `color-interpolation-filters='sRGB'` or
+the whole field washes ~10 RGB lighter (linearRGB default). RPM deps: `mpv` + `(zenity or kdialog)`
 — boolean dep, dnf installs the first missing alternative (zenity: small, native
 on GNOME; on the KDE spin kdialog is already present). GNOME-only box right now:
 the kdialog branch is verified by argv-identity (byte-identical args), never by
@@ -380,10 +394,14 @@ skills' defaults:
    left column, browser in the right) at **1200×660**, and a size change is both a
    broken desktop and the known trigger of the WebKitGTK band-clip glitch. Verify
    the UI at his size (see PLAN.md → Environment quick facts).
-   GNOME (2026-09-23, current box): no `songstress-dev` unit, no spectacle/qdbus —
-   equivalents are `gnome-screenshot` + `gdbus`, and the focus-then-shoot rule is
-   UNVERIFIED under Mutter (the WebKit-stale-frame behavior was measured on KWin;
-   re-probe before trusting a GNOME screenshot). The restart protocol above is
+   GNOME (current box; the 2026-09-23 note is STALE — re-measured 2026-09-26:
+   `songstress-dev` IS loaded and running, and `tools/devctl.mjs eval`+`tail`
+   bridge into the page fine, so DOM/texture probes work on GNOME too. Of the
+   screenshot tooling, `spectacle`, `qdbus-qt6` AND `gnome-screenshot` are all
+   absent (`gdbus` is present), so there is no established screenshot path here —
+   the DOM probe is the tool that works; if a shot is ever needed, the Mutter
+   focus/stale-frame rule is UNVERIFIED (it was measured on KWin) and the portal
+   route would have to be probed first. The restart protocol above is
    KWin-specific; Mutter centers new windows — re-measure placement/size behavior
    before writing a GNOME protocol here.
 6. Update PLAN.md (status table + implementation log)

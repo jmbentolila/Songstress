@@ -154,9 +154,18 @@ system decoration — traffic-light palette, button order, and the Plasma
 Global Menu come from KWin, so the player reads as Plasma furniture rather
 than a guest with a skin.
 
+**On GNOME the material is matte, not glass.** Mutter has no force blur and
+this WebKitGTK's `backdrop-filter` is a measured no-op, so translucency would
+only reveal sharp wallpaper; `html[data-de="gnome"]` pins the same hues to
+alpha 1 and gives the fields grain instead (see The Matte Rule under Elevation
+& Depth). Same colors, different material — the fallback is a decision, not a
+missing feature.
+
 **Key Characteristics:**
 - Album grid is the interface; expanding a tile reveals its tracklist in place
 - Glass = alpha-tiered transparency over KWin-frosted wallpaper, never solid fills
+- On GNOME (no compositor blur) the same field is opaque and carries grain
+  instead — matte, not glass — so the fallback keeps a material
 - Controls dim at rest (`--text-dim`), answer on press with a translucent accent wash
 - One accent (Stock Orchid, user-overridable) used sparingly: state, selection, focus
 - No titlebar: window chrome (traffic lights, menu gear) lives in the sidebar header
@@ -299,6 +308,31 @@ supporting roles: anchoring physical objects, and casting light.
 compositor layer on hover (WebKit paints that churn as a one-frame blank
 cover flash). Hover = outline ring; press = wash. Motion belongs to
 structure (panels, stack), not to tiles.
+
+**The Matte Rule.** Where there is no compositor blur, the field carries grain
+instead of pretending to be glass. On GNOME (`html[data-de="gnome"]`) the tuned
+alphas are pinned to alpha 1 and every opaque field — grid backdrop, sidebar,
+playbar, every `.glass` surface (popovers, context menu, modals) and the expanded
+album panel — takes one background-layer texture (`--tex`) blended into its own
+color: soft-light in dark (symmetric, so the field is textured, never
+washed), multiply at a hair under 1 in light (a near-white field has no
+soft-light headroom; it can only read as paper tooth). It is ONE scale — fine
+grain at high frequency in a 480px tile, no large-scale structure. Two attempts
+at adding the large-scale unevenness that blurred wallpaper used to supply were
+rejected on sight: at a coarse frequency it read as a grid of repeating grain
+pictures (the tile repeat became visible), and finer it read as **dirt** under a
+clean grid. The tooth alone is what reads as a surface; a mottled field reads as
+a dirty one. Measured end state — dark: ±1.25 RGB at 5–95%, mean unchanged
+(extremes ±2.6); light: mean −1.3 RGB with the tooth 0…+3.1 RGB (multiply cannot
+lighten, so light is the one field whose mean moves — by 0.5%, invisibly). The
+level is taste and was dialled down twice on sight from the same mechanism, so
+treat the number as a setting, not a derivation.
+The texture is a BACKGROUND layer on the field itself — never an overlay on the
+surface — so tiles, captions and glyphs sit on it untouched. KDE keeps glass,
+and its old 2% `.glass::after` banding garnish is switched off on GNOME (no blur,
+no banding, and it sat over text). The grain dial is the two `values` slopes in
+the tile's SVG; the intercepts are `0.5 − slope/2` and the filter needs
+`color-interpolation-filters='sRGB'` — see the block in `app.css`.
 
 ## Shapes
 

@@ -29,6 +29,12 @@
      traces + the 20px-line decision in PLAN.md): do not "improve" it. */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1); /* Apple drawer (sidebar menu stack) */
+  /* Grain defaults, so a component may put `var(--tex)` in a background layer
+     stack unguarded: `none` is a valid image layer and `normal` a valid blend
+     mode, so KDE (and every non-GNOME desktop) resolves this to "no texture".
+     The real values are set per-DE/theme below. */
+  --tex: none;
+  --tex-blend: normal;
 }
 
 html[data-theme="dark"] {
@@ -95,16 +101,95 @@ html[data-de="gnome"][data-theme="dark"] {
   --bg-chrome: rgb(22, 22, 28);
   --panel-bg: rgb(32, 32, 40);
   --panel-bg-strong: rgb(26, 26, 33);
+  /* The matte field's texture (measured numbers below): ONE fine-grain layer at
+     480px, soft-light, so the modulation is symmetric around mid-gray — the field
+     is textured, never washed. */
+  --tex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='480'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='3'/%3E%3CfeColorMatrix type='matrix' values='.16 0 0 0 .42 .16 0 0 0 .42 .16 0 0 0 .42 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --tex-blend: soft-light;
 }
 html[data-de="gnome"][data-theme="light"] {
   --bg-grid: rgb(246, 246, 249);
   --bg-chrome: rgb(246, 246, 249);
   --panel-bg: rgb(255, 255, 255);
   --panel-bg-strong: rgb(252, 252, 254);
+  /* Light gets MULTIPLY, biased just under 1: a near-white field has almost no
+     headroom for soft-light (measured: a ±0.13 blend swing there buys ±0.6 RGB),
+     so the grain can only read as paper tooth — slight darkening, never a wash.
+     Measured end state: field −1.3 RGB at the mean, tooth 0…+3.1 RGB (5–95%).
+     The mean is not zero because multiply cannot lighten; the drift is 0.5% of
+     the field and invisible, the tooth is what you see. */
+  --tex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='480'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='3'/%3E%3CfeColorMatrix type='matrix' values='.045 0 0 0 .973 .045 0 0 0 .973 .045 0 0 0 .973 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --tex-blend: multiply;
 }
 html[data-de="gnome"] .app-tip,
 html[data-de="gnome"] .vol-tip {
   background: var(--panel-bg-strong);
+}
+
+/* ── The matte field ────────────────────────────────────────────────────────
+   With the alphas pinned, an opaque slab carries no material at all — a screen
+   of flat vinyl. Grain is what makes it read as a surface, and it is a
+   BACKGROUND layer on the fields themselves (never an overlay): the tiles,
+   captions and glyphs of the sidebar, the playbar, the grid and every modal panel
+   paint on top of it, so nothing is textured except the material under them.
+
+   COVERAGE: the three big fields (grid backdrop, sidebar, playbar) plus EVERY
+   `.glass` surface — which is the app's chrome/panel/popover tier in one class:
+   sidebar, playbar, EQ and queue popovers, context menu, and the four modals (all
+   `.glass` panels that are the direct child of their scrim). The expanded album
+   panel is the one surface NOT reachable from here — it sets its background
+   INLINE (album gradient + base), and an inline `background` shorthand beats any
+   stylesheet — so it carries the texture in its own layer stack
+   (ExpandedPanel.svelte); its own coverage rule is there. The `.glass` selector
+   needs no per-component specificity tricks for anything else: those surfaces
+   declare only `--bg-chrome`/`--panel-bg-strong` colors, never an image layer.
+   NOT covered, on purpose: small floating pills (`.app-tip`, `.vol-tip`) — a
+   20px grain stencil on a 24px pill is noise, not material.
+
+   GRAIN ONLY — one scale, fine, high frequency (baseFrequency .9). Two earlier
+   cuts are recorded here so that neither comes back:
+   - v1 (320px tile, `.012` unevenness at 3× this amplitude) read as "a grid of
+     individual grain pictures": at that frequency a blotch is ~80px across and
+     the eye locks onto the tile repeat, even with `stitchTiles` keeping the edges
+     continuous.
+   - v2 fixed the tiling (finer .025, 480px tile, ~44% amplitude) and the owner
+     rejected the unevenness layer outright: on an opaque slab it reads as DIRT,
+     not as material. Large-scale mottling has no business under a clean grid —
+     the tooth alone is what reads as a surface. So: one filter, one rect, and no
+     stitchTiles (nothing low-frequency is left to stitch). The 480px tile stays —
+     at high frequency the repeat is invisible, and 480 keeps it far apart.
+
+   THREE THINGS IN THE URIs ARE LOAD-BEARING, and each one was measured wrong first:
+   - `color-interpolation-filters='sRGB'`. SVG filters default to linearRGB, where
+     a 0.5 pivot is sRGB 0.76 — the whole field came out ~10 RGB units lighter and
+     the texture drifted the tuned alphas. Do not delete it.
+   - `values` is slope(float) then intercept: intercept = 0.5 − slope/2, because
+     fractalNoise's raw output is centred on 0.5, not 0. With that, the tile's mean
+     is exactly 0.5 (measured 127.8/255) and soft-light neither lightens nor darkens
+     on average.
+   - the AMPLITUDE lives in the slope: the tile's swing is ~0.35·slope at the
+     extremes (0.35 is the noise's own reach; 1σ ≈ 0.089 raw). Measured at .16:
+     ±1.25 RGB on the dark field (5–95%), ±2.6 at the extremes — the fourth cut,
+     dialled down by the owner twice on sight (.32 → .16; the level is taste, and
+     he asks, so do not pre-emptively "fix" it upward). The slope is the grain
+     dial; nothing else needs to change.
+
+   `.app` in the first selector is ALSO load-bearing: `.stage::before`'s own
+   scoped rule sets the `background` SHORTHAND (which resets image and blend
+   mode), and ties on specificity go to the later sheet — the extra class is
+   what keeps this material instead of silently losing to it.
+
+   GNOME-only: on KDE the wallpaper blur IS the texture. The old 2% garnish
+   on `.glass::after` is switched off here — it exists to hide blur banding,
+   which GNOME has none of, and it sits over text. */
+html[data-de="gnome"] .app .stage::before,
+html[data-de="gnome"] .glass {
+  background-image: var(--tex);
+  background-blend-mode: var(--tex-blend);
+}
+
+html[data-de="gnome"] .glass::after {
+  opacity: 0;
 }
 
 /* ── Reduced transparency + higher contrast ───────────────────────────────
