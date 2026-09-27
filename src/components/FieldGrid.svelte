@@ -6,8 +6,11 @@
    *
    *  - `census` (album modal) puts dispute chips under a disagreed field;
    *  - track numbers carry their inline "of N" totals wherever they render;
-   *  - `albumOptions` gives the Album field its datalist (the track modal's
-   *    retag door — same-album-artist suggestions first, computed outside).
+   *  - `prefer` orders one field's suggestion list (the track modal's retag
+   *    door puts the same album artist's titles first, exactly as its datalist
+   *    did) — the VALUES themselves come from the vocabulary store (the DB's own
+   *    distinct values, migration v6), and the ranking/highlight rules are pure
+   *    functions in lib/suggest.ts, which is where their tests live.
    *
    * The grid is TWO tracks — label | field. A row that holds two fields
    * (Genre+Year, Track#+Disc# — owner ruling: number fields are small, give
@@ -24,6 +27,13 @@
     type FieldKey,
   } from "../lib/tagFields";
   import { tooltip } from "../lib/tooltip";
+  import SuggestMenu from "./SuggestMenu.svelte";
+  import { highlightIndex, rankSuggestions, shouldFlipAbove } from "../lib/suggest";
+  import {
+    isSuggestable,
+    loadVocabulary,
+    valuesFor,
+  } from "../lib/stores/vocabulary.svelte";
 
   let {
     edit,
@@ -31,7 +41,7 @@
     bad,
     census = {},
     disputed = {},
-    albumOptions = null,
+    prefer = {},
   }: {
     /** The editors' own $state object — mutated in place across the prop
      *  boundary, which is exactly the reactivity Svelte 5 proxies give you. */
@@ -44,9 +54,139 @@
     bad: Set<string>;
     census?: Record<string, FieldCensus>;
     disputed?: Record<string, boolean>;
-    /** Existing album titles, ordered (matches first); renders a datalist. */
-    albumOptions?: string[] | null;
+    /** Per-field values that win their match class, in the order given — the
+     *  album door's same-album-artist-first order, carried over from its old
+     *  datalist. */
+    prefer?: Partial<Record<FieldKey, string[]>>;
   } = $props();
+
+  // ── as-you-type suggestions ─────────────────────────────────────────────
+  // One list for the whole grid, anchored to whichever field opened it. Values
+  // come from the vocabulary store (the DB's own distinct values, migration
+  // v6); ranking and the highlight rule are pure functions in lib/suggest.ts,
+  // which is where their tests live.
+  let sugKey = $state<FieldKey | null>(null);
+  let sugItems = $state<string[]>([]);
+  let sugHi = $state(-1);
+  let sugInput = $state<HTMLInputElement | null>(null);
+  let sugLeft = $state(0);
+  let sugTop = $state(0);
+  let sugBottom = $state(0);
+  let sugWidth = $state(0);
+  let sugFlip = $state(false);
+  const SUG_ID = "te-suggestions";
+
+  function closeSuggest() {
+    sugKey = null;
+    sugItems = [];
+    sugHi = -1;
+    sugInput = null;
+  }
+
+  /** Re-rank for what the input holds NOW — read from the element, not `edit`:
+   *  with `bind:value` on the same event, the state write's order is not ours
+   *  to assume. */
+  function refreshSuggest(input: HTMLInputElement) {
+    const key = sugKey;
+    if (!key) return;
+    const query = input.value;
+    const items = rankSuggestions(valuesFor(key), query, {
+      limit: 8,
+      prefer: prefer[key],
+    });
+    if (items.length === 0) {
+      closeSuggest();
+      return;
+    }
+    sugInput = input;
+    sugItems = items;
+    sugHi = highlightIndex(items);
+    place(input, items.length);
+  }
+
+  /** Offsets from the field CELL, because that is the positioned ancestor the
+   *  list renders in. A `fixed` child of a `.glass` panel would anchor to the
+   *  PANEL (backdrop-filter is a containing block) and the modal body both
+   *  scrolls and clips. */
+  function place(input: HTMLInputElement, count: number) {
+    const cell = input.closest(".te-field") as HTMLElement | null;
+    if (!cell) return;
+    const ir = input.getBoundingClientRect();
+    const cr = cell.getBoundingClientRect();
+    sugWidth = Math.round(ir.width);
+    sugLeft = Math.round(ir.left - cr.left);
+    sugTop = Math.round(ir.bottom - cr.top) + 4;
+    sugBottom = Math.round(cr.bottom - ir.top) + 4;
+    // Flip above the field when the list would run past the panel's visible
+    // bottom (pure + tested in lib/suggest.ts: the modal body scrolls AND
+    // clips, so a list below a low field would be cut off).
+    const panel = input.closest(".te") as HTMLElement | null;
+    const bottom = (panel ?? document.documentElement).getBoundingClientRect().bottom;
+    sugFlip = shouldFlipAbove({
+      inputTop: ir.top,
+      inputBottom: ir.bottom,
+      panelBottom: bottom,
+      count,
+    });
+  }
+
+  function openSuggest(input: HTMLInputElement, key: FieldKey) {
+    void loadVocabulary();
+    sugKey = key;
+    refreshSuggest(input);
+  }
+
+  function commitSuggest(value: string) {
+    const key = sugKey;
+    const input = sugInput;
+    if (!key) return;
+    edit[key] = value;
+    closeSuggest();
+    if (input) {
+      // Focus stays in the field, caret after the completed value: the owner's
+      // contract is that Tab completes and a SECOND Tab moves on.
+      input.focus();
+      input.setSelectionRange(value.length, value.length);
+    }
+  }
+
+  /** ↑/↓ walk the list, Tab and Enter take the highlighted value, Escape closes
+   *  the LIST and not the modal. Enter only takes a value when one is actually
+   *  highlighted (owner ruling) — otherwise it stays the editors' Save. Both
+   *  the focus trap and the accelerators live on `window` in TagSurface, so a
+   *  handled key must stop the event there. */
+  function onFieldKeydown(e: KeyboardEvent, key: FieldKey) {
+    if (sugKey !== key || sugItems.length === 0) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      const n = sugItems.length;
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      sugHi = sugHi < 0 ? (step > 0 ? 0 : n - 1) : (sugHi + step + n) % n;
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSuggest();
+      return;
+    }
+    if ((e.key === "Tab" || e.key === "Enter") && sugHi >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      commitSuggest(sugItems[sugHi]);
+    }
+  }
+
+  function onFieldInput(e: Event, key: FieldKey) {
+    if (!isSuggestable(key)) return;
+    const input = e.currentTarget as HTMLInputElement;
+    if (sugKey !== key) {
+      openSuggest(input, key);
+      return;
+    }
+    refreshSuggest(input);
+  }
 
   // Which fields this modal shows, and which share a row. Album mode never
   // touches per-file fields (title/artist/numbering belong to the files —
@@ -239,13 +379,36 @@
     class:is-year={field.key === "year"}
     class:te-bad={bad.has(field.key)}
     bind:value={edit[field.key]}
-    list={field.key === "album" && albumOptions ? "te-albums" : undefined}
+    role={isSuggestable(field.key) ? "combobox" : undefined}
+    aria-autocomplete={isSuggestable(field.key) ? "list" : undefined}
+    aria-expanded={sugKey === field.key && sugItems.length > 0}
+    aria-controls={sugKey === field.key && sugItems.length > 0 ? SUG_ID : undefined}
+    aria-activedescendant={sugKey === field.key && sugHi >= 0
+      ? `${SUG_ID}-${sugHi}`
+      : undefined}
+    oninput={(e) => onFieldInput(e, field.key)}
+    onblur={closeSuggest}
+    onkeydown={(e) => onFieldKeydown(e, field.key)}
     inputmode={["year", "trackNo", "trackTotal", "discNo", "discTotal"].includes(
       field.key,
     )
       ? "numeric"
       : undefined}
   />
+  {#if sugKey === field.key && sugItems.length > 0}
+    <SuggestMenu
+      id={SUG_ID}
+      items={sugItems}
+      hi={sugHi}
+      left={sugLeft}
+      top={sugTop}
+      bottom={sugBottom}
+      flip={sugFlip}
+      width={sugWidth}
+      onpick={commitSuggest}
+      onhover={(i) => (sugHi = i)}
+    />
+  {/if}
   {#if field.key === "trackNo"}<i>of</i>
     <input class="of" aria-label="Track total" bind:value={edit.trackTotal} inputmode="numeric" />
   {:else if field.key === "discNo"}<i>of</i>
@@ -253,13 +416,6 @@
   {/if}
 {/snippet}
 
-{#if albumOptions}
-  <datalist id="te-albums">
-    {#each albumOptions as name (name)}
-      <option value={name}></option>
-    {/each}
-  </datalist>
-{/if}
 
 <style>
   .te-grid {
@@ -331,6 +487,10 @@
   }
 
   .te-field {
+    /* The suggestion list renders INSIDE this cell and is placed from offsets
+     * measured against it (see place() above) — so the cell is the positioned
+     * ancestor by definition, not by accident. */
+    position: relative;
     display: flex;
     align-items: center;
     flex-wrap: wrap;

@@ -8,7 +8,9 @@ pub mod db;
 pub mod import;
 pub mod scan;
 pub mod settings;
+pub mod sidecar;
 pub mod tags;
+pub mod vocab;
 
 /// Read a file's tags, tolerating the tag trivia real-world rips carry.
 ///

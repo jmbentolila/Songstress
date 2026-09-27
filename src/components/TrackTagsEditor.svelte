@@ -459,7 +459,7 @@
     {/if}
     <div class="te-right">
       <div class="te-col-title">Song tags</div>
-      <FieldGrid {edit} layout="track-core" bad={bad} {albumOptions} />
+      <FieldGrid {edit} layout="track-core" bad={bad} prefer={{ album: albumOptions }} />
       {#if meta?.staged}
         <!-- The pending-only door (Phase E). A staged file has no folder to
              betray yet, so JOINING an existing album is a promise the retag

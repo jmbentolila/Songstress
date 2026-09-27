@@ -348,6 +348,54 @@ button {
   position: relative;
 }
 
+/* ── Menu surface ───────────────────────────────────────────────────────────
+   ONE surface for the context menu and the tag editors' suggestion list: the
+   owner asked for completions to look like our own menus, not the browser's
+   popup, and two copies of these rules is how they drift apart. Both wear
+   `.glass` on top, so the chrome tier's translucency (KDE) and grain (GNOME)
+   apply unchanged. Positioning is the ONE thing that stays local: the context
+   menu is `fixed` to screen coordinates, the suggestion list is `absolute`
+   inside its field cell (a fixed child of a `.glass` panel would anchor to the
+   panel — backdrop-filter is a containing block). */
+.menu-surface {
+  z-index: 200;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu-item {
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Keyboard highlight and hover are the SAME state — the pointer and the arrow
+   keys must not draw two different "selected" rows. */
+.menu-item:hover,
+.menu-item.is-active {
+  background: var(--hover);
+}
+
+/* The menu's section hairline — same quiet line the glass surfaces use,
+   inset so it reads as a break between rows, not a border of the box. */
+.menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  border: none;
+  background: var(--border);
+}
+
 /* ── Shared tooltip ─────────────────────────────────────────────────────────
    ONE tooltip language: the singleton pill `tooltip.ts` serves every anchor,
    defined once here as a global (like .glass) so the 49 sites cannot drift.

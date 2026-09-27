@@ -64,6 +64,20 @@ pub const MIGRATIONS: &[&str] = &[
     // hue-adjacent to every hot star by construction, so whatever wins now
     // is the greenest distant region available, never the mud.
     "UPDATE albums SET color_c1 = NULL, color_c2 = NULL;",
+    // v6 — tag vocabulary for the editors' as-you-type suggestions. The scan
+    // has always READ these out of the files (genre rides the tag accessor;
+    // composer/label/grouping are ItemKey lookups) but only kept the artist,
+    // so a suggestion list could only ever know the album it was editing.
+    // Nullable on purpose: pre-v6 rows read back NULL until a rescan fills
+    // them — incremental scans skip unchanged files, so a Full Rescan (or any
+    // tag edit, which changes mtime) is what backfills. `album_artist` rides
+    // along for the same reason: `artists.name` is the GROUPED artist, which
+    // equals the album artist only when the tag exists.
+    "ALTER TABLE tracks ADD COLUMN genre TEXT;
+     ALTER TABLE tracks ADD COLUMN composer TEXT;
+     ALTER TABLE tracks ADD COLUMN label TEXT;
+     ALTER TABLE tracks ADD COLUMN grouping TEXT;
+     ALTER TABLE tracks ADD COLUMN album_artist TEXT;",
 ];
 
 fn apply_migrations(conn: &Connection) -> rusqlite::Result<()> {
@@ -138,7 +152,9 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO artists VALUES ('ar-1', 'Helloween', 'helloween');
              INSERT INTO albums VALUES ('al-1', 'ar-1', 'Giants & Monsters', 2021, NULL, 'ff8800', '0044cc');
-             INSERT INTO tracks VALUES ('tr-1', 'al-1', 1, 1, 'Silent Echoes', 336.0,
+             INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path,
+                                mtime_ns, size, staged, artist)
+             VALUES ('tr-1', 'al-1', 1, 1, 'Silent Echoes', 336.0,
                  '/music/helloween/giants/01.flac', 123, 456, 0, NULL);",
         )
         .expect("seed");

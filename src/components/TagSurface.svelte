@@ -17,6 +17,7 @@
   import { ui } from "../lib/stores/ui.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
   import { trapTab } from "../lib/focusTrap";
+  import { scrimDismiss } from "../lib/scrimDismiss";
 
   let {
     label,
@@ -124,7 +125,7 @@
   class:out
   role="presentation"
   onanimationend={onOutroEnd}
-  onclick={(e) => e.target === e.currentTarget && close()}
+  use:scrimDismiss={close}
 >
   <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
   <section class="te glass" bind:this={panelEl} role="dialog" aria-modal="true" aria-label={label}>

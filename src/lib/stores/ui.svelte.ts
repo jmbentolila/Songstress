@@ -124,16 +124,54 @@ export function resetAppearance() {
 
 /** Per-album panel gradient override (Step 9b): hex WITHOUT # (DB form).
  *  Applies instantly — this is display state, not file tags, so it never
- *  waits for the modal's Save. Survives rescans: it lives in settings,
- *  keyed by album id, never in the color_c1/c2 columns a scan rewrites. */
+ *  waits for the modal's Save. Survives rescans: it lives in settings (one key
+ *  per album, `albumGradient:<id>`), never in the color_c1/c2 columns a scan
+ *  rewrites.
+ *
+ *  The backend writes the album's `.songstress.json` in the same call, so the
+ *  portable half can never disagree with what is on screen (2026-09-26). */
 export function setPanelGradient(albumId: string, c1: string, c2: string) {
   ui.panelGradients = { ...ui.panelGradients, [albumId]: { c1, c2 } };
+  if (!isTauri) return;
+  void invoke("set_album_gradient", { albumId, colors: [c1, c2] }).catch(() =>
+    announcer.say("Could not save this album's colors — they may not stick next launch."),
+  );
 }
 
-/** Forget the override: the album returns to its artwork colors. */
+/** Forget the override: the album returns to its artwork colors (and the
+ *  sidecar drops the key, keeping whatever else it carries). */
 export function clearPanelGradient(albumId: string) {
   const { [albumId]: _, ...rest } = ui.panelGradients;
   ui.panelGradients = rest;
+  if (!isTauri) return;
+  void invoke("set_album_gradient", { albumId, colors: null }).catch(() =>
+    announcer.say("Could not clear this album's colors — they may not stick next launch."),
+  );
+}
+
+/** Re-read the per-album overrides (used after a scan: the scan ADOPTS
+ *  `.songstress.json` values into settings, and this map was hydrated before
+ *  it ran). */
+export async function refreshPanelGradients() {
+  if (!isTauri) return;
+  try {
+    const all = await invoke<Record<string, string>>("get_settings");
+    const gradients: typeof ui.panelGradients = {};
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith("albumGradient:")) continue;
+      try {
+        const pair = JSON.parse(value) as unknown;
+        if (Array.isArray(pair) && pair.length === 2 && pair.every((c) => typeof c === "string")) {
+          gradients[key.slice("albumGradient:".length)] = { c1: pair[0], c2: pair[1] };
+        }
+      } catch {
+        // ignore a malformed pair
+      }
+    }
+    ui.panelGradients = gradients;
+  } catch {
+    // A failed refresh leaves the map as it was — never a reason to blank the UI.
+  }
 }
 
 // --- SQLite-backed settings (Phase 2 M4) ------------------------------------
@@ -195,10 +233,25 @@ export async function initSettings() {
     ui.sidebarRowSize = parse<number>("sidebarRowSize", ui.sidebarRowSize);
     ui.playbarGradient = parse<boolean>("playbarGradient", ui.playbarGradient);
     ui.albumGradient = parse<boolean>("albumGradient", ui.albumGradient);
-    ui.panelGradients = parse<typeof ui.panelGradients>(
-      "panelGradients",
-      ui.panelGradients,
-    );
+    // Per-album gradient overrides are one settings key each
+    // (`albumGradient:<album id>`), not one blob: the scan adopts a
+    // `.songstress.json` straight into an album's key, and a blob would let
+    // this in-memory map — hydrated before that scan — clobber the adoption.
+    // The legacy blob is converted by the backend's `init_settings` before
+    // `get_settings` is ever called, so it is simply not read here.
+    const gradients: typeof ui.panelGradients = {};
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith("albumGradient:")) continue;
+      try {
+        const pair = JSON.parse(value) as unknown;
+        if (Array.isArray(pair) && pair.length === 2 && pair.every((c) => typeof c === "string")) {
+          gradients[key.slice("albumGradient:".length)] = { c1: pair[0], c2: pair[1] };
+        }
+      } catch {
+        // A malformed pair is a missing override, not a reason to fail boot.
+      }
+    }
+    ui.panelGradients = gradients;
     ui.accentColor = parse<string | null>("accentColor", ui.accentColor);
     // musicDirs is the migrated multi-root list (setup writes it from the
     // legacy musicDir on first launch); parse falls back to [] when absent.

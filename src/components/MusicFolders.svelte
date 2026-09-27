@@ -2,6 +2,7 @@
   import { ui } from "../lib/stores/ui.svelte";
   import SurfaceClose from "./SurfaceClose.svelte";
   import { tooltip } from "../lib/tooltip";
+  import { scrimDismiss } from "../lib/scrimDismiss";
   import { trapTab } from "../lib/focusTrap";
   import {
     addMusicFolderRoot,
@@ -76,7 +77,7 @@
     class:out
     role="presentation"
     onanimationend={onOutroEnd}
-    onclick={(e) => e.target === e.currentTarget && close()}
+    use:scrimDismiss={close}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mf-modal glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="Music folders">

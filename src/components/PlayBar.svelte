@@ -305,10 +305,10 @@
       <div class="art placeholder"><StencilMark /></div>
     {/if}
     <div class="text">
-      <span class="t mq" use:marquee={mqKey} use:tooltip={titleText}>
+      <span class="t mq" use:marquee={{ key: mqKey, pause: !playback.isPlaying }} use:tooltip={titleText}>
         <span class="mq-in">{titleText}</span>
       </span>
-      <span class="sub mq" use:marquee={mqKey} use:tooltip={subText}>
+      <span class="sub mq" use:marquee={{ key: mqKey, pause: !playback.isPlaying }} use:tooltip={subText}>
         <span class="mq-in">{subText}</span>
       </span>
     </div>
@@ -759,9 +759,11 @@
      strip that travels (twin gap = MQ_GAP in the action). transform-only,
      linear: constant speed, GPU path.
      1.2s delay reads the head on arrival (it applies to the first loop
-     only, then the cycle runs). Hover pauses so a line can be read;
-     .paused (music paused/stopped) parks it — cycling while nothing plays
-     is motion with no job. Reduced motion: no twin, no loop, ellipsis. */
+     only, then the cycle runs). Hover pauses so a line can be read; a pause
+     (music paused/stopped) does not cut a title off mid-roll — the action
+     waits for the loop point and parks the strip there, adding the JS-owned
+     `is-held` this rule reads. Cycling while nothing plays is motion with no
+     job. Reduced motion: no twin, no loop, ellipsis. */
   /* :global(.is-over): added by the action via classList (overflow measured
      at runtime), so the compiler never sees it — same escape hatch as
      ArtSelector's as-load. Scoping stays on .mq; only the JS-owned class
@@ -771,7 +773,7 @@
     animation-delay: 1.2s;
   }
 
-  .playbar.paused .mq-in {
+  .mq:global(.is-held) .mq-in {
     animation-play-state: paused;
   }
 

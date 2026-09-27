@@ -81,14 +81,33 @@ function trackAt(albumId: string, index: number): Track | null {
 export function currentTrack(): Track | null {
   const ctx = playback.current;
   if (!ctx) return null;
-  const tracks = library.tracksOf(ctx.albumId);
-  // The trackId is authoritative: a rescan can re-order or re-group the
-  // album mid-playback, silently shifting what the index points at.
+  // The trackId is authoritative, and it is looked up LIBRARY-WIDE: a retag can
+  // move the row to another album mid-playback (the path — and so the id —
+  // survives; album_id does not), and resolving through the stale album id read
+  // "Nothing playing" in the playbar while mpv kept playing (owner report,
+  // 2026-09-26). The album's own list is only the fallback for a context that
+  // never knew a track id.
   if (ctx.trackId) {
-    const byId = tracks.find((t) => t.id === ctx.trackId);
+    const byId = library.trackById(ctx.trackId);
     if (byId) return byId;
   }
-  return tracks[ctx.trackIndex] ?? null;
+  return trackAt(ctx.albumId, ctx.trackIndex);
+}
+
+/** Point the context at where the playing row ACTUALLY lives now, so anything
+ *  reading `playback.current.albumId`/`trackIndex` (queue building, fake-mode
+ *  advance, the marquee key) is coherent after a retag moved the row. Safe to
+ *  call often: it is a no-op unless the resolved row disagrees with the
+ *  context. Called from the engine's own events and after every library dump
+ *  (App.svelte watches `library.dumpVersion`). */
+export function reanchorCurrent() {
+  const ctx = playback.current;
+  if (!ctx?.trackId) return;
+  const track = library.trackById(ctx.trackId);
+  if (!track) return;
+  const index = Math.max(0, library.tracksOf(track.albumId).findIndex((t) => t.id === track.id));
+  if (ctx.albumId === track.albumId && ctx.trackIndex === index) return;
+  playback.current = { albumId: track.albumId, trackIndex: index, trackId: track.id };
 }
 
 // --- live engine (mpv via Rust) ----------------------------------------------
@@ -108,6 +127,9 @@ function wireLive(): Promise<void> {
       playback.positionSec = 0;
       playback.durationSec = currentTrack()?.durationSec ?? 0;
       playback.isPlaying = true;
+      // The engine's album label can be stale (a retag moved the row); the id
+      // resolves, so put the context back where the row is.
+      reanchorCurrent();
     });
     await listen("playback-paused", (e) => {
       playback.isPlaying = !(e.payload as boolean);

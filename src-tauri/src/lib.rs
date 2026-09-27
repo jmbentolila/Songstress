@@ -559,6 +559,23 @@ async fn scan_inner(
         // scan (discards, retags to a new key), their thumbs dirs must not
         // pile up forever (measured 50 orphans before this line existed).
         library::artwork::prune_orphan_thumbs(&conn, &cache_dir);
+        // Per-album display state (`.songstress.json`): adopt what the files
+        // carry — a gradient always, colours only where the artwork has none —
+        // then mirror the final state back. AFTER the artwork pass on purpose:
+        // the mirror must hold the pair the artwork just derived.
+        let sidecar_counts = library::sidecar::sync_all(&conn)?;
+        if sidecar_counts.written > 0
+            || sidecar_counts.adopted_gradient > 0
+            || sidecar_counts.adopted_colors > 0
+        {
+            eprintln!(
+                "[sidecar] {} albums · wrote {} · adopted {} gradient(s), {} colour pair(s)",
+                sidecar_counts.albums,
+                sidecar_counts.written,
+                sidecar_counts.adopted_gradient,
+                sidecar_counts.adopted_colors
+            );
+        }
         eprintln!(
             "[scan] files {:?} (added {} updated {} removed {} skipped {}) · artwork {:?}",
             files_elapsed, counts.added, counts.updated, counts.removed, counts.skipped,
@@ -1387,8 +1404,41 @@ fn init_settings(
     state: tauri::State<AppState>,
     values: HashMap<String, String>,
 ) -> Result<(), String> {
-    library::settings::init_missing(&state.db.lock().unwrap(), &values)
-        .map_err(|e| e.to_string())
+    let conn = state.db.lock().unwrap();
+    library::settings::init_missing(&conn, &values).map_err(|e| e.to_string())?;
+    // One-time: the per-album gradient overrides moved out of the
+    // `panelGradients` blob into one key per album when the sidecar arrived
+    // (the scan adopts a `.songstress.json` straight into an album's key, and a
+    // blob would let the app's pre-scan in-memory map clobber it). Runs after
+    // the seed above so a localStorage-era install converts too.
+    match library::settings::migrate_panel_gradients(&conn) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("[settings] migrated {n} panel gradient override(s) to per-album keys"),
+        Err(e) => eprintln!("[settings] panel gradient migration failed: {e}"),
+    }
+    Ok(())
+}
+
+/// Set (or clear, with `colors: null`) one album's panel-gradient override, and
+/// mirror it into the album's `.songstress.json` in the same step — the file is
+/// the portable half, and the two must never disagree in normal use.
+#[tauri::command]
+fn set_album_gradient(
+    state: tauri::State<AppState>,
+    album_id: String,
+    colors: Option<Vec<String>>,
+) -> Result<(), String> {
+    let pair = match colors {
+        None => None,
+        Some(v) if v.len() == 2 && v.iter().all(|c| !c.trim().is_empty()) => {
+            Some([v[0].clone(), v[1].clone()])
+        }
+        Some(_) => return Err("expected two hex colors".into()),
+    };
+    let conn = state.db.lock().unwrap();
+    library::settings::set_album_gradient(&conn, &album_id, pair.as_ref())
+        .map_err(|e| e.to_string())?;
+    library::sidecar::sync_one(&conn, &album_id).map(|_| ())
 }
 
 // --- Library dump (Phase 2 M4) ----------------------------------------------
@@ -2261,6 +2311,22 @@ async fn get_track_tags(
     .map_err(|e| e.to_string())?
 }
 
+/// The tag editors' suggestion vocabulary (migration v6): distinct values the
+/// library already holds, per field, most used first. Own connection, like the
+/// other read commands, so the query never holds AppState.
+#[tauri::command]
+async fn tag_vocabulary(
+    state: tauri::State<'_, AppState>,
+) -> Result<library::vocab::Vocabulary, String> {
+    let db_path = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        library::vocab::vocabulary(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn get_track_file(
   state: tauri::State<'_, AppState>,
@@ -2384,6 +2450,30 @@ async fn get_art_candidates(
     tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
         library::tags::list_art_candidates(&conn, &album_id, track_id.as_deref(), &cache_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Delete ONE artwork from an album — immediately, not on Save. All of the
+/// policy lives in `library::tags::delete_artwork` (which owns the inventory);
+/// this wrapper opens a connection, does the deletion, and re-scans the files
+/// it rewrote so the grid, the panel and the playbar all follow from real
+/// state rather than from a hopeful refresh.
+#[tauri::command]
+async fn delete_artwork(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    album_id: String,
+    hash: String,
+) -> Result<library::tags::ArtDeleteReport, String> {
+    let db_path = state.db_path.clone();
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+        let report = library::tags::delete_artwork(&conn, &cache_dir, &album_id, &hash)?;
+        rescan_written(&mut conn, &app, &report.touched);
+        Ok::<library::tags::ArtDeleteReport, String>(report)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2708,6 +2798,7 @@ pub fn run() {
             reveal_container,
             set_setting,
             init_settings,
+            set_album_gradient,
             scan_library,
             get_library,
             get_music_folders,
@@ -2737,11 +2828,13 @@ pub fn run() {
             playback_queue_clear,
             playback_eq,
             get_track_tags,
+            tag_vocabulary,
             get_track_file,
             get_album_tags,
             save_track_tags,
             save_album_tags,
             get_art_candidates,
+            delete_artwork,
             pick_image,
             pick_screen_color,
             read_image
@@ -3101,9 +3194,10 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-x','X','x');
              INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);
              INSERT INTO albums VALUES ('al-2','ar-x','B',2021,NULL,NULL,NULL);
-             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/track.flac',1,123,0,NULL);
-             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/track.flac',1,123,0,NULL);
-             INSERT INTO tracks VALUES ('tr-3','al-2',1,1,'t3',10.0,'/music/bc/other.flac',1,456,0,NULL);",
+             INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size)
+             VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/track.flac',1,123),
+                    ('tr-2','al-2',1,1,'t2',10.0,'/music/b/track.flac',1,123),
+                    ('tr-3','al-2',1,1,'t3',10.0,'/music/bc/other.flac',1,456);",
         )
         .expect("seed");
         let n = super::delete_tracks_under_root(&conn, std::path::Path::new("/music/b"))
@@ -3127,10 +3221,11 @@ mod tests {
             "INSERT INTO artists VALUES ('ar-x','X','x');
              INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);
              INSERT INTO albums VALUES ('al-2','ar-x','B',2021,NULL,NULL,NULL);
-             INSERT INTO tracks VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/one.flac',1,1,0,NULL);
-             INSERT INTO tracks VALUES ('tr-2','al-2',1,1,'t2',10.0,'/music/b/two.flac',1,1,0,NULL);
-             INSERT INTO tracks VALUES ('tr-3','al-2',1,2,'t3',10.0,'/music/b/three.flac',1,1,0,NULL);
-             INSERT INTO tracks VALUES ('tr-4','al-2',2,1,'t4',10.0,'/music/b-cd2/four.flac',1,1,0,NULL);",
+             INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size)
+             VALUES ('tr-1','al-1',1,1,'t1',10.0,'/music/a/one.flac',1,1),
+                    ('tr-2','al-2',1,1,'t2',10.0,'/music/b/two.flac',1,1),
+                    ('tr-3','al-2',1,2,'t3',10.0,'/music/b/three.flac',1,1),
+                    ('tr-4','al-2',2,1,'t4',10.0,'/music/b-cd2/four.flac',1,1);",
         )
         .expect("seed");
         // A track reveals ITS FILE (the caller --selects it).

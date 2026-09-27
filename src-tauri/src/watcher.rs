@@ -46,7 +46,7 @@ const TICK: Duration = Duration::from_millis(50);
 /// `Any`/`Other` stay IN as the conservative catch-alls; neither is generated
 /// by read traffic.
 pub fn marks_library_dirty(ev: &Event) -> bool {
-    matches!(
+    let mutating = matches!(
         ev.kind,
         EventKind::Create(_)
             | EventKind::Remove(_)
@@ -60,7 +60,18 @@ pub fn marks_library_dirty(ev: &Event) -> bool {
             // pass. Read traffic is the one thing that must never be in here.
             | EventKind::Any
             | EventKind::Other
-    )
+    );
+    if !mutating {
+        return false;
+    }
+    // Our own `.songstress.json` is NOT library content. The scan writes them
+    // (one per album, carrying the display state) and the app rewrites the one
+    // you just styled, so counting them would re-arm the watcher on our own
+    // writes — the same self-feeding bug read traffic caused (AGENTS.md). An
+    // event with no path at all is unattributable, so it counts (fail open).
+    let only_sidecars = !ev.paths.is_empty()
+        && ev.paths.iter().all(|p| crate::library::sidecar::is_sidecar_path(p));
+    !only_sidecars
 }
 
 /// Stopping the thread releases its watches (the notify watcher drops).
@@ -247,6 +258,30 @@ mod tests {
         ] {
             assert!(marks_library_dirty(&Event::new(kind)), "{kind:?} must count");
         }
+    }
+
+    /// Our own display-state file must never re-arm the watcher: the scan
+    /// writes one per album and the app rewrites the styled one, so counting
+    /// them would schedule a rescan on every gradient edit — and the rescan
+    /// would write again. Same self-feeding shape as the read-traffic bug.
+    #[test]
+    fn sidecar_writes_are_not_library_changes() {
+        use crate::library::sidecar;
+        use notify::event::{CreateKind, RenameMode};
+        let folder = std::path::Path::new("/music/Ghost/Meliora (2015)");
+        let mut ev = Event::new(EventKind::Create(CreateKind::Any));
+        ev.paths = vec![sidecar::path_in(folder)];
+        assert!(!marks_library_dirty(&ev), "our file is not library content");
+
+        // The temp of an atomic write, and the rename that lands it.
+        let mut tmp = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any)));
+        tmp.paths = vec![folder.join(".songstress.json.tmp-1234"), sidecar::path_in(folder)];
+        assert!(!marks_library_dirty(&tmp));
+
+        // A real file next to it still counts — including in the same event.
+        let mut mixed = Event::new(EventKind::Create(CreateKind::Any));
+        mixed.paths = vec![sidecar::path_in(folder), folder.join("01 - Spirit.flac")];
+        assert!(marks_library_dirty(&mixed));
     }
 
     /// Dropping the handle stops the thread and releases its watches.

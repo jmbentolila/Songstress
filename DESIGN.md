@@ -309,6 +309,26 @@ compositor layer on hover (WebKit paints that churn as a one-frame blank
 cover flash). Hover = outline ring; press = wash. Motion belongs to
 structure (panels, stack), not to tiles.
 
+**The In-Modal Confirmation Rule.** A confirmation raised from INSIDE a
+surface drops down from the top edge of the INNERMOST surface that raised it —
+the modal normally, the lightbox when the expanded view is what asked (a
+notification on the panel behind the image reads as a bug) — as a box — never a
+modal on top of a modal, and never a native dialog (owner ruling, 2026-09-26).
+It belongs to the panel it came from: no second dialog and no native dialog,
+`.glass` material, one sentence naming exactly what will happen, the safe action
+first and the destructive one in the caution hue. **Its own surface dims under
+it** exactly the way the window dims under a modal — same wash
+(`rgba(0,0,0,0.35)`) and same 200 ms, scoped to the panel (`notifyVeil`), with a
+press on the dim cancelling the way a press outside a modal dismisses it. It enters with the
+shared `notifyDrop` transition (`src/lib/notifyDrop.ts`: 200 ms, cubicOut, a 10px
+travel, mirrored on exit, reduced-motion honored in JS) and **Escape closes it
+before the surface it rides** — which takes a capture-phase handler, because the
+modal's own Escape listener is on `window` too and `stopPropagation` cannot quiet
+a listener on the same target. Anchor it with `position: fixed`: a `.glass`
+panel establishes a containing block for fixed descendants (backdrop-filter), so
+`fixed` lands on the modal while `absolute` lands on the nearest positioned
+ancestor — measured on `.te-body`, which is `position: relative`, 64px down.
+
 **The Matte Rule.** Where there is no compositor blur, the field carries grain
 instead of pretending to be glass. On GNOME (`html[data-de="gnome"]`) the tuned
 alphas are pinned to alpha 1 and every opaque field — grid backdrop, sidebar,

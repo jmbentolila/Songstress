@@ -30,6 +30,7 @@
     trackNumbers,
   } from "../lib/importPlan";
   import SurfaceClose from "./SurfaceClose.svelte";
+  import { scrimDismiss } from "../lib/scrimDismiss";
   import ProgressRing from "./ProgressRing.svelte";
   import { tooltip } from "../lib/tooltip";
   import { trapTab } from "../lib/focusTrap";
@@ -351,9 +352,7 @@
     class:out
     role="presentation"
     onanimationend={onOutroEnd}
-    onclick={(e) => {
-      if (e.target === e.currentTarget) requestClose();
-    }}
+    use:scrimDismiss={requestClose}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <section class="mi glass" bind:this={panel} role="dialog" aria-modal="true" aria-label="Imported music">

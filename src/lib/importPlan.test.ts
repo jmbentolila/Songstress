@@ -9,7 +9,9 @@ import {
   summarize,
   trackNumbers,
   totalTracks,
+  landingAlbumId,
   type Decision,
+  type ImportReport,
   type StagedAlbum,
 } from "./importPlan";
 
@@ -164,5 +166,48 @@ describe("listing", () => {
     expect(plural(1, "album")).toBe("1 album");
     expect(plural(2, "album")).toBe("2 albums");
     expect(plural(1234, "track")).toBe("1,234 tracks");
+  });
+});
+
+
+const landingAlbum = (albumId: string, artist: string, title: string, tracks = 1) => ({
+  albumId,
+  artist,
+  title,
+  tracks,
+});
+
+/**
+ * Where the grid lands after an import: the FIRST ALBUM OF THIS BATCH, never
+ * the pile's first pending album. Owner report, 2026-09-26 — importing album B
+ * while an older A was still awaiting import landed on A.
+ */
+describe("landingAlbumId", () => {
+  it("picks the first album of the batch, in the order the files were picked", () => {
+    const report: ImportReport = {
+      staged: [landingAlbum("al-zed", "Zed", "Zebra"), landingAlbum("al-ann", "Ann", "Aardvark")],
+      already: [],
+    };
+    expect(landingAlbumId(report)).toBe("al-zed");
+  });
+
+  it("ignores the pending pile (the report is the only input)", () => {
+    const report: ImportReport = {
+      staged: [landingAlbum("al-new", "New", "Newest", 4)],
+      already: [landingAlbum("al-old", "Old", "Older")],
+    };
+    expect(landingAlbumId(report)).toBe("al-new");
+  });
+
+  it("stays put when the batch staged nothing (all already in the library)", () => {
+    const report: ImportReport = {
+      staged: [],
+      already: [landingAlbum("al-owned", "Owned", "Already Mine")],
+    };
+    expect(landingAlbumId(report)).toBeNull();
+  });
+
+  it("stays put on an empty report", () => {
+    expect(landingAlbumId({ staged: [], already: [] })).toBeNull();
   });
 });

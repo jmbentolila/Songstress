@@ -416,6 +416,41 @@ fn set_pictures(tag: &mut Tag, target: Option<&ResolvedArt>) {
     }
 }
 
+/// Remove ONE embedded picture (by blake3 hash) from a file's tags. Returns
+/// whether the file changed.
+///
+/// Decides first, read-only: a file that does not carry this picture is never
+/// rewritten, because a write touches mtime and mtime is what the incremental
+/// scan re-reads. When it does carry it, the write goes through the same
+/// armored path as a save (temp + rename, caught panic) — this is a save, one
+/// picture smaller.
+pub fn remove_picture(path: &Path, hash: &str) -> Result<bool, String> {
+    let tagged = super::read_tagged(path)?;
+    let carries = tagged
+        .tags()
+        .iter()
+        .flat_map(|t| t.pictures())
+        .any(|p| blake3::hash(p.data()).to_hex().to_string() == hash);
+    if !carries {
+        return Ok(false);
+    }
+    write_file(path, |tag| {
+        let keep: Vec<Picture> = tag
+            .pictures()
+            .iter()
+            .filter(|p| blake3::hash(p.data()).to_hex().to_string() != hash)
+            .cloned()
+            .collect();
+        while !tag.pictures().is_empty() {
+            tag.remove_picture(0);
+        }
+        for pic in keep {
+            tag.push_picture(pic);
+        }
+    })?;
+    Ok(true)
+}
+
 fn art_differs(pics: &[String], target: &ArtTarget) -> bool {
     match target {
         ArtTarget::Keep => false,
@@ -485,6 +520,124 @@ fn file_name(p: &Path) -> String {
 }
 
 struct RowPaths(Vec<(String, PathBuf)>); // (track_id, path)
+
+/// What one artwork deletion did, for the panel to say out loud.
+#[derive(Debug, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtDeleteReport {
+    /// The folder-art file that was removed. Its BYTES had to hash to the
+    /// candidate: a filename is never a reason to delete a file.
+    pub file_deleted: Option<String>,
+    /// Files that carried the picture in their tags and no longer do.
+    pub files_stripped: usize,
+    /// The candidate the cover fell back to, when the deleted artwork WAS the
+    /// cover.
+    pub cover_fallback: Option<String>,
+    /// True when nothing was left and the album is back to its placeholder.
+    pub cover_cleared: bool,
+    /// Files whose tags could not be read or rewritten (the probe refused
+    /// them), by path. The deletion CONTINUES through these — one unreadable
+    /// file must not stop the artwork leaving the other twenty (owner
+    /// screenshot, 2026-09-26: a partial delete reported as a hard failure).
+    /// Files rewritten, for the caller to re-scan. Not part of the receipt.
+    pub skipped: Vec<String>,
+    #[serde(skip)]
+    pub touched: Vec<PathBuf>,
+}
+
+/// Delete ONE artwork from an album — immediately, not on Save (owner ruling,
+/// 2026-09-26: "it does after confirmation. no need to save and reopen the
+/// modal"). The folder-art file goes from disk (hash-verified), the picture is
+/// stripped from every file carrying it, and if that artwork was the cover the
+/// album falls back to the remaining candidate embedded in the MOST files — a
+/// folder-art file only wins a tie, deliberately NOT the scan's "folder art
+/// first" rule, because the owner asked for the next most popular artwork.
+///
+/// This is the app's only destructive file operation: scoped to the exact
+/// artwork the user confirmed, hash-verified, and reported back.
+pub fn delete_artwork(
+    conn: &Connection,
+    cache_dir: &Path,
+    album_id: &str,
+    hash: &str,
+) -> Result<ArtDeleteReport, String> {
+    let mut report = ArtDeleteReport::default();
+    let before = list_art_candidates(conn, album_id, None, cache_dir)?;
+    let candidate = before
+        .candidates
+        .iter()
+        .find(|c| c.hash == hash)
+        .cloned()
+        .ok_or_else(|| "that artwork is no longer part of this album".to_string())?;
+
+    // 1. The folder-art file, when this candidate has one.
+    if let Some(name) = &candidate.folder {
+        if let Some(dir) = crate::library::artwork::dominant_dir(conn, album_id) {
+            let path = dir.join(name);
+            if let Ok(bytes) = std::fs::read(&path) {
+                if blake3::hash(&bytes).to_hex().to_string() == hash {
+                    std::fs::remove_file(&path).map_err(|e| format!("{name}: {e}"))?;
+                    report.file_deleted = Some(name.clone());
+                }
+            }
+        }
+    }
+
+    // 2. Every file carrying the picture in its tags. A file the tag writer
+    //    cannot read is SKIPPED and named, never an abort: the album's artwork
+    //    still leaves the files that can be written, and the report says which
+    //    ones could not be touched (and why, in the journal).
+    for path in album_paths(conn, album_id)? {
+        match remove_picture(&path, hash) {
+            Ok(true) => {
+                report.files_stripped += 1;
+                report.touched.push(path);
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("[art] could not strip {}: {e}", path.display());
+                report.skipped.push(path.display().to_string());
+            }
+        }
+    }
+
+    // 3. Did the cover just leave? Pick up what remains.
+    if before.current.as_deref() == Some(hash) {
+        let left = list_art_candidates(conn, album_id, None, cache_dir)?;
+        let next = left
+            .candidates
+            .iter()
+            .max_by_key(|c| (c.count, c.folder.is_some()))
+            .map(|c| c.hash.clone());
+        match next {
+            Some(next_hash) => {
+                let bytes = art_bytes(conn, album_id, &next_hash)?;
+                crate::library::artwork::render_from_bytes(conn, cache_dir, album_id, &bytes)?;
+                report.cover_fallback = Some(next_hash);
+            }
+            None => {
+                crate::library::artwork::clear_cover(conn, cache_dir, album_id)?;
+                report.cover_cleared = true;
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Every track path of an album, in row order — the delete path walks these.
+pub fn album_paths(conn: &Connection, album_id: &str) -> Result<Vec<PathBuf>, String> {
+    let RowPaths(rows) = album_rows(conn, album_id)?;
+    Ok(rows.into_iter().map(|(_, p)| p).collect())
+}
+
+/// The bytes behind one candidate hash, wherever they live (a tag or a folder
+/// file) — the delete path's fallback cover needs them without a save.
+pub fn art_bytes(conn: &Connection, album_id: &str, hash: &str) -> Result<Vec<u8>, String> {
+    match resolve_art(conn, album_id, &ArtChange::Hash(hash.to_string()))? {
+        ArtTarget::Set(r) => Ok(r.data),
+        _ => Err(format!("artwork {hash} is no longer in this album")),
+    }
+}
 
 /// One image the album owns: every distinct embedded picture (count = files
 /// carrying it) and/or a folder-art file by name. `preview` is a 256px
@@ -1751,6 +1904,137 @@ mod tests {
         let c = at.conflicts.iter().find(|c| c.field == "genre").unwrap();
         assert_eq!(c.values[0].value, "Metal");
         assert_eq!(c.values[0].count, 2);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A JPEG made from a fixture, at a chosen size — two sizes give two
+    /// DIFFERENT hashes, which is all the delete path needs to tell two
+    /// pictures apart while every one of them stays decodable (the fallback
+    /// path renders the bytes it picks).
+    fn test_jpeg(size: u32) -> Vec<u8> {
+        let src = Path::new("fixtures/library/Helloween/Giants & Monsters (2021)/folder.jpg");
+        let img = image::open(src).expect("fixture image").to_rgb8();
+        let small = image::imageops::resize(
+            &img,
+            size,
+            size,
+            image::imageops::FilterType::Nearest,
+        );
+        let mut buf = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 80)
+            .encode(small.as_raw(), size, size, image::ExtendedColorType::Rgb8)
+            .expect("encode jpeg");
+        buf
+    }
+
+    fn pictures_in(path: &Path) -> Vec<String> {
+        crate::library::read_tagged(path)
+            .expect("read")
+            .tags()
+            .iter()
+            .flat_map(|t| t.pictures())
+            .map(|p| blake3::hash(p.data()).to_hex().to_string())
+            .collect()
+    }
+
+    /// The whole delete path: the folder file goes (hash-verified), the picture
+    /// is stripped from the files that carried it, the cover falls back to the
+    /// most popular remaining artwork, and when nothing is left the album
+    /// returns to its placeholder.
+    #[test]
+    fn deleting_artwork_removes_the_source_and_re_derives_the_cover() {
+        use crate::library::{artwork, db};
+
+        let root = temp_dir("delete-art");
+        let album_dir = root.join("Ghost/Meliora (2015)");
+        std::fs::create_dir_all(&album_dir).expect("mkdir");
+        let a = album_dir.join("01 - Spirit.mp3");
+        let b = album_dir.join("02 - Pinnacle.mp3");
+        let src = Path::new("fixtures/library/Helloween/Giants & Monsters (2021)/02 - Throne of the Iron Vigil.mp3");
+        std::fs::copy(src, &a).expect("copy a");
+        std::fs::copy(src, &b).expect("copy b");
+
+        let art_a = test_jpeg(512);
+        let art_b = test_jpeg(128);
+        let hash_a = blake3::hash(&art_a).to_hex().to_string();
+        let hash_b = blake3::hash(&art_b).to_hex().to_string();
+        let pic = |data: &[u8]| {
+            Picture::new_unchecked(
+                PictureType::CoverFront,
+                Some(MimeType::Jpeg),
+                None,
+                data.to_vec(),
+            )
+        };
+        write_file(&a, |tag| {
+            tag.push_picture(pic(&art_a));
+            tag.push_picture(pic(&art_b));
+        })
+        .expect("tag a");
+        write_file(&b, |tag| tag.push_picture(pic(&art_a))).expect("tag b");
+        // Folder art IS candidate A, so it owns the file as well as the tags.
+        std::fs::write(album_dir.join("folder.jpg"), &art_a).expect("folder art");
+
+        let conn = db::open(&root.join("t.db")).expect("open");
+        conn.execute_batch(&format!(
+            "INSERT INTO artists VALUES ('ar-1','Ghost','ghost');
+             INSERT INTO albums(id, artist_id, title, year) VALUES ('al-1','ar-1','Meliora',2015);
+             INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size)
+             VALUES ('tr-1','al-1',1,1,'x',1.0,'{}',1,1),
+                    ('tr-2','al-1',1,2,'y',1.0,'{}',1,1);",
+            a.display(),
+            b.display()
+        ))
+        .expect("seed");
+        let cache = root.join("cache");
+        std::fs::create_dir_all(&cache).expect("cache");
+        artwork::render_from_bytes(&conn, &cache, "al-1", &art_a).expect("cover");
+
+        let before = list_art_candidates(&conn, "al-1", None, &cache).expect("inventory");
+        assert_eq!(before.current.as_deref(), Some(hash_a.as_str()), "folder art wins");
+        assert_eq!(before.candidates.len(), 2);
+
+        let report = delete_artwork(&conn, &cache, "al-1", &hash_a).expect("delete A");
+        assert_eq!(report.file_deleted.as_deref(), Some("folder.jpg"));
+        assert_eq!(report.files_stripped, 2, "both files carried A");
+        assert_eq!(report.cover_fallback.as_deref(), Some(hash_b.as_str()));
+        assert!(!report.cover_cleared);
+        assert!(
+            !album_dir.join("folder.jpg").exists(),
+            "the file the user confirmed is gone"
+        );
+        assert_eq!(pictures_in(&a), vec![hash_b.clone()], "B survived in the first file");
+        assert!(pictures_in(&b).is_empty(), "the second file has no artwork left");
+
+        let left = list_art_candidates(&conn, "al-1", None, &cache).expect("inventory");
+        assert_eq!(left.candidates.len(), 1);
+        assert_eq!(
+            left.current.as_deref(),
+            Some(hash_b.as_str()),
+            "the fallback is the cover now"
+        );
+        let (cover, c1): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT cover, color_c1 FROM albums WHERE id = 'al-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert!(cover.is_some() && c1.is_some(), "the album still has a cover");
+
+        // Deleting the last artwork leaves the placeholder, not a stale cover.
+        let last = delete_artwork(&conn, &cache, "al-1", &hash_b).expect("delete B");
+        assert!(last.cover_cleared);
+        assert_eq!(last.cover_fallback, None);
+        let (cover, c1): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT cover, color_c1 FROM albums WHERE id = 'al-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert!(cover.is_none() && c1.is_none(), "back to the placeholder");
+
         let _ = std::fs::remove_dir_all(&root);
     }
 

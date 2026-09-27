@@ -11,10 +11,12 @@
   import { fade } from "svelte/transition";
   import { MediaQuery } from "svelte/reactivity";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
-  import type { ArtChange, ArtInventory } from "../lib/artChange";
+  import type { ArtCandidate, ArtChange, ArtInventory } from "../lib/artChange";
   import { artSrc } from "../lib/artSrc";
   import { sniffMime, toBase64 } from "../lib/artChange";
   import { tooltip } from "../lib/tooltip";
+  import { announcer } from "../lib/stores/announcer.svelte";
+  import { notifyDrop, notifyVeil } from "../lib/notifyDrop";
 
   let {
     albumId,
@@ -47,6 +49,101 @@
   let arrivals = $state<{ image: string; mime: string; url: string }[]>([]);
   let dropOver = $state(false);
   let busy = $state(false);
+  /** The artwork the user asked to delete, waiting on the confirmation. */
+  let confirming = $state<ArtCandidate | null>(null);
+  /** Focus lands on Cancel: the destructive button must never be the default
+   *  a stray Enter can fire (the notification box is not a dialog trap). */
+  let cancelBtn = $state<HTMLButtonElement | null>(null);
+  $effect(() => {
+    if (confirming) cancelBtn?.focus();
+  });
+  /** The tile the pointer is over — the Delete key acts on THIS one (owner
+   *  ask 2026-09-26: hover a tile, press Delete, same prompt as the ✕). */
+  let hovered = $state<string | null>(null);
+
+  /** What the confirmation promises, in the terms of the thing clicked: a
+   *  folder FILE is deleted from disk, a picture is stripped from the files
+   *  carrying it — and one candidate can be both at once. */
+  let confirmMsg = $derived.by(() => {
+    const c = confirming;
+    if (!c) return "";
+    const files = c.count > 0 ? `${c.count} ${c.count === 1 ? "file" : "files"}` : "";
+    if (c.folder && files) return `Delete ${c.folder} and remove this picture from ${files}?`;
+    if (c.folder) return `Delete ${c.folder}?`;
+    return `Remove this picture from ${files}?`;
+  });
+
+  function promptDelete(hash: string) {
+    const c = inventory?.candidates.find((x) => x.hash === hash) ?? null;
+    if (c) confirming = c;
+  }
+
+  /** Deletion is IMMEDIATE on confirmation (owner ruling): no Save, no
+   *  reopening the modal. The backend does the work and re-scans what it
+   *  rewrote; this side then re-reads the inventory, so the tile leaves the
+   *  strip from real state rather than from a hopeful local edit. */
+  async function doDelete() {
+    const c = confirming;
+    if (!c || busy) return;
+    busy = true;
+    try {
+      const r = await invoke<{
+        fileDeleted: string | null;
+        filesStripped: number;
+        coverFallback: string | null;
+        coverCleared: boolean;
+        skipped: string[];
+      }>("delete_artwork", { albumId, hash: c.hash });
+      await load(true);
+      const said: string[] = [];
+      if (r.fileDeleted) said.push(`deleted ${r.fileDeleted}`);
+      if (r.filesStripped > 0) {
+        said.push(
+          `removed it from ${r.filesStripped} ${r.filesStripped === 1 ? "file" : "files"}`,
+        );
+      }
+      const what = said.length > 0 ? said.join(" and ") : "removed";
+      announcer.say(
+        r.coverCleared
+          ? `Artwork ${what} — this album has no cover now.`
+          : `Artwork ${what}.`,
+      );
+      // A file the tag writer cannot read is skipped, not fatal: the artwork
+      // left the files that could be written. Say so where it is visible
+      // (the panel's own line), naming the file — never a bare failure that
+      // hides the partial success.
+      if (r.skipped.length > 0) {
+        const names = r.skipped.map((p) => p.split("/").pop()).join(", ");
+        error = `${r.skipped.length} ${r.skipped.length === 1 ? "file" : "files"} could not be updated (unreadable tags): ${names}`;
+      }
+      if (view && view.hash === c.hash) view = null;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+      confirming = null;
+    }
+  }
+
+  /** Hover + Delete = the ✕. Registered on the window because hovering does
+   *  not focus the tile; Delete is nobody else's key in this modal. */
+  function onDeleteKey(e: KeyboardEvent) {
+    if (e.key !== "Delete" || !hovered || confirming || cleared) return;
+    e.preventDefault();
+    promptDelete(hovered);
+  }
+
+  /** The confirmation owns the first Escape — in CAPTURE, because the modal's
+   *  own Escape handler is a window listener too, and a `stopPropagation` in
+   *  the bubble phase cannot quiet a listener on the same target (measured: the
+   *  modal closed with the dialog, 2026-09-26). Capture runs first, and
+   *  stopImmediatePropagation ends the event there. */
+  function onKeyCapture(e: KeyboardEvent) {
+    if (e.key !== "Escape" || !confirming) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    confirming = null;
+  }
 
   async function load(quiet = false) {
     // A refresh keeps the tiles standing (no skeleton over content that is
@@ -219,7 +316,47 @@
   });
 </script>
 
-<svelte:window onpaste={onPaste} />
+<svelte:window onpaste={onPaste} onkeydown={onDeleteKey} onkeydowncapture={onKeyCapture} />
+
+{#snippet notifyBox(inLightbox: boolean)}
+  <!-- A notification box dropping from the top edge of the surface that asked
+       — the modal normally, the LIGHTBOX when the expanded view is what raised
+       it (owner report, 2026-09-26: it appeared on the tag editor behind the
+       image instead of on the image's own surface). Never a modal on top of a
+       modal, never a native dialog. -->
+  <div
+    class="as-notify glass"
+    class:as-notify-lb={inLightbox}
+    role="alertdialog"
+    aria-label="Delete artwork"
+    transition:notifyDrop
+  >
+    <p class="as-notify-msg">{confirmMsg}</p>
+    <div class="as-notify-row">
+      <button class="as-btn" bind:this={cancelBtn} onclick={() => (confirming = null)}>Cancel</button>
+      <button
+        class="as-btn as-btn-danger"
+        disabled={busy}
+        aria-busy={busy}
+        aria-label="Delete artwork"
+        onclick={() => void doDelete()}
+      >
+        <!-- The label never leaves the DOM: it is hidden, not removed, so the
+             button's width is the LABEL's width in both states and the row
+             cannot twitch when the spinner takes over (owner note,
+             2026-09-26). The spinner is centred over it. -->
+        <span class="as-btn-label" class:as-btn-label-hidden={busy}>Delete</span>
+        {#if busy}
+          <!-- In flight: a spinner, not a word. The app's ProgressRing is
+               deliberately determinate (a scan says how far it got); a delete
+               is a short indeterminate verb, which is the case a spinner is
+               honest about. -->
+          <span class="as-spin" aria-hidden="true"></span>
+        {/if}
+      </button>
+    </div>
+  </div>
+{/snippet}
 
 <div class="as" class:as-drop={dropOver}>
   <div class="as-head">
@@ -285,6 +422,8 @@
           class="as-tile"
           class:as-sel={isSel}
           class:as-ghost={willRm}
+          onpointerenter={() => (hovered = c.hash)}
+          onpointerleave={() => (hovered = hovered === c.hash ? null : hovered)}
           onclick={() =>
             expand({
               src: c.full,
@@ -317,26 +456,44 @@
                 pick(c.hash);
               }
             }}
-            >{isSel ? "✓" : ""}</span
+            >
+              {#if isSel}
+                <!-- Same drawn mark as the ✕ beside it (owner: inline
+                     consistency) — one stroke weight, one size, no text glyphs. -->
+                <svg viewBox="0 0 10 10" aria-hidden="true">
+                  <path d="M2.2 5.5 L4.1 7.4 L7.8 3.1" />
+                </svg>
+              {/if}
+            </span
           >
-          <!-- removal lives ON the image it dismisses, not beside the strip -->
-          {#if isSel && !cleared}
+          <!-- Removal lives ON the image it dismisses, and on EVERY tile now,
+               not only the chosen one (owner ask 2026-09-26): the ✕ is the
+               button that deletes THIS artwork, and the confirmation names
+               what goes. -->
+          {#if !cleared}
             <span
               class="as-rm"
               role="button"
               tabindex="0"
-              use:tooltip={"Remove artwork from every file"}
+              use:tooltip={"Delete this artwork"}
               onclick={(e) => {
                 e.stopPropagation();
-                change = "clear";
+                promptDelete(c.hash);
               }}
               onkeydown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.stopPropagation();
-                  change = "clear";
+                  promptDelete(c.hash);
                 }
               }}
-              >✕</span
+              >
+              <!-- A drawn cross, not the ✕ glyph: the text glyph renders
+                   hairline at this size and vanishes on cover art. The stroke
+                   is the weight (owner note, 2026-09-26). -->
+              <svg viewBox="0 0 10 10" aria-hidden="true">
+                <path d="M2.5 2.5 L7.5 7.5 M7.5 2.5 L2.5 7.5" />
+              </svg>
+            </span
             >
           {/if}
           <span class="as-cap" class:as-cap-rm={willRm}>{willRm ? "removing on Save" : c.count > 0 ? `in ${c.count} ${c.count === 1 ? "file" : "files"}` : c.label}</span>
@@ -358,11 +515,41 @@
     {/if}
   {/if}
 
+  {#if confirming && !view}
+    <!-- The modal darkens exactly the way the app does when a modal is
+         invoked — same wash, same timing — but scoped to THIS panel (owner
+         ask 2026-09-26). A press on it cancels, the way a press outside a
+         modal dismisses it. -->
+    <div
+      class="as-veil"
+      role="presentation"
+      transition:notifyVeil
+      onpointerdown={() => (confirming = null)}
+    ></div>
+    {@render notifyBox(false)}
+  {/if}
+
   {#if view}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="as-lb" role="presentation" onclick={closeLb} transition:fade|local={LB_FADE}>
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div
+      class="as-lb"
+      role="presentation"
+      onclick={(e) => {
+        // Only the dimmed area acts: the card itself is not a target, which is
+        // what the removed stopPropagation used to say the long way round. With
+        // a confirmation up, the press belongs to IT — the nearest surface owns
+        // the interaction, exactly like Escape.
+        if (e.target !== e.currentTarget) return;
+        if (confirming) confirming = null;
+        else closeLb();
+      }}
+      transition:fade|local={LB_FADE}
+    >
+      {#if confirming}
+        {@render notifyBox(true)}
+      {/if}
       <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-      <figure class="as-lbfig" role="dialog" aria-modal="true" aria-label={view.label} onclick={(e) => e.stopPropagation()}>
+      <figure class="as-lbfig" role="dialog" aria-modal="true" aria-label={view.label}>
         <img src={artSrc(view.src)} alt={view.label} />
         <figcaption>
           <span>{view.label}</span>
@@ -370,7 +557,9 @@
             <button class="as-btn" onclick={() => (change = "keep")}>Keep artwork</button>
           {:else if viewHash}
             {@const vh = viewHash}
-            <button class="as-btn" onclick={() => (change = "clear")}>Remove artwork</button>
+            {#if vh}
+              <button class="as-btn" onclick={() => promptDelete(vh)}>Remove artwork</button>
+            {/if}
             {#if !(selectedHash ? selectedHash === vh : vh === inventory?.current && !uploaded)}
               <button class="as-btn as-btn-accent" onclick={() => pick(vh)}>Use as cover</button>
             {/if}
@@ -566,9 +755,8 @@
     border: 1.5px solid rgba(255, 255, 255, 0.85);
     background: rgba(0, 0, 0, 0.35);
     color: var(--on-cover);
-    font-size: 14px;
-    line-height: 17px;
-    text-align: center;
+    display: grid;
+    place-items: center;
     cursor: pointer;
     transition:
       background 120ms ease-out,
@@ -600,9 +788,8 @@
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.45);
     color: var(--on-cover);
-    font-size: 13px;
-    line-height: 19px;
-    text-align: center;
+    display: grid;
+    place-items: center;
     cursor: pointer;
     opacity: 0;
     transition: opacity 120ms ease-out;
@@ -611,8 +798,108 @@
   .as-rm:focus-visible {
     opacity: 1;
   }
+  /* The marks on a tile — the ✕ and the ✓ — are DRAWN, not text glyphs:
+     one stroke weight and one size for both, because a font's check and cross
+     are different weights at the same font-size and the pair read as two
+     different systems (owner notes 2026-09-26). */
+  .as-rm svg,
+  .as-badge svg {
+    width: 11px;
+    height: 11px;
+    display: block;
+  }
+  .as-rm svg path,
+  .as-badge svg path {
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+  }
+
   .as-rm:hover {
     background: var(--caution);
+  }
+
+  /* The delete confirmation: a notification-style box at the modal's top
+     edge, INSIDE it (no scrim, no second dialog).
+     `fixed` is the one that lands on the MODAL: `.te-body` is
+     `position: relative`, so an absolute box anchors to the body (measured:
+     it sat 64px down, at the artwork section's top edge) — while a fixed box
+     resolves to the nearest ancestor that establishes a containing block for
+     it, which here is the panel itself (its `.glass` backdrop-filter). That is
+     the top of the modal, and it stays put while the body scrolls. */
+  .as-veil {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: var(--radius-panel);
+  }
+
+  .as-notify {
+    position: fixed;
+    top: 8px;
+    left: 16px;
+    right: 16px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+  /* Inside the lightbox: absolute, so it anchors to the CARD the image sits
+   * on (the lightbox is a positioned sibling), dropping from that surface's
+   * own top edge. No veil — the lightbox's 0.7 dim already IS the dim. */
+  .as-notify-lb {
+    position: absolute;
+    top: 12px;
+    z-index: 2;
+  }
+  .as-notify-msg {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.35;
+    color: var(--text);
+  }
+  .as-notify-row {
+    display: flex;
+    flex-shrink: 0;
+    gap: 8px;
+  }
+  .as-btn-danger {
+    background: var(--caution);
+    color: var(--on-cover);
+    /* Positioned so the spinner can sit exactly over the hidden label: the
+       label's box is the button's width, in both states. */
+    position: relative;
+  }
+  .as-btn-label-hidden {
+    visibility: hidden;
+  }
+  .as-spin {
+    /* Centred by layout, not by arithmetic: `inset: 0` + `margin: auto` puts a
+       fixed-size box dead centre whatever the border-box math is, and needs no
+       transform (this engine's individual transform properties are not
+       trustworthy — see AGENTS.md). */
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: currentColor;
+    animation: as-spin 700ms linear infinite;
+  }
+  @keyframes as-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* Lightbox: the whole image, on dim, inside this dialog (not a second

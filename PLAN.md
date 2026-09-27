@@ -81,6 +81,13 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | WebKitGTK 2.54: dev-thumb bridge + compositor-stutter verdict | ✅ 2026-09-26 (artwork fixed; stutter = upstream, fixed by pinning webkit2gtk to 2.52.1 — owner-verified A/B) |
 | GNOME matte fields: fine grain (`--tex`) on the grid backdrop + every `.glass` (sidebar, playbar, popovers, menu, modals) + the expanded panel instead of the pinned-flat glass | ✅ 2026-09-26 · **0.13.3** (five owner reviews: tiled → dirt → grain only → half level → modals → popovers + expanded view) |
 | Matte grain level dialled up 15% on request (dark `.16 → .184`, light `.045 → .052`, intercepts re-derived; probe: dark mean +14.7% / p95 +14.5%, light tooth ×1.16 with mean drift −1.27 → −1.43 RGB) | ✅ 2026-09-26 · **0.13.4** (polish; docs + comments updated, no screen re-measure — declared as scaled) |
+| Outside-dismiss closes on press, not on release (`use:scrimDismiss`; drag a selection out of a modal and it stays open) | ✅ 2026-09-26 (all four scrims: TagSurface, ManageImports, MusicFolders, About; 5 vitest cases) |
+| Tag editor field suggestions: custom popover replacing the native Album datalist, for Artist/Album/Album artist/Genre/Composer/Label/Grouping | ✅ 2026-09-26 · **0.14.0** (migration v6 persists the tags + `tag_vocabulary`; custom popover on the context-menu surface; Tab/Enter complete a highlighted item, Enter otherwise saves) |
+| Per-album display state travels in `.songstress.json` (per-folder map of album id → colors/gradient) | ✅ 2026-09-26 · **0.14.0** (scan adopts, in-app changes mirror; watcher ignores the file; per-album `albumGradient:<id>` keys replace the blob) |
+| Playbar marquee parks at the loop point on pause instead of freezing mid-roll | ✅ 2026-09-26 · **0.14.0** |
+| Playbar survives a retag that moves the playing row to another album (library-wide track resolution + re-anchor) | ✅ 2026-09-26 · **0.14.0** |
+| Import lands on the first album of the batch just imported, not the first pending one | ✅ 2026-09-26 · **0.14.0** |
+| Artwork deletion: ✕ on every tile on hover, in-modal confirmation dropping from the owning surface, immediate delete, most-files cover fallback, spinner while it runs, unreadable files skipped and named | ✅ 2026-09-26 · **0.14.0** (the artwork flow also banks "The In-Modal Confirmation Rule" in DESIGN.md) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -2433,6 +2440,14 @@ follows now: the ring's only direction is forward, and it is allowed to say
   folder holding most of its tracks; matching on the disc number is the
   refinement. No album in this library needs it today.
 - TagEditor entrance motion, parked with the modal work above.
+- ~~**Per-album sidecar file** (owner idea, 2026-09-26)~~ — **SHIPPED** the same
+  day as `.songstress.json`; the format, the adoption rules and the shared-folder
+  finding are in "Per-album display state travels" below. The open questions
+  this note used to carry are answered there: the DB stays the source of truth
+  at runtime with the file as the portable half (a scan adopts, an in-app change
+  mirrors), one file per FOLDER with a map of album id → state, and an album
+  spanning several folders keeps its entry in the folder holding most of its
+  tracks (the same rule-1 cascade the import destination uses).
 
 ## Environment quick facts (for fresh sessions)
 
@@ -5222,3 +5237,310 @@ Also corrected here: AGENTS.md's 2026-09-23 "no `songstress-dev` unit on GNOME"
 note is stale — the unit is loaded and running, and `tools/devctl.mjs` bridges
 into the page on GNOME. `spectacle`, `qdbus-qt6` and `gnome-screenshot` are all
 absent on this box (measured), vs the previously documented gnome-screenshot path.
+
+## Tag editor suggestions: DB vocabulary + our own menu (2026-09-26, owner ask)
+
+The tag editor had exactly one completion: a native `<datalist>` on the Album
+field, fed from `library.albums`. It rendered WebKit's own popup (visibly not
+our UI), and Tab could not take the highlighted suggestion — the browser only
+accepts on Enter/click. The ask was three things: suggestions on **Artist,
+Album, Album artist, Genre, Composer, Label and Grouping** wherever they appear;
+**Tab completes the selected suggestion**; and the list wears **our context
+menu's surface**.
+
+**The blocker that shaped the design: the DB never stored those tags.**
+`tracks` held `id, album_id, disc, track, title, duration_sec, path, mtime_ns,
+size, staged, artist` — genre/composer/label/grouping existed only inside the
+files, read on demand by `tags.rs` when a modal opened. Building a suggestion
+list by reading tags would cost a full lofty pass per editor open. Owner chose
+the schema route over an on-demand read/cache:
+
+- **Migration v6** (`db.rs`): nullable `genre`, `composer`, `label`, `grouping`,
+  `album_artist` on `tracks`. Additive, so it auto-upgrades — the same class as
+  v3 (`tracks.artist`), which shipped without a major bump. **Nullable matters**:
+  incremental scans skip unchanged files, so pre-v6 rows read NULL until a
+  **Full Rescan** (or any tag save, which changes mtime) backfills them. Until
+  then the four tag fields simply offer nothing — honest, not broken.
+- **The scan persists what it already read** (`scan.rs`): `genre` via the
+  accessor, `composer`/`label`/`grouping`/`album_artist` via `ItemKey` — the same
+  keys `tags::write_file` writes, so the round trip is exact. The insert row was
+  a seven-wide tuple at the point this started and would have hit twelve, so it
+  became the `TrackRow` struct.
+- **`tag_vocabulary`** (`library/vocab.rs`): distinct values per field with
+  counts, capped at 400. Values are trimmed, blanks dropped, **ASCII case
+  variants fold into one suggestion wearing the most-used spelling** (ties go to
+  the ASCII-first spelling, so the order is reproducible), and **diacritics stay
+  distinct** — `Motörhead` and `Motorhead` are two suggestions because they are
+  two spellings the user may hold on purpose; their *matching* still folds, so
+  typing `motor` finds both.
+- **Ranking is pure** (`lib/suggest.ts`, 21 vitest cases): folded prefix beats
+  folded substring, and nothing else counts — no subsequence fuzz, because a
+  field that offers `Meliora` for `mlr` is guessing about the user's own data.
+  An **exact folded match leads its class ahead of everything**, including the
+  preference list: owner report the day it shipped — typing `DAWN` offered
+  `Dawn of Victory` first (more tracks, so more popular) and the highlight rule
+  then armed Tab/Enter to replace a correct value with a different album. Then
+  `prefer` (the album door's same-album-artist-first order, carried over intact
+  from the datalist), then **closeness: earliest match position, then shortest
+  value**. Popularity is not part of the order at all (owner ruling the same
+  day: "it's not about popularity") — the counts still travel from the DB, but
+  they only describe the library and no longer decide what the top suggestion
+  is. Ranking by how much of the library a value happens to name made the list
+  depend on library size instead of on what was typed.
+- **Keyboard contract (owner-set, twice: 2026-09-26)**: ↓/↑ walk the list;
+  **Tab completes the highlighted value and keeps focus** (a second Tab then
+  moves on — the trap and the accelerators live on `window` in TagSurface, so a
+  handled key stops the event there); **Enter completes only when something is
+  highlighted, otherwise it stays the editors' Save**; Escape closes the LIST,
+  not the modal; picking is on pointer-down with the default prevented so the
+  input never blurs. **The first row is always armed**, including when it equals
+  the query: the list is the library's answer to what was typed, and the case,
+  decoration or spacing the DB holds is precisely what completing should give
+  back (owner case: type `dawn`, the library holds `DAWN` — refusing to highlight
+  it left no keyboard way to take the stored spelling). Ranking puts an exact
+  match first, so Tab/Enter take THAT spelling; a second Tab then moves on, and
+  with a list open the first Enter completes rather than saves.
+- **Surface**: the context menu's rules moved to app.css
+  (`.menu-surface`/`.menu-item`/`.menu-sep`) and its entrance to
+  `lib/menuPop.ts`, and both the menu and the list now use them — "looks like
+  our menus" is true by construction instead of by two copies of the numbers.
+  The list is `position: absolute` INSIDE the field cell: a `fixed` child of a
+  `.glass` panel anchors to the **panel**, because backdrop-filter is a
+  containing block, and the modal body both scrolls and clips. It flips above
+  the field when it would run past the panel's visible bottom.
+- **Values in browser dev** fall back to the fake library's knowledge (album
+  titles, artist names) with the four tag fields quiet — no command exists there.
+
+Gates: cargo 123 (incl. an end-to-end test that tags a real fixture file, scans
+it, and reads the vocabulary back), vitest 117 (13 new), svelte-check 0, build
+ok. Live-verified in the dev instance through the devtools bridge: the list sits
+exactly under its input (same left/width, +4px), prefixes outrank substrings,
+`aria-expanded`/`aria-activedescendant` track the highlight, Tab commits and
+keeps focus, Escape closes the list then the modal, and `tag_vocabulary` returns
+the real library's albums/artists (the four tag fields read 0 until a rescan).
+
+### Marquee parks at the loop point, not mid-roll (2026-09-26, owner ask)
+
+Pausing used to freeze the playbar marquee wherever it stood — `.playbar.paused
+.mq-in { animation-play-state: paused }` — which cut a long title off mid-word
+and left it parked on a half-scrolled string. The owner's ask: on pause/stop the
+line should **finish rolling to the next dwelling point and stop there**.
+
+The action owns it now (`lib/marquee.ts`), because CSS cannot wait for a point in
+a loop:
+
+- The pause signal rides the action's parameter (`{ key, pause }` from PlayBar's
+  `!playback.isPlaying`); `update()` compares values and only re-measures when
+  the KEY changes, so PlayBar's frequent re-renders (progress, transport) cannot
+  restart the roll.
+- On pause it waits for `animationiteration` — the loop point, where the strip is
+  back at the head and the keyframes hold it for the next quarter anyway — and
+  parks there by adding the JS-owned `is-held` class the stylesheet reads. The
+  landing spot is exactly where the cycle rests, so the parked line looks like
+  every dwell.
+- If the strip has not begun rolling yet (still inside its 1.2s arrival delay),
+  it parks at once: the strip is already at the head, so rolling a whole lap to
+  "finish" would be motion with no job. A text change while parked stays parked
+  (the class outlives the re-measure); resuming unpauses in place.
+- Cost, measured live: a 560px line (19.9s loop) kept rolling 17.6s after the
+  click, then stopped at the head (`x = -1`, `is-over`/`is-held` true,
+  `animation-play-state: paused`) and stayed there across further samples.
+  **Worst case is therefore one loop** (≤ the 24s cap) — inherent to "finish the
+  roll" on a very long line. If that ever reads as too long a tail, the lever is
+  a cap on the remaining travel (park immediately when the loop point is more
+  than N seconds away), not the mechanism.
+
+Gates: svelte-check 0, vitest 125, build ok. No version bump of its own — this
+rides the 0.14.0 batch with the tag-editor suggestions.
+
+## Per-album display state travels: `.songstress.json` (2026-09-26, owner ask)
+
+Owner's goal: "the important thing is that the user is able to easily go from one
+device to another and keep its library having the exact same behavior inside
+Songstress". Per-album state lived only in the SQLite `settings` table, keyed by
+album id — exactly what a fresh install does not have — so the portable half is
+now a file in the album's own folder.
+
+**Shape (v1), one file per FOLDER, one entry per album:**
+
+```json
+{
+  "version": 1,
+  "albums": {
+    "al-cac01388c68b989f": {
+      "colors":   ["cee4de", "086ba0"],
+      "gradient": ["cee4de", "086ba0"]
+    }
+  }
+}
+```
+
+- **Why a map and not one object per file:** a folder can hold several albums.
+  Measured in this library: `~/Music/Compilations/Proyecto Anison Latino` is a
+  flat folder whose files carry THREE different album tags (11/14/2 tracks), so
+  the scan correctly groups three albums that all point at one folder. A flat
+  object had them overwrite each other (251 albums → 249 files, last writer
+  wins); the map keeps an entry each. The album id is the key because it is
+  tag-derived and therefore stable across machines.
+- **`gradient`** (the panel override, mirroring the new per-album setting
+  `albumGradient:<id>`) is a real override: **on a scan the file wins, always**.
+- **`colors`** (the artwork-derived pair, mirroring `albums.color_c1/c2`) is a
+  **fallback only**: the artwork stays the live source, so picking new art and
+  pressing "use album colors" derives from the art you actually loaded, and the
+  file's pair answers only the case where there is nothing to derive from
+  (copied library, lost `folder.jpg`, unreadable format). Delete the key to let
+  the app re-derive. The owner's refinement, after the first cut had it win
+  outright: "keep that value for the specific case of missing artwork".
+- **Direction is explicit in the code** (`sync_album`/`sync_entry` take `adopt`).
+  A scan adopts; an in-app change mirrors. The first implementation re-adopted on
+  the write path, so setting a gradient wrote the new value to the DB and then
+  put the OLD one back into both — caught live, regression-tested.
+- **Per-album overrides moved out of the `panelGradients` blob** into one key
+  per album, migrated once at `init_settings` (never clobbering a key a sidecar
+  already adopted). A blob would have let the app's pre-scan in-memory map wipe
+  an adopted value on its next write. The frontend re-reads those keys after
+  every scan (`refreshPanelGradients`).
+- **Written for every album's folder**, version-only when there is nothing to
+  carry ("just in case", owner) — and never rewritten when the bytes match, so
+  the file's mtime does not churn. Stale entries (album retagged/removed) are
+  pruned by the owner of that folder's file.
+- **The inotify watcher ignores it** (`marks_library_dirty` → all paths ours →
+  not a library change). Without that, every gradient edit would schedule a
+  rescan and the scan's own writes could re-arm it — the same self-feeding shape
+  as the read-traffic bug. Verified live: no scan in the 12s after an in-app
+  gradient write.
+- **Multi-folder albums** get ONE entry in the folder holding most of their
+  tracks (rule-1, the import-destination cascade). Measured: `Nightfall In
+  Middle-Earth` spans a regular and a special-edition folder; `Anison no Kokoro`
+  spans a Downloads folder and a Music one.
+
+Live verification in the dev instance against the real library: first scan wrote
+249 files over 251 albums (the shared folder explains the difference), carried
+the owner's pre-existing DAWN override out of the legacy blob into the file, the
+shared folder came out with three entries, an in-app `set_album_gradient` moved
+only that album's `gradient` key (colors untouched), and a second scan wrote 0.
+
+Gates: cargo 133 (7 sidecar tests incl. the shared-folder and pruning cases),
+vitest 125, svelte-check 0, build ok.
+
+### The playbar survives a retag that moves the playing row (2026-09-26, owner report)
+
+Symptom, after importing and playing: edit the tags of the playing file so it
+belongs to a different album, and the audio keeps going while the UI goes blank —
+playbar reads "Nothing playing" (no gradient, no details, no active transport),
+and the destination album's rows show no playing state.
+
+Cause: `tracks.album_id` is grouping output, not identity. A retag rewrites the
+file, the watcher's incremental scan re-groups it, and the row moves to another
+album — while the PATH, and therefore the track id (`stable_id("tr", path)`),
+stays. The frontend resolved the playing track through
+`library.tracksOf(playback.current.albumId)[...]`, i.e. through the album the
+engine had named when playback started. `tracksOf(stale)` is `[]`, so
+`currentTrack()` returned null and every surface that hangs off it (playbar
+details, artwork gradient, `.cover.ring` on the album tile, the active state on
+track rows) went quiet at once — including the destination album's rows, which
+had no reason to light up because nothing said the track lived there now.
+
+Fix, all frontend (the engine is fine — see below):
+- `library.trackById(id)` — a `#byId` index built with every dump, so a row can
+  be found library-wide in O(1) (`albumOfTrack` rides on it).
+- `currentTrack()` resolves the context's `trackId` **library-wide first**, and
+  only falls back to the album's own list for a context that never had a track
+  id (the note this replaced still said "trackId is authoritative", which was
+  true only inside the album it started in).
+- `reanchorCurrent()` points `playback.current` at the row's new home
+  (album id + index), so everything that reads `albumId` stays coherent —
+  queue building, the fake-mode advance, the marquee key. Called from the
+  engine's own `playback-changed` events (their album label can go stale too)
+  and from an App.svelte effect watching the new `library.dumpVersion`, which is
+  the moment a moved row actually lands.
+
+Verified live in the dev instance, by moving a row between albums in the DB and
+forcing a dump (no files touched): playing "MOON RIVER -prologue-" out of DAWN,
+moving its row to `Impera`, then scanning — the playbar kept the title and the
+Pause state, and the playing ring MOVED to `Impera`. Moving it back put the ring
+back on DAWN with the playbar untouched. 4 new vitest cases pin the rule
+(library-wide resolution, re-anchor, unknown id left alone, no-id fallback).
+
+Why the engine needs no change: mpv's play order is materialized at album start
+(a list of album_id + path), so the currently-playing file and the following
+tracks keep playing — the file did not move, only its album label did. Two
+adjacent cases remain, both unverified and out of scope here: moving a file on
+disk while it plays (import Save re-points the row to a NEW id in a NEW path, so
+the engine's stored path goes stale and there is no local old→new mapping), and
+a retag that renames the artist so the album's own id changes — the row
+survives, but a *queue* built earlier still names the old album.
+
+Gates: svelte-check 0, vitest 129, build ok (no Rust change, so no cargo run).
+
+### The import landing targets the batch, not the pending pile (2026-09-26, owner report)
+
+The landing itself is wanted and stays: an import switches the artist tab and
+expands the album it staged ("the landing IS the receipt", 2026-09-24). What was
+wrong is WHERE it landed. `importMusic` used `imports.plan[0]?.albumId` — the
+first entry of the whole pending pile (`staged_import_plan`, DB order) — so
+importing album B while an older album A was still awaiting import landed on
+**A**, an album the user had not touched. The owner's rule: "it should land on
+the first item of the most recent import batch".
+
+- `ImportReport.staged` already carried only this batch, but as
+  `{artist, title, tracks}` — no id, so the frontend could only have matched by
+  artist+title, which picks the wrong album when two share a title.
+  `ImportedAlbum` now carries `album_id` (lib.rs passes the same structs through;
+  the only construction site is `album_groups`).
+- `album_groups` now orders by the FIRST path that names each album rather than
+  alphabetically: the report is a receipt for the files the user picked, and
+  "the first album of this batch" means the album of the first file picked. (The
+  receipt list in the modal reads in picked order now too — a side effect worth
+  having.)
+- `landingAlbumId(report)` (importPlan.ts, 4 vitest cases) is the whole rule:
+  first staged album of the batch, else null so the grid stays put — the
+  existing "everything was already in your library" fallback (which uses
+  `report.already`, also this batch) is untouched, and `imports.plan` still
+  holds every pending album for the modal and the badge. Only the landing moved.
+
+Gates: cargo 134 (new `album_groups` order/id test), vitest 133, svelte-check 0,
+build ok. Live verification of the landing would need a real import action (the
+unit tests cover the decision); not exercised in the dev instance.
+
+Note for the record: writing the new test appended to `src/lib/importPlan.test.ts`
+initially CLOBBERED that file (it already existed with 16 tests — writing tool,
+not git, so the restore came from HEAD). Caught by the test count dropping from
+129 to 117, restored from `git show`, then appended: 20 tests in that file, 0
+deletions in the diff. Check for an existing file before writing one.
+
+### Artwork delete: resilience, the spinner, and the surface it drops on (2026-09-26, owner-driven)
+
+Four refinements landed together after the first end-to-end use of the delete:
+
+- **A file the tag writer cannot read is SKIPPED, not fatal.** The first version
+  walked the album's files and aborted on the first refusal, which surfaced as a
+  raw error *and* left a silent partial delete. `ArtDeleteReport.skipped` now
+  carries the paths, the reason goes to the journal (`[art] could not strip ...`),
+  the delete continues through the rest, and the panel says it in plain words
+  ("2 files could not be updated (unreadable tags): <name>") beside the
+  announcer's "removed it from 21 files". Re-running the same delete is safe:
+  already-stripped files report "nothing to do".
+- **The trigger for that: `Barairo no Sekai (GetBackers).mp3`** in *Anison no
+  Kokoro*. Measured with a byte dump: one ID3v2.3 tag (186,368-byte payload)
+  ending at 186,378, then **1,044 bytes of NUL**, then the first MPEG frame
+  (`FF FB E0 04`) at 187,422. `file(1)` agrees with lofty — it reports only the
+  ID3 header. This is NOT the stacked-tag shape the existing repair handles
+  (that expects a second `ID3` header at the declared end), so that repair
+  cannot fix it. **Owner decision: leave it** — the app skips it and the album's
+  artwork stays editable on the other files. A "find the first frame after the
+  tag and rewrite" repair was offered and declined.
+- **The in-flight Delete button is a spinner, not a word**, and the label never
+  leaves the DOM (it is hidden): the button's width is the LABEL's width in both
+  states, so the row cannot twitch. Measured 75px → 75px. `ProgressRing` stays
+  determinate on purpose (a scan says how far it got); a delete is a short
+  indeterminate verb, which is the one case a spinner is honest about.
+- **The confirmation drops from the INNERMOST surface that raised it** — the
+  modal normally, the lightbox when the expanded view asked (a box on the panel
+  behind the image read as a bug). Inside the lightbox there is no veil: its own
+  0.7 dim already is the dim. Escape and a backdrop press both resolve the
+  confirmation before the surface itself (capture-phase Escape, since the modal's
+  listener is on `window` too). The general rule is in DESIGN.md ("The In-Modal
+  Confirmation Rule") and AGENTS.md.
+
+Gates: cargo 135, vitest 133, svelte-check 0, build ok.

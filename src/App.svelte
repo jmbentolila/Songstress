@@ -17,7 +17,7 @@
   import { modalOpen } from "./lib/stores/surfaces.svelte";
   import { library } from "./lib/stores/library.svelte";
   import { announcer } from "./lib/stores/announcer.svelte";
-  import { playback, initEq } from "./lib/stores/playback.svelte";
+  import { playback, initEq, reanchorCurrent } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { invoke } from "@tauri-apps/api/core";
   import { isTauri } from "./lib/window";
@@ -85,6 +85,16 @@
     );
   });
 
+  // A retag can move the PLAYING row to another album (the path and the track
+  // id survive; album_id does not). Every dump is where that lands, so re-point
+  // the playback context at the row's new home — otherwise the playbar reads
+  // "Nothing playing" over audio that is still going, and the destination
+  // album's rows show no playing state (owner report, 2026-09-26).
+  $effect(() => {
+    void library.dumpVersion;
+    reanchorCurrent();
+  });
+
   // Accent picker (Step 4): ONE stored hex → per-theme variable overrides on
   // <html>. Unset = removeProperty → stock purple from app.css everywhere.
   $effect(() => {
@@ -127,7 +137,10 @@
     pushSetting("sidebarRowSize", ui.sidebarRowSize);
     pushSetting("playbarGradient", ui.playbarGradient);
     pushSetting("albumGradient", ui.albumGradient);
-    pushSetting("panelGradients", ui.panelGradients);
+    // No `panelGradients` push: the overrides are one settings key per album
+    // (`albumGradient:<id>`), written by `set_album_gradient` together with the
+    // album's `.songstress.json`. Pushing the whole map from here would race
+    // the backend's sidecar adoption on the next scan.
     pushSetting("accentColor", ui.accentColor);
   });
 </script>

@@ -1,28 +1,13 @@
 <script lang="ts">
-  import { cubicOut } from "svelte/easing";
   import { contextMenu, closeContextMenu, type MenuItem } from "../lib/stores/contextMenu.svelte";
+  import { menuPop } from "../lib/menuPop";
 
   let el = $state<HTMLDivElement>();
 
-  /**
-   * The menu grows out of the point you clicked and shrinks back into it
-   * — owner rule: every entrance wears its mirror exit. 125 ms, cubicOut
-   * (the accordion's easing), opacity + a 0.97 scale; the transform-origin
-   * is pinned to the anchoring corner by the clamp effect below, so the
-   * corner nearest the cursor is the one that does not travel. Svelte
-   * runs the SAME generator backwards for the outro: same path, same
-   * duration, free symmetry. JS-driven, so reduced-motion is honored in
-   * JS (the stylesheet's kill switch cannot reach these).
-   */
-  function ctxPop(_node: Element, _params = {}) {
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    return {
-      duration: reduce ? 0 : 125,
-      easing: cubicOut,
-      css: (t: number) =>
-        `opacity: ${t}; transform: scale(${(0.97 + 0.03 * t).toFixed(4)}); will-change: transform, opacity`,
-    };
-  }
+  /* The entrance (menuPop, lib/menuPop.ts) is shared with the tag editors'
+   * suggestion list; the transform-origin is pinned to the anchoring corner by
+   * the clamp effect below, so the corner nearest the cursor is the one that
+   * does not travel. */
 
   // Keep the menu inside the window once its size is known — and pin the
   // entrance's transform-origin to the corner the click actually anchors
@@ -96,20 +81,20 @@
 
 {#if contextMenu.open}
   <div
-    class="ctx glass"
+    class="menu-surface ctx glass"
     bind:this={el}
     style:top="{contextMenu.y}px"
     style:left="{contextMenu.x}px"
     role="menu"
-    transition:ctxPop
+    transition:menuPop
   >
     <!-- Keyed by index ON PURPOSE: SEP is one shared object, and a menu with
          two breaks would collide under Svelte's default identity keys. -->
     {#each contextMenu.items as item, i (i)}
       {#if item.separator}
-        <hr class="ctx-sep" role="presentation" />
+        <hr class="menu-sep" role="presentation" />
       {:else}
-        <button class="ctx-item" role="menuitem" onclick={() => run(item)}>
+        <button class="menu-item" role="menuitem" onclick={() => run(item)}>
           {item.label}
         </button>
       {/if}
@@ -118,40 +103,11 @@
 {/if}
 
 <style>
+  /* Positioning is all that is left as this component's own: the surface,
+   * item, hairline and the hover/active fill live in app.css
+   * (`.menu-surface`, `.menu-item`, `.menu-sep`), shared with the tag editors'
+   * suggestion list so "looks like our own menus" cannot drift. */
   .ctx {
     position: fixed;
-    z-index: 200;
-    min-width: 180px;
-    padding: 6px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .ctx-item {
-    text-align: left;
-    padding: 8px 12px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--text);
-    font-size: 15px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .ctx-item:hover {
-    background: var(--hover);
-  }
-
-  /* The menu's section hairline — same quiet line the glass surfaces use,
-   * inset so it reads as a break between rows, not a border of the box. */
-  .ctx-sep {
-    height: 1px;
-    margin: 4px 8px;
-    border: none;
-    background: var(--border);
   }
 </style>

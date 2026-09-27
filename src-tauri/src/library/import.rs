@@ -581,6 +581,10 @@ pub fn sanitize_path(name: &str) -> String {
 #[derive(Debug, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedAlbum {
+    /// The album row the files belong to. The frontend LANDS on the first album
+    /// of the batch it just imported, and matching by artist+title would pick
+    /// the wrong album whenever two of them share a title.
+    pub album_id: String,
     pub artist: String,
     pub title: String,
     pub tracks: usize,
@@ -658,21 +662,37 @@ pub fn import_targets(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
 /// Which album rows a set of files belongs to, counted per album. Per-path lookup
 /// rather than one `IN (…)`: an import is tens of files, and the query stays
 /// legible. Files with no row yet (flagged before the scan wrote them) drop out.
+///
+/// Ordered by the FIRST path that names each album, not alphabetically: the
+/// report is a receipt for the files the user picked, and "the first album of
+/// this batch" — where the grid lands afterwards — means the album of the first
+/// file he picked (owner report, 2026-09-26).
 pub fn album_groups(conn: &Connection, paths: &[PathBuf]) -> Result<Vec<ImportedAlbum>, String> {
-
-    let mut counts: std::collections::HashMap<String, usize> = Default::default();
-    for p in paths {
+    // album id → (tracks, index of its first path)
+    let mut counts: std::collections::HashMap<String, (usize, usize)> = Default::default();
+    for (i, p) in paths.iter().enumerate() {
         let album_id = album_id_of_path(conn, p).unwrap_or_default();
-        if !album_id.is_empty() {
-            *counts.entry(album_id).or_default() += 1;
+        if album_id.is_empty() {
+            continue;
         }
+        let slot = counts.entry(album_id).or_insert((0, i));
+        slot.0 += 1;
     }
-    let mut out = Vec::with_capacity(counts.len());
-    for (album_id, tracks) in counts {
+    let mut rows: Vec<(usize, String, usize)> = counts
+        .into_iter()
+        .map(|(album_id, (tracks, first))| (first, album_id, tracks))
+        .collect();
+    rows.sort_by_key(|(first, _, _)| *first);
+    let mut out = Vec::with_capacity(rows.len());
+    for (_, album_id, tracks) in rows {
         let (_, artist, title) = album_identity(conn, &album_id)?;
-        out.push(ImportedAlbum { artist, title, tracks });
+        out.push(ImportedAlbum {
+            album_id,
+            artist,
+            title,
+            tracks,
+        });
     }
-    out.sort_by(|a, b| a.artist.cmp(&b.artist).then(a.title.cmp(&b.title)));
     Ok(out)
 }
 
@@ -870,6 +890,34 @@ mod tests {
             .unwrap();
         }
         id.to_string()
+    }
+
+    #[test]
+    fn album_groups_keep_the_batch_order_and_carry_the_album_id() {
+        // The landing after an import is "the first album of THIS batch", and
+        // the batch's own report is what says which that is — the pile's first
+        // pending album used to win instead, landing on an album the user had
+        // not touched (owner report, 2026-09-26). Order is the order the files
+        // were picked, and the id travels so the frontend need not guess by
+        // artist+title.
+        let root = temp_dir("groups-order");
+        let conn = empty_db(&root);
+        let zed = root.join("zed.mp3");
+        let alpha = root.join("alpha.mp3");
+        let zed2 = root.join("zed2.mp3");
+        seed_album(&conn, "al-zed", "Zed", "Zebra", &[zed.clone(), zed2.clone()]);
+        seed_album(&conn, "al-alpha", "Ann", "Aardvark", &[alpha.clone()]);
+
+        // Picked in this order: Zed, Alpha, Zed again.
+        let groups = album_groups(&conn, &[zed, alpha, zed2]).expect("groups");
+        let ids: Vec<&str> = groups.iter().map(|g| g.album_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["al-zed", "al-alpha"],
+            "file order, not alphabetical (Aardvark would come first)"
+        );
+        assert_eq!(groups[0].tracks, 2, "both Zed files count");
+        assert_eq!((groups[0].artist.as_str(), groups[0].title.as_str()), ("Zed", "Zebra"));
     }
 
     #[test]

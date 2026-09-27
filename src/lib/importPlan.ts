@@ -39,11 +39,27 @@ export interface StagedAlbum {
 }
 
 /** One album as the import receipt names it: no destination, because the point
- *  of the receipt is that there was nothing to decide. */
+ *  of the receipt is that there was nothing to decide. `albumId` is what the
+ *  grid LANDS on after an import (the first album of the batch just imported)
+ *  — matching by artist+title would pick the wrong album when two share one. */
 export interface ImportedAlbum {
+  albumId: string;
   artist: string;
   title: string;
   tracks: number;
+}
+
+/**
+ * Which album the grid should land on after an import, or null to stay put.
+ *
+ * The batch's OWN report decides — never `imports.plan[0]`, which is the first
+ * entry of the whole pending pile: importing album B while an older A is still
+ * pending used to land on A, an album the user had not touched (owner report,
+ * 2026-09-26). The report is ordered by the first file picked, so this is "the
+ * first album of the most recent import batch".
+ */
+export function landingAlbumId(report: ImportReport): string | null {
+  return report.staged[0]?.albumId ?? null;
 }
 
 /** What an import did. `already` is the half that needs explaining: pointing at

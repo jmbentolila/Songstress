@@ -54,6 +54,29 @@ struct ParsedTrack {
     disc: i64,
     track: Option<i64>,
     duration_sec: f64,
+    // v6 vocabulary: read for the editors' suggestions (see db.rs migration).
+    genre: Option<String>,
+    composer: Option<String>,
+    label: Option<String>,
+    grouping: Option<String>,
+}
+
+/// One row's insert payload. A struct, not the tuple this used to be: at seven
+/// fields `r.6` already needed a comment to read, and the vocabulary columns
+/// take it to twelve.
+struct TrackRow {
+    id: String,
+    path: String,
+    disc: i64,
+    track: Option<i64>,
+    title: String,
+    duration_sec: f64,
+    artist: Option<String>,
+    album_artist: Option<String>,
+    genre: Option<String>,
+    composer: Option<String>,
+    label: Option<String>,
+    grouping: Option<String>,
 }
 
 struct FileEntry {
@@ -107,13 +130,17 @@ fn parse_file(path: &Path) -> Result<ParsedTrack, String> {
         v.map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     };
+    // ItemKey lookups (no accessor for these): Composer / Label / the grouping
+    // frame are the same keys tags::write_file writes, so the round trip is
+    // exact.
+    let opt_key = |key: ItemKey| -> Option<String> {
+        tag.and_then(|t| t.get_string(&key))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
 
     let artist = tag.and_then(|t| opt_string(t.artist()));
-    // No Accessor for album artist — it's an ItemKey lookup.
-    let album_artist = tag
-        .and_then(|t| t.get_string(&ItemKey::AlbumArtist))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let album_artist = opt_key(ItemKey::AlbumArtist);
     let album = tag
         .and_then(|t| opt_string(t.album()))
         .unwrap_or_else(|| "Unknown Album".into());
@@ -142,6 +169,10 @@ fn parse_file(path: &Path) -> Result<ParsedTrack, String> {
         disc,
         track,
         duration_sec,
+        genre: tag.and_then(|t| opt_string(t.genre())),
+        composer: opt_key(ItemKey::Composer),
+        label: opt_key(ItemKey::Label),
+        grouping: opt_key(ItemKey::ContentGroup),
     })
 }
 
@@ -568,21 +599,25 @@ pub fn run_scan_files(
         )
         .map_err(|e| e.to_string())?;
 
-        let mut rows: Vec<(String, String, i64, Option<i64>, String, f64, Option<String>)> = Vec::new();
+        let mut rows: Vec<TrackRow> = Vec::new();
         for (entry, p, fresh) in &g.tracks {
-            let tid = stable_id("tr", &[&entry.path]);
-            rows.push((
-                tid,
-                entry.path.clone(),
-                p.disc,
-                p.track,
-                p.title.trim().to_string(),
-                p.duration_sec,
+            rows.push(TrackRow {
+                id: stable_id("tr", &[&entry.path]),
+                path: entry.path.clone(),
+                disc: p.disc,
+                track: p.track,
+                title: p.title.trim().to_string(),
+                duration_sec: p.duration_sec,
                 // Empty/whitespace trims to None at parse time already; store
                 // the display string as-is so the playbar can prefer it over
                 // the album artist (NULL = fall back, never an empty line).
-                p.artist.clone(),
-            ));
+                artist: p.artist.clone(),
+                album_artist: p.album_artist.clone(),
+                genre: p.genre.clone(),
+                composer: p.composer.clone(),
+                label: p.label.clone(),
+                grouping: p.grouping.clone(),
+            });
             if *fresh {
                 counts.added += 1;
             } else {
@@ -590,20 +625,40 @@ pub fn run_scan_files(
             }
         }
         // Deterministic ordering within the album regardless of walk order.
-        rows.sort_by_key(|(_, _, disc, track, _, _, _)| (*disc, track.unwrap_or(9_999)));
-        for (tid, path, disc, track, title, dur, artist) in &rows {
-            let fe = g.tracks.iter().find(|(e, _, _)| e.path == *path);
+        rows.sort_by_key(|r| (r.disc, r.track.unwrap_or(9_999)));
+        for r in &rows {
+            let fe = g.tracks.iter().find(|(e, _, _)| e.path == r.path);
             let (mtime_ns, size) = fe.map(|(e, _, _)| (e.mtime_ns, e.size)).unwrap_or((0, 0));
             tx.execute(
-                "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size, artist)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path,
+                                    mtime_ns, size, artist, album_artist, genre, composer,
+                                    label, grouping)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                  ON CONFLICT(path) DO UPDATE SET
                    album_id = excluded.album_id, disc = excluded.disc,
                    track = excluded.track, title = excluded.title,
                    duration_sec = excluded.duration_sec,
                    mtime_ns = excluded.mtime_ns, size = excluded.size,
-                   artist = excluded.artist",
-                rusqlite::params![tid, album_id, disc, track, title, dur, path, mtime_ns, size, artist],
+                   artist = excluded.artist, album_artist = excluded.album_artist,
+                   genre = excluded.genre, composer = excluded.composer,
+                   label = excluded.label, grouping = excluded.grouping",
+                rusqlite::params![
+                    r.id,
+                    album_id,
+                    r.disc,
+                    r.track,
+                    r.title,
+                    r.duration_sec,
+                    r.path,
+                    mtime_ns,
+                    size,
+                    r.artist,
+                    r.album_artist,
+                    r.genre,
+                    r.composer,
+                    r.label,
+                    r.grouping
+                ],
             )
             .map_err(|e| e.to_string())?;
         }

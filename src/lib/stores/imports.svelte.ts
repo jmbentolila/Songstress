@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   applyOrder,
+  landingAlbumId,
   type Decision,
   type ImportReport,
   type SaveReport,
@@ -217,9 +218,12 @@ export async function importMusic(paths: string[]): Promise<void> {
   imports.report = report;
   imports.applied = null;
   await refreshImportPlan();
-  // First of the imported, staged preferred: the plan order is the pile's
-  // order, which is what "first on the list" means.
-  const first = imports.plan[0]?.albumId ?? null;
+  // Land on the FIRST ALBUM OF THIS BATCH — from its own report, in the order
+  // the files were picked — never the pile's first pending album: importing B
+  // while an older A is still pending landed on A, which the user had not
+  // touched (owner report, 2026-09-26). The pile is untouched by this; it just
+  // stops deciding where the grid goes.
+  const first = landingAlbumId(report);
   if (first) {
     const album = await waitForAlbum(first);
     if (album) revealInGrid(album.id, album.artistId);

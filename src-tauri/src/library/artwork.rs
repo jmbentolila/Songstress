@@ -108,6 +108,11 @@ enum Source {
     Folder(PathBuf),
     /// Track files to scan for the largest embedded picture.
     Embedded(Vec<PathBuf>),
+    /// Exact bytes, already resolved (a candidate chosen by hash — the delete
+    /// fallback renders one hands the pipeline the very picture it means,
+    /// rather than re-deriving "largest" from whichever files happen to carry
+    /// it).
+    Bytes(Vec<u8>),
 }
 
 /// Resolve one album's cover source (folder art > largest embedded),
@@ -133,6 +138,7 @@ fn process_album(job: &Job, cache_dir: &Path) -> Option<(String, String, String)
     let img = match job.source.as_ref()? {
         Source::Folder(path) => image::open(path).ok(),
         Source::Embedded(paths) => embedded_art(paths).and_then(|d| image::load_from_memory(&d).ok()),
+        Source::Bytes(data) => image::load_from_memory(data).ok(),
     }?;
 
     let out_dir = thumbs_dir(cache_dir).join(&job.album_id);
@@ -269,6 +275,48 @@ pub fn refresh_one(conn: &Connection, cache_dir: &Path, album_id: &str) -> Resul
     conn.execute(
         "UPDATE albums SET cover = ?2, color_c1 = ?3, color_c2 = ?4 WHERE id = ?1",
         rusqlite::params![album_id, cover, c1, c2],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Render ONE album's cover from bytes the caller already resolved (a chosen
+/// candidate, not a derivation): decode, rewrite the 96/256/512 thumbs and the
+/// panel colours, and point `albums.cover` at the result.
+///
+/// This is the delete path's fallback — after removing the artwork that WAS the
+/// cover, the album keeps a cover instead of going bare — so it takes the
+/// picture explicitly rather than re-deriving "folder art > largest embedded".
+pub fn render_from_bytes(
+    conn: &Connection,
+    cache_dir: &Path,
+    album_id: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(thumbs_dir(cache_dir).join(album_id));
+    let job = Job {
+        album_id: album_id.to_string(),
+        source: Some(Source::Bytes(data.to_vec())),
+    };
+    let (cover, c1, c2) = match process_album(&job, cache_dir) {
+        Some(v) => (Some(v.0), Some(v.1), Some(v.2)),
+        None => (None, None, None),
+    };
+    conn.execute(
+        "UPDATE albums SET cover = ?2, color_c1 = ?3, color_c2 = ?4 WHERE id = ?1",
+        rusqlite::params![album_id, cover, c1, c2],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// No artwork left: the album returns to the placeholder (cover + colours
+/// NULL) and its thumbs dir goes.
+pub fn clear_cover(conn: &Connection, cache_dir: &Path, album_id: &str) -> Result<(), String> {
+    let _ = std::fs::remove_dir_all(thumbs_dir(cache_dir).join(album_id));
+    conn.execute(
+        "UPDATE albums SET cover = NULL, color_c1 = NULL, color_c2 = NULL WHERE id = ?1",
+        [album_id],
     )
     .map(|_| ())
     .map_err(|e| e.to_string())

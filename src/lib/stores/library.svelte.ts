@@ -5,7 +5,7 @@ import { albums as fakeAlbums, artistOf as fakeArtistOf, artists as fakeArtists,
 import { sortKey } from "../sort";
 import { MIN_SKELETON_MS, ENTER_MS } from "../loadingState";
 import { isTauri } from "../window";
-import { pushSetting, ui } from "./ui.svelte";
+import { pushSetting, refreshPanelGradients, ui } from "./ui.svelte";
 import { announcer } from "./announcer.svelte";
 
 /**
@@ -54,6 +54,11 @@ class LibraryStore {
   albums = $state<Album[]>(LIVE_LIBRARY ? [] : byYear(fakeAlbums));
   /** Denominator for the Library pane's status footer. */
   trackCount = $state(0);
+  /** Bumped on every applied dump — a change signal for mirrors that keep
+   *  their own copy of library identity (the playback context does). */
+  dumpVersion = $state(0);
+  /** Track id → the row as the CURRENT dump has it. */
+  #byId = new Map<string, Track>();
   #byAlbum = new Map<string, Track[]>();
 
   constructor() {
@@ -87,6 +92,10 @@ class LibraryStore {
         // survives a restart instead of being session-fresh every launch.
         ui.lastScan = Date.now();
         pushSetting("lastScan", ui.lastScan);
+        // The scan just adopted any `.songstress.json` overrides into settings;
+        // this map was hydrated before it ran, so re-read it rather than show
+        // artwork colours over an override that exists.
+        void refreshPanelGradients();
         void this.load(true);
       });
       void listen("scan-progress", () => {
@@ -144,11 +153,16 @@ class LibraryStore {
       }
       this.trackCount = dump.tracks.length;
       this.#byAlbum = new Map<string, Track[]>();
+      this.#byId = new Map<string, Track>();
       for (const t of dump.tracks) {
         const list = this.#byAlbum.get(t.albumId);
         if (list) list.push(t);
         else this.#byAlbum.set(t.albumId, [t]);
+        this.#byId.set(t.id, t);
       }
+      // A new dump can move rows between albums; whoever mirrors engine state
+      // (the playback store) re-anchors off this counter.
+      this.dumpVersion += 1;
       this.ready = true;
       if (filledFromPlaceholder) this.#enterNow();
     } catch {
@@ -167,6 +181,26 @@ class LibraryStore {
 
   tracksOf(albumId: string): Track[] {
     return this.live ? (this.#byAlbum.get(albumId) ?? []) : fakeTracksOf(albumId);
+  }
+
+  /** One track by id, library-wide. The playbar needs this because a retag can
+   *  move a row to ANOTHER album while it is playing (the file path — and so the
+   *  track id — survives; the album id does not), and resolving through the
+   *  stale album id is how the UI read "Nothing playing" over a track that mpv
+   *  was happily playing (owner report, 2026-09-26). O(1) via the dump index. */
+  trackById(trackId: string): Track | undefined {
+    if (this.live) return this.#byId.get(trackId);
+    for (const a of this.albums) {
+      const hit = fakeTracksOf(a.id).find((t) => t.id === trackId);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  /** Which album a track lives in NOW (undefined when it is gone). */
+  albumOfTrack(trackId: string): Album | undefined {
+    const t = this.trackById(trackId);
+    return t ? this.albums.find((a) => a.id === t.albumId) : undefined;
   }
 
   /** Flag a track as missing without waiting for a rescan (the file just

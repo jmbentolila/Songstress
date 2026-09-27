@@ -255,6 +255,30 @@ public/covers/            album art for the fake library (real folder.jpg files)
 - **Screenshots lie when the game is fullscreen.** Raise our window first:
   WindowsRunner `Match` → `Run(matchId, "activate")`. Never minimize/kill the
   user's windows or change their wallpaper without asking.
+- **Confirmations inside a modal drop from the top edge of the surface that
+  raised them** — the modal normally, the LIGHTBOX when the expanded artwork
+  view is what asked (rendered into whichever is innermost; a box on the panel
+  behind the image reads as a bug) — as
+  notification boxes (`.glass`, safe action first, destructive in caution), and
+  the modal's own surface DIMS under them — the window's scrim wash
+  (`rgba(0,0,0,.35)`) and timing, scoped to the panel, press-to-cancel. Never a
+  modal on top of a modal, never a native dialog. Shared entrance/dim:
+  `notifyDrop` + `notifyVeil` (src/lib/notifyDrop.ts). Two traps, both measured:
+  `position: fixed` is what lands on the panel (`.te-body` is
+  `position: relative`, so `absolute` anchors 64px down at the artwork section),
+  and Escape must be handled in CAPTURE with `stopImmediatePropagation` —
+  the modal's own Escape listener is on `window` too, and `stopPropagation`
+  cannot quiet a listener on the same target. Example: the artwork delete
+  confirmation in ArtSelector.
+- **A track's ALBUM is grouping output, not identity.** A retag rewrites the
+  file, the scan re-groups it, and the row moves to another album while its
+  PATH (and so its id, `stable_id("tr", path)`) stays put. So never resolve "the
+  playing track" through `playback.current.albumId` — `currentTrack()` looks the
+  `trackId` up library-wide via `library.trackById`, and `reanchorCurrent()`
+  re-points the context after each dump (`library.dumpVersion`, wired in
+  App.svelte). Resolving through the album is how the playbar read "Nothing
+  playing" over audio that was still going (2026-09-26). The engine is
+  unaffected: mpv's order is materialized by path at album start.
 - **This WebKitGTK ignores some modern CSS that computes cleanly.** Measured
   2026-09-05: unprefixed `user-select` is a no-op (every `none` in the app was
   dead code — `-webkit-user-select` is mandatory), and the INDIVIDUAL transform
@@ -304,6 +328,37 @@ public/covers/            album art for the fake library (real folder.jpg files)
   Expand/collapse keeps the eased `grid-template-rows` animation.
 - **Cover decode is expensive** (some art is 3000px). Panel art uses
   `decoding="async"`; `AlbumGrid.toggleExpand` pre-decodes via `img.decode()`.
+- **`.songstress.json` is per-album display state, not library content.** One
+  file per FOLDER, a map of album id → `{colors, gradient}` (a flat folder can
+  hold several albums — measured: three album tags in one compilation folder).
+  A SCAN adopts it (gradient always wins; `colors` only fills in when there is
+  no artwork to derive from), while an in-app change MIRRORS the DB into it —
+  `sync_album`/`sync_entry` take an explicit `adopt` flag, and getting that
+  direction backwards silently reverts the user's edit (it did, once). The
+  watcher ignores the filename: without that, every colour edit schedules a
+  rescan. Per-album gradient overrides are settings keys
+  `albumGradient:<album id>` (one per album, not the retired `panelGradients`
+  blob), written together with the file by `set_album_gradient`, and re-read by
+  `refreshPanelGradients()` after each scan. Never write into an album folder by
+  any name other than this one (plus its own temp) — see the 2026-09-04 rule.
+- **Tag editor suggestions are DB-backed, and the DB only knows what a scan
+  stored.** The seven completable fields read `tag_vocabulary`
+  (`library/vocab.rs`, migration v6), so `genre`/`composer`/`label`/`grouping`
+  return **nothing until a Full Rescan** has backfilled the columns —
+  incremental scans skip unchanged files, and a tag SAVE only fills its own row
+  (mtime changed). Don't "fix" an empty genre list by re-reading files at editor
+  open: that was the design the schema route replaced. Also: counts arrive from
+  the DB but do NOT rank the list (closeness does: earliest inclusion, then
+  shortest value — owner ruling); the **first row is always armed**, even when
+  it equals the query (type `dawn`, the library holds `DAWN`: completing must be
+  able to give back the stored spelling), so with a list open the first Tab/Enter
+  completes and the second moves on / saves; Tab/Enter complete only a
+  **highlighted** item (Enter
+  otherwise stays Save); Escape closes the list, not the modal; and the list is
+  `position: absolute` inside the field cell because a `fixed` child of a
+  `.glass` panel anchors to the PANEL (backdrop-filter is a containing block)
+  while the modal body also clips. Ranking rules live in `lib/suggest.ts` with
+  their tests — change the order there, not in the component.
 
 ## Import staging (read before touching `library/import.rs`)
 
