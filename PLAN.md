@@ -197,11 +197,16 @@ blur → dnf remove clean.
   `AudioVideo;Audio;Music;`), license MIT, short/long description,
   `bundle.linux.rpm = { release: "1", depends: ["mpv", "kdialog"] }`.
   (2026-09-23, GNOME move — single-RPM decision, owner-approved over two DE
-  packages): `depends` is now `["mpv", "(zenity or kdialog)"]` (boolean dep — the
-  KDE spin already satisfies it via kdialog, bare GNOME pulls small zenity) and
-  `release` resets to `"1"` under 0.12.1. Descriptions neutralized ("for Fedora /
-  Plasma and GNOME"). Rich-dep passthrough by tauri-bundler is ASSUMED — verify
-  with `rpm -qpR` on the first build from a toolchain box.
+  packages): `depends` was briefly `["mpv", "(zenity or kdialog)"]` and
+  `release` reset to `"1"` under 0.12.1. **Correction (2026-09-26) — that rich
+  dep is not in the tree and never shipped**: the zenity picker stack was
+  reverted by the 0.12.0 merge (`a0e03ea`, portal-first), `tauri.conf.json`
+  carries `depends: ["mpv"]`, and `rpm -qpR` on the 0.12.1, 0.13.0 and 0.13.4
+  RPMs shows only `mpv` + webkit2gtk + gtk3 — so the "rich-dep passthrough by
+  tauri-bundler" question left open below was never exercised (moot, not
+  answered). Descriptions neutralized ("for Fedora / Plasma and GNOME"). If a
+  picker helper is ever required again, settle it the way it was finally
+  settled here: build, then `rpm -qpR`.
 - **Category gotcha**: the bundler's AppCategory is the macOS/GNOME-style
   name list ("Music", "Video", "Game", …) — NOT freedesktop strings
   ("AudioVideo" / "Audio" / "Audio;Video;" all → "invalid category", and
@@ -2434,7 +2439,7 @@ follows now: the ring's only direction is forward, and it is allowed to say
 - Fedora 44, **GNOME 50.5 (Mutter) Wayland** — corrected 2026-09-26: this line
   said Plasma 6.7.4, which is what the box ran when it was written. The KDE
   notes all over this file predate that move; AGENTS.md carries the current DE
-  rules (zenity pickers, in-titlebar menu, matte fields, GNOME screenshot
+  rules (portal-first pickers, in-titlebar menu, matte fields, GNOME screenshot
   tooling absent). Output HDMI-2 (LG HDR 4K) 3840×2160 @ scale 1.5 → logical
   2560×1440; the webview reports **dpr 2**, because GTK4 rounds to an integer
   scale under GNOME's fractional scaling (a DOM probe therefore reads

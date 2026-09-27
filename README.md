@@ -24,8 +24,9 @@ built for Fedora (Plasma and GNOME on Wayland), shaped by one very deafeningly o
   disputed-tag awareness, and an import flow that *moves* your files where
   they belong and shows you the receipt
 - **Desktop-native integration** — Global Menu over DBus on Plasma (with live
-  transport glyphs), MPRIS, inotify library watching, blur via KWin, dialogs via
-  kdialog — with zenity + in-titlebar fallbacks on GNOME
+  transport glyphs), MPRIS, inotify library watching, blur via KWin, pickers via
+  the XDG desktop portal (kdialog fallback) — with an in-titlebar menu fallback
+  on GNOME
 - **Glass, not frameworks** — hand-rolled CSS with theme tokens; two-tier
   translucency tuned to the compositor, zero CSS dependencies
 
@@ -33,7 +34,7 @@ built for Fedora (Plasma and GNOME on Wayland), shaped by one very deafeningly o
 
 ```sh
 npm install
-npm run tauri dev      # the full app (needs mpv + kdialog/zenity)
+npm run tauri dev      # the full app (needs mpv)
 npm run check          # svelte-check
 npm test               # vitest
 cd src-tauri && cargo test --lib

@@ -16,8 +16,9 @@ CSS framework — hand-rolled CSS with custom properties.
 Single RPM, both desktops (2026-09-23): one package serves Plasma and GNOME —
 DE differences are runtime fallbacks, never build variants. Plasma is the
 reference desktop (kdialog pickers, Global Menu, KWin force-blur); on GNOME the
-app takes the zenity pickers, the in-titlebar menu bar (`wayland_appmenu` skips
-with STATE=2), and OPAQUE chrome (`html[data-de="gnome"]` pins the glass tokens
+same portal-first picker takes over, the menu bar moves into the titlebar
+(`wayland_appmenu` skips with STATE=2), and the chrome goes OPAQUE
+(`html[data-de="gnome"]` pins the glass tokens
 solid — KDE keeps the glass; GNOME gets GRAIN instead of glass on every opaque
 field: the grid backdrop, the sidebar, the playbar, EVERY `.glass` (that one
 class is the chrome/popover/modal tier: EQ + queue popovers, context menu, the
@@ -32,9 +33,11 @@ One noise scale only: a second, low-frequency layer was tried twice and removed
 is the material).
 `--tex` lives in app.css next to the GNOME block, with "The Matte Rule" in
 DESIGN.md; the tile's SVG filter needs `color-interpolation-filters='sRGB'` or
-the whole field washes ~10 RGB lighter (linearRGB default). RPM deps: `mpv` + `(zenity or kdialog)`
-— boolean dep, dnf installs the first missing alternative (zenity: small, native
-on GNOME; on the KDE spin kdialog is already present). GNOME-only box right now:
+the whole field washes ~10 RGB lighter (linearRGB default). RPM deps: **`mpv`
+only** — the pickers are XDG-portal-first (`portal_files.rs`) with a `kdialog`
+fallback, so no picker package is required (verified 2026-09-26: `rpm -qpR` on
+Songstress-0.13.4-1 requires mpv + libwebkit2gtk-4.1 + libgtk-3 and nothing
+else; `zenity` appears nowhere in the source). GNOME-only box right now:
 the kdialog branch is verified by argv-identity (byte-identical args), never by
 a live pick — say so, don't claim it.
 
@@ -183,14 +186,18 @@ public/covers/            album art for the fake library (real folder.jpg files)
   gets character ops, char boundaries, and temp+rename — always.
 - **mpv must be spawned with `--no-config`** — the user's `~/.config/mpv/mpv.conf`
   is a broken Windows config (d3d11, C:\ fonts).
-- **No GTK dialogs on Plasma.** File/folder pickers must go through `kdialog` (see the
-  `choose_music_folder` command) so they render native KDE style. Don't reintroduce
-  tauri-plugin-dialog / rfd — its GTK chooser looks GNOME-ish (user rejected it).
-  On GNOME there IS no kdialog: `pick_directory`/`pick_image` fall back to `zenity`
-  (single-RPM rule, 0.12.1) — kdialog first with byte-identical argv, zenity only
-  on spawn-NotFound, cancel stays Ok(None) on either. The RPM's `(zenity or
-  kdialog)` dep should make "neither installed" unreachable; the error names
-  what to install if it happens anyway.
+- **No GTK dialogs. Pickers are portal-first, then `kdialog`.** `pick_directory`/
+  `pick_image` call the XDG desktop portal (`portal_files.rs`), so the picker is
+  compositor-native on BOTH desktops; if the portal is unavailable they fall back
+  to `kdialog` (spawn-NotFound only), cancel stays Ok(None) on either. Don't
+  reintroduce tauri-plugin-dialog / rfd — its GTK chooser looks GNOME-ish (user
+  rejected it). There is **no `zenity` path** (verified 2026-09-26:
+  `grep -rn zenity src-tauri/src` → nothing): the 0.12.1 "zenity picker stack"
+  was a detour built on a wrong assumption and reverted by the 0.12.0 merge
+  `a0e03ea` — PLAN.md keeps it as history, not as design. Packaging consequence:
+  the RPM carries no picker dependency (`depends = ["mpv"]`), so a picker
+  failure surfaces as an error naming the missing helper rather than being
+  unreachable by construction.
 - **A cancelled kdialog folder pick stores JSON `null` as musicDir.** `music_root`
   must treat null/empty as unset (→ ~/Music) — the old `unwrap_or(v)` made the
   scan root a RELATIVE path `null`, so every scan failed instantly and silently
