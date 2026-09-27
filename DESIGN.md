@@ -326,7 +326,16 @@ a dirty one. Measured end state — dark: ±1.25 RGB at 5–95%, mean unchanged
 (extremes ±2.6); light: mean −1.3 RGB with the tooth 0…+3.1 RGB (multiply cannot
 lighten, so light is the one field whose mean moves — by 0.5%, invisibly). The
 level is taste and was dialled down twice on sight from the same mechanism, so
-treat the number as a setting, not a derivation.
+treat the number as a setting, not a derivation. It was dialled **up on request**
+(2026-09-26): +25% first, then stepped back to a net **+15%** over the values
+measured above — dark slope `.16 → .184` with the intercept re-derived
+(`0.5 − slope/2` = `.408`, symmetry kept), light `.045 → .052` with its top still
+clamping just under 1 (`.973 → .969`; +15.6%, since the light slope rounds to 3
+decimals like the rest of the token). The measured numbers in the paragraph above
+were taken at the original slope. A canvas-readback probe applying the CSS blend
+formula (not a screen measurement) says: dark mean +14.7% / p95 +14.5%, and light
+tooth depth ×1.16 (bottom `.9505 → .943` under the same `.995` top) with the mean
+drift rising `−1.27 → −1.43` RGB — still 0.5%-level and invisible.
 The texture is a BACKGROUND layer on the field itself — never an overlay on the
 surface — so tiles, captions and glyphs sit on it untouched. KDE keeps glass,
 and its old 2% `.glass::after` banding garnish is switched off on GNOME (no blur,

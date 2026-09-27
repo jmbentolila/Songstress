@@ -278,8 +278,14 @@ public/covers/            album art for the fake library (real folder.jpg files)
   dev and the RPM, main thread clean (rAF probe). Every env lever
   (`WEBKIT_DISABLE_DMABUF_RENDERER`, `…_COMPOSITING_MODE`,
   `WEBKIT_USE_SKIA_FOR_COMPOSITION=0`) MISPAINTS worse — black window except
-  the damage rect around the pointer. Do not chase these; the fix is upstream
-  (2.54.1) and the owner declined the 2.52 downgrade. See PLAN.md 2026-09-26.
+  the damage rect around the pointer. Do not chase these: (2) is
+  **confirmed 2.54 and fixed by 2.52.1** — the box is pinned by hand, so a
+  plain `dnf upgrade` brings the stutter back; check `rpm -q webkit2gtk4.1`
+  before blaming the app, and revert/upgrade deliberately with
+  `sudo dnf upgrade webkit2gtk4.1 webkit2gtk4.1-devel webkitgtk6.0`.
+  Instrument trap when re-measuring: 2.52 names the FPS var
+  `WEBKIT_SHOW_FPS`, 2.54 `WEBKIT_DRAW_FPS` — the wrong name prints nothing
+  (a blind counter reads as "no drops"). See PLAN.md 2026-09-26.
   A long-running instance is a fossil: `rpm -q --last webkit2gtk4.1` dated
   the outage; "the RPM was fine yesterday" meant a process started Sep 24.
 - **UI alphas** (user-tuned): grid backdrop 0.8 (`--bg-grid`), chrome 0.7

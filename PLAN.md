@@ -78,8 +78,9 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Dev/prod instance separation: dev overlay identifier (isolated library, socket, MPRIS, appmenu) + mono dev icon + — dev title | ✅ 2026-09-24 (dev-only, no version bump) |
 | Empty-state app mark: master icon SVG above the welcome headline at 75% | ✅ 2026-09-24 |
 | Track modal Genre→Track# cascade after the +2px scale (wrap + mirror + x-scroll, one-number fix) | ✅ 2026-09-24 |
-| WebKitGTK 2.54: dev-thumb bridge + compositor-stutter verdict | ✅ 2026-09-26 (artwork fixed; stutter = upstream, riding it) |
+| WebKitGTK 2.54: dev-thumb bridge + compositor-stutter verdict | ✅ 2026-09-26 (artwork fixed; stutter = upstream, fixed by pinning webkit2gtk to 2.52.1 — owner-verified A/B) |
 | GNOME matte fields: fine grain (`--tex`) on the grid backdrop + every `.glass` (sidebar, playbar, popovers, menu, modals) + the expanded panel instead of the pinned-flat glass | ✅ 2026-09-26 · **0.13.3** (five owner reviews: tiled → dirt → grain only → half level → modals → popovers + expanded view) |
+| Matte grain level dialled up 15% on request (dark `.16 → .184`, light `.045 → .052`, intercepts re-derived; probe: dark mean +14.7% / p95 +14.5%, light tooth ×1.16 with mean drift −1.27 → −1.43 RGB) | ✅ 2026-09-26 · **0.13.4** (polish; docs + comments updated, no screen re-measure — declared as scaled) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -163,6 +164,10 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
   the smoothest glide of all the variants. The heavy pin/predict
   machinery stayed removed: what came back is only measured spawn +
   plain CSS close + a queue.
+- **WebKitGTK rides 2.52.1 for now (owner, 2026-09-26)**: 2.54.0's Skia
+  compositor stutters on this box and 2.52.1 does not (owner-verified A/B).
+  The pin is manual, so `dnf upgrade` undoes it and the stutter returns;
+  revisit on 2.54.1 rather than re-litigating the downgrade in the meantime.
 
 ## Remaining work
 
@@ -2426,10 +2431,22 @@ follows now: the ring's only direction is forward, and it is allowed to say
 
 ## Environment quick facts (for fresh sessions)
 
-- Fedora 44, Plasma 6.7.4 Wayland, output 3840×2160 @ scale 1.6 (logical
-  2400×1350; fractional — relevant to 0b). GPU: AMD Radeon 780M
-  (radeonsi, Mesa 26.1.7); WebKitGTK composites via EGL/gbm.
+- Fedora 44, **GNOME 50.5 (Mutter) Wayland** — corrected 2026-09-26: this line
+  said Plasma 6.7.4, which is what the box ran when it was written. The KDE
+  notes all over this file predate that move; AGENTS.md carries the current DE
+  rules (zenity pickers, in-titlebar menu, matte fields, GNOME screenshot
+  tooling absent). Output HDMI-2 (LG HDR 4K) 3840×2160 @ scale 1.5 → logical
+  2560×1440; the webview reports **dpr 2**, because GTK4 rounds to an integer
+  scale under GNOME's fractional scaling (a DOM probe therefore reads
+  2560×1440 CSS px). GPU: AMD Radeon 780M / Phoenix1 (radeonsi, Mesa 26.2.3);
+  WebKitGTK composites via EGL/gbm.
 - mpv 0.41 at /usr/bin/mpv. sudo requires password (user runs dnf lines).
+- **WebKitGTK is pinned to 2.52.1 by hand** (`webkit2gtk4.1`, `-devel`,
+  `webkitgtk6.0`): 2.54.0's Skia compositor stutters 3–47 FPS on
+  hover/populate on this box, 2.52.1 does not (owner-verified A/B, 2026-09-26).
+  The pin is NOT enforced — `dnf upgrade` silently restores 2.54 and the
+  stutter with it, so check `rpm -q webkit2gtk4.1` first whenever the UI goes
+  janky again.
 - Dev unit: `systemctl --user restart songstress-dev`; logs `journalctl
   --user -u songstress-dev -f`. HMR rot → cold restart first.
 - Raise window: WindowsRunner DBus Match + Run(matchId, "activate")
@@ -5051,6 +5068,32 @@ off the mirrors; 2.52.1 would work but pins security fixes behind it). Ride
 2.54, keep the dev instance's `WEBKIT_DRAW_FPS` drop-in OUT (removed), and
 revisit on 2.54.1. Upstream report is welcome-but-not-yet-filed; the minimal
 repro is any 250-image grid + hover tooltips on this box.
+
+**Update, later the same day (2026-09-26) — the downgrade was run, and it fixes
+it.** The owner ran `sudo dnf downgrade webkit2gtk4.1 webkit2gtk4.1-devel
+webkitgtk6.0` → **2.52.1-1.fc44** (that build is in the base `fedora` repo;
+2.52.5 is gone from the mirrors). A cold-started dev instance on 2.52.1 (a fresh
+process, not a fossil of the 2.54 session) showed **no stutter at all** on the
+exact surfaces that had measured 3–47 FPS — owner-verified, so the regression is
+attributed to 2.54's compositor by A/B on this one box. Decision (owner, same
+day): **stay on 2.52.1 and check for updates at a later date** — this replaces
+the "ride 2.54" call above. Cost, stated honestly: 2.52.1 keeps the 2.54
+security fixes off **system-wide**, not just for us — epiphany-runtime (GNOME
+Web), yelp, gnome-initial-setup, evolution-data-server and
+NetworkManager-openconnect-gnome all moved back with it
+(`rpm -q --whatrequires 'libwebkitgtk-6.0.so.4()(64bit)'` and
+`'libwebkit2gtk-4.1.so.0()(64bit)'`; gnome-shell only *declares* the package, it
+does not link the library). Nothing in the RPM changed — this is system state,
+not a code change, so **no version bump**. The pin is manual: a plain
+`dnf upgrade` puts 2.54.0 back, and the stutter with it. Revert deliberately
+with `sudo dnf upgrade webkit2gtk4.1 webkit2gtk4.1-devel webkitgtk6.0`.
+
+**Instrument trap (cost one blind measurement).** The FPS counter env var was
+**renamed**: 2.52.1 reads `WEBKIT_SHOW_FPS`, 2.54 reads `WEBKIT_DRAW_FPS`.
+Setting the 2.54 name on 2.52 printed **zero lines for every input** — the
+counter was blind, not the compositor quiet. Positive control:
+`strings /usr/lib64/libwebkit2gtk-4.1.so.0 | grep -i fps` names the variable the
+installed library actually reads (run it before trusting an empty trace).
 
 Diagnostics worth keeping: `rpm -q --last` is the smoking-gun command (the
 "nothing changed but it broke" answer usually changed in the system, not the
