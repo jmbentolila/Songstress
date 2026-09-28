@@ -30,6 +30,9 @@ export const ui = $state({
   sidebarRowSize: load("songstress.sidebarRowSize", DEFAULT_SIDEBAR_ROWS),
   /** Playbar backdrop = artwork gradient while something is playing (Step 2b). */
   playbarGradient: load("songstress.playbarGradient", false),
+  /** Playbar progress style: false = the straight line (the shipped default),
+   *  true = the waveform variant. Also swaps --playbar-h via html[data-playbar]. */
+  playbarWaveform: load("songstress.playbarWaveform", false),
   /** Expanded-panel artwork gradient (Step 9b). True = the shipped look;
    *  false = plain --panel-bg everywhere, per-album overrides included. */
   albumGradient: load("songstress.albumGradient", true),
@@ -118,6 +121,7 @@ export function resetAppearance() {
   ui.theme = "system";
   ui.accentColor = null;
   ui.playbarGradient = false; // the pane's other visible control; reset means reset
+  ui.playbarWaveform = false; // progress style is appearance too
   ui.albumGradient = true;
   ui.panelGradients = {}; // custom panel colors are appearance too
 }
@@ -214,6 +218,7 @@ export async function initSettings() {
           tileSize: JSON.stringify(ui.tileSize),
           sidebarRowSize: JSON.stringify(ui.sidebarRowSize),
           playbarGradient: JSON.stringify(ui.playbarGradient),
+          playbarWaveform: JSON.stringify(ui.playbarWaveform),
           albumGradient: JSON.stringify(ui.albumGradient),
           panelGradients: JSON.stringify(ui.panelGradients),
           accentColor: JSON.stringify(ui.accentColor),
@@ -232,6 +237,7 @@ export async function initSettings() {
     ui.tileSize = parse<number>("tileSize", ui.tileSize);
     ui.sidebarRowSize = parse<number>("sidebarRowSize", ui.sidebarRowSize);
     ui.playbarGradient = parse<boolean>("playbarGradient", ui.playbarGradient);
+    ui.playbarWaveform = parse<boolean>("playbarWaveform", ui.playbarWaveform);
     ui.albumGradient = parse<boolean>("albumGradient", ui.albumGradient);
     // Per-album gradient overrides are one settings key each
     // (`albumGradient:<album id>`), not one blob: the scan adopts a

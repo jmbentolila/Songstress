@@ -90,12 +90,35 @@ const CLAMP = {
 } as const;
 
 const ACTIVE_ALPHA = { dark: 0.18, light: 0.14 } as const; // user-tuned
+/** Owner-requested light-mode darkening, in HSL lightness points. */
+const LIGHT_DARKEN = 0.1;
+export const BLACK_PRESET_HEX = "#000000";
+export const WHITE_PRESET_HEX = "#ffffff";
+
+/** White has no usable light-mode form, so it is unavailable there. */
+export function isAccentAvailable(hex: string | null, theme: "dark" | "light"): boolean {
+  return !(
+    theme === "light" &&
+    typeof hex === "string" &&
+    hex.toLowerCase() === WHITE_PRESET_HEX
+  );
+}
+
+/** A stored white selection entering light mode falls back to black. */
+export function fallbackAccentForTheme(
+  hex: string | null,
+  theme: "dark" | "light",
+): string | null {
+  if (!isAccentAvailable(hex, theme)) return BLACK_PRESET_HEX;
+  return hex;
+}
 
 /** Derive the theme's accent variables from one stored hex. */
 export function accentVariants(hex: string, theme: "dark" | "light"): AccentVariants {
   const [lo, hi] = CLAMP[theme];
   const [h, s, l0] = hexToHsl(hex);
-  const l = Math.min(hi, Math.max(lo, l0));
+  const clamped = Math.min(hi, Math.max(lo, l0));
+  const l = theme === "light" ? Math.max(0, clamped - LIGHT_DARKEN) : clamped;
   const accent = hslToHex(h, s, l);
   const r = parseInt(accent.slice(1, 3), 16);
   const g = parseInt(accent.slice(3, 5), 16);

@@ -178,11 +178,13 @@ caution color; the entire palette is expressed as alpha over the frosted
 wallpaper rather than opaque fills.
 
 ### Primary
-- **Stock Orchid** (`#a78bfa` dark / `#7c58f0` light): the only brand color —
+- **Stock Orchid** (`#a78bfa` dark / `#4715ea` light): the only brand color —
   focus rings, selected states, the play button wash, accent text on wash
   backgrounds, the back-chevron. It is user-overridable at runtime
   (accent picker), so any surface using it must consume the `--accent`
-  variable, never a literal.
+  variable, never a literal. In light mode every accent — stock included —
+  is darkened by 10 HSL lightness points after the theme clamp, so chosen
+  colors keep their hue while gaining contrast on porcelain glass.
 
 ### Tertiary
 - **Amber Caution** (`#f2a33c` dark / `#b26a12` light — the light value is the
@@ -271,8 +273,12 @@ and an 84px playbar (full-width bottom). There is **no titlebar** — window
 controls sit in the sidebar header.
 
 The grid is a row model: column count derives from available width ÷ tile
-size (user-tunable 120–320px, default 180px) with 20px gaps; an expanded
+size (user-tunable 120–320px nominal, default 180px) with 20px gaps; an expanded
 album becomes a full-width panel row that pushes subsequent rows down.
+The Tile size slider offers only the nominal stops that actually change the
+column count for the measured grid width — one detent per layout — and its
+readout names the rendered result (`212px · 5 across`), never a pixel value
+that moves no tile.
 Sidebar artist rows are user-tunable height (28–52px, default 36px);
 menu rows are fixed 40px.
 
@@ -415,6 +421,37 @@ Two families, split by role — every glyph in the chrome belongs to one:
   icons differ in mass so the pair is distinguishable without tooltips.
 - No typographic glyphs (×, −, +) in interactive chrome — the old font ×
   read as a third family beside the SVGs.
+
+### The seek: line or waveform
+
+The playbar's seek is an Appearance choice (one setting, `playbarWaveform`), and
+both variants are the SAME native `<input type="range">` under the hood —
+keyboard, ARIA, drag and the ←/→ ±5s hook are inherited, never re-implemented.
+
+- **Straight line (default).** A 4px glass track whose fill gradient IS the track
+  (accent to the playhead, `--hover` after) with the accent round thumb. The
+  thumb is the playhead and eases in only when there is something to position (a
+  track loaded); at rest the line dims to 0.35 and the thumb is gone.
+- **Waveform.** 80 mirrored bars, played in `--accent` and the rest a faint wash
+  (`--text-dim` at 0.2, on an 85% lane). Bars are stroked vertical lines with
+  round caps and `non-scaling-stroke`, so their ends are true pills; the loudest
+  bucket fills the lane (a stored peak–RMS blend, normalized per track).
+- **The quiet state IS the waveform at minimum height** (`WAVE_FLOOR`), never a
+  separate dotted line: the bars rest as a beaded line and the track expands
+  straight out of it. Entrances and exits share one 460ms / 0.35 stagger, so the
+  collapse mirrors the rise.
+- **The shelf follows the style** (line 84px, waveform 101.4px). Both variants
+  stay mounted and stacked so the toggle CROSS-FADES rather than squeezing the
+  lane; the inactive one is `disabled` and `pointer-events: none`.
+- **The toggle animates concrete properties, not the token.** `--playbar-h`
+  changes instantly; `.playbar`/`.seek-lane` transition their `height` and the
+  followers (`.content`, `.sidebar`, `.edge-shadows`, `.stage::before`) their
+  `bottom`, all on `--playbar-dur` (0ms under reduced motion). Animating the
+  inherited custom property itself forced a document-wide recalc (~27fps).
+
+**The rule:** one accent marks the playhead; the unplayed side is a quiet wash,
+never a second colour. The waveform is texture — the accent boundary is the
+answer to "where am I".
 
 ### Rows & Navigation
 - **Menu row (one row language, 2026-08-30):** the sidebar has ONE row
@@ -893,7 +930,9 @@ not a global gap.
   a 2px ring in the color it actually produces, plus a tooltip naming it. The
   ring appears only where the promise and the result differ, and NOT on the
   selected dot: two near-identical concentric rings read as a rendering glitch
-  and make the selected dot look disabled.
+  and make the selected dot look disabled. White has no usable light-mode form:
+  its swatch is disabled in the light theme, and a stored white selection
+  entering light mode falls back to Black.
 
 ### Chips / Badges
 - **Pill badges (999px radius):** 3×9 padding, 10px/600 UPPERCASE label,

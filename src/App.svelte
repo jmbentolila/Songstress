@@ -8,7 +8,7 @@
   import ManageImports from "./components/ManageImports.svelte";
   import ContextMenu from "./components/ContextMenu.svelte";
   import { ui, resolvedTheme, initSettings, pushSetting } from "./lib/stores/ui.svelte";
-  import { accentVariants } from "./lib/accent";
+  import { accentVariants, fallbackAccentForTheme } from "./lib/accent";
   import { decoVars } from "./lib/stores/decoration.svelte";
   import { initMenu, pushMenuState } from "./lib/stores/menu.svelte";
   import { startViewportGuard } from "./lib/viewportGuard";
@@ -53,6 +53,7 @@
     void library.albums.length;
     void ui.theme;
     void ui.playbarGradient;
+    void ui.playbarWaveform;
     void ui.albumGradient;
     pushMenuState();
   });
@@ -78,6 +79,8 @@
 
   $effect(() => {
     document.documentElement.dataset.theme = resolvedTheme();
+    // Progress style drives the playbar height (app.css html[data-playbar]).
+    document.documentElement.dataset.playbar = ui.playbarWaveform ? "wave" : "line";
     document.documentElement.style.setProperty("--tile-size", `${ui.tileSize}px`);
     document.documentElement.style.setProperty(
       "--sidebar-row-size",
@@ -93,6 +96,13 @@
   $effect(() => {
     void library.dumpVersion;
     reanchorCurrent();
+  });
+
+  // White has no usable light-mode form: a stored white selection entering
+  // light mode becomes black, in the store and therefore in persistence.
+  $effect(() => {
+    const next = fallbackAccentForTheme(ui.accentColor, resolvedTheme());
+    if (next !== ui.accentColor) ui.accentColor = next;
   });
 
   // Accent picker (Step 4): ONE stored hex → per-theme variable overrides on
@@ -124,6 +134,10 @@
       JSON.stringify(ui.playbarGradient),
     );
     localStorage.setItem(
+      "songstress.playbarWaveform",
+      JSON.stringify(ui.playbarWaveform),
+    );
+    localStorage.setItem(
       "songstress.albumGradient",
       JSON.stringify(ui.albumGradient),
     );
@@ -136,6 +150,7 @@
     pushSetting("tileSize", ui.tileSize);
     pushSetting("sidebarRowSize", ui.sidebarRowSize);
     pushSetting("playbarGradient", ui.playbarGradient);
+    pushSetting("playbarWaveform", ui.playbarWaveform);
     pushSetting("albumGradient", ui.albumGradient);
     // No `panelGradients` push: the overrides are one settings key per album
     // (`albumGradient:<id>`), written by `set_album_gradient` together with the
@@ -221,6 +236,7 @@
     left: var(--sidebar-width);
     right: 0;
     bottom: var(--playbar-h);
+    transition: bottom var(--playbar-dur, 200ms) var(--ease-out);
     z-index: 5;
     pointer-events: none;
     background:
@@ -238,6 +254,7 @@
     left: var(--sidebar-width);
     right: 0;
     bottom: var(--playbar-h);
+    transition: bottom var(--playbar-dur, 200ms) var(--ease-out);
     background: var(--bg-grid);
   }
 </style>

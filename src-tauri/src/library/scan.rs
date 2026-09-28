@@ -946,7 +946,8 @@ mod tests {
         let counts = run_scan(&mut conn, &fixtures_src(), |_, _| {}).expect("scan");
 
         assert_eq!(counts.errors, Vec::<String>::new());
-        assert_eq!(counts.added, 8, "all fixture files added");
+        // 8 original fixtures + the AIFF format sample (sample/untitled-song.aiff).
+        assert_eq!(counts.added, 9, "all fixture files added");
 
         // Multi-disc ordering within one album.
         let gm = album_tracks(&conn, "Giants & Monsters");
@@ -1018,7 +1019,7 @@ mod tests {
         run_scan(&mut conn, &root, |_, _| {}).expect("first scan");
         let second = run_scan(&mut conn, &root, |_, _| {}).expect("second scan");
         assert_eq!((second.added, second.updated, second.removed), (0, 0, 0));
-        assert_eq!(second.skipped, 8, "unchanged files skipped by mtime+size");
+        assert_eq!(second.skipped, 9, "unchanged files skipped by mtime+size");
 
         // Touch one file's mtime → exactly one update on the next scan.
         let victim = root.join("Helloween/Giants & Monsters (2021)/01 - Silent Echoes.flac");
@@ -1026,7 +1027,7 @@ mod tests {
         f.set_modified(std::time::SystemTime::now()).expect("touch");
         drop(f);
         let third = run_scan(&mut conn, &root, |_, _| {}).expect("third scan");
-        assert_eq!((third.added, third.updated, third.removed, third.skipped), (0, 1, 0, 7));
+        assert_eq!((third.added, third.updated, third.removed, third.skipped), (0, 1, 0, 8));
 
         // Delete a file → its row is KEPT and flagged missing (relink or
         // explicit removal is the user's call); nothing auto-removed.

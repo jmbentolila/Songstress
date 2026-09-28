@@ -4,7 +4,9 @@
   import { library, LIVE_LIBRARY } from "../lib/stores/library.svelte";
   import { openContextMenu } from "../lib/stores/contextMenu.svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { ACCENT_PRESETS, accentVariants, hexToHsl } from "../lib/accent";
+  import { ACCENT_PRESETS, accentVariants, hexToHsl, isAccentAvailable } from "../lib/accent";
+  import { layout as gridLayout } from "../lib/stores/layout.svelte";
+  import { GRID_GAP, TILE_SIZE_MAX, TILE_SIZE_MIN, tileStopIndex, tileStops } from "../lib/buildRows";
   import { menu, activateMenuItem } from "../lib/stores/menu.svelte";
   import { scanner } from "../lib/stores/scanner.svelte";
   import { tooltip } from "../lib/tooltip";
@@ -272,6 +274,7 @@
     scan: "Scanning",
     artwork: "Reading artwork",
     import: "Importing",
+    peaks: "Precomputing waveforms",
   };
   // Operations that emit no progress events (discard, a folder added or removed)
   // still owe assistive tech a sentence, and "Scanning…" would misreport what
@@ -396,6 +399,10 @@
     if (!ring) return name;
     return `${name} — renders ${ring} in ${themeNow} theme`;
   }
+  function presetTip(hex: string | null, name: string): string {
+    if (!isAccentAvailable(hex, themeNow)) return `${name} — unavailable in light theme`;
+    return clampHint(hex, name);
+  }
   // The custom swatch shows the picked color (the rainbow is a permanent
   // placeholder for a choice already made); a conic corner keeps it readable
   // as the picker rather than as a twelfth preset.
@@ -406,6 +413,27 @@
     ui.accentColor === null
       ? undefined
       : accentVariants(ui.accentColor, themeNow).accent,
+  );
+
+  // Tile-size stops: only nominal sizes that change the grid's column count
+  // get a thumb position. Values between stops rewrite the setting without
+  // moving a tile, so the slider offers effective layouts, not raw pixels.
+  let tileStopList = $derived(
+    tileStops(gridLayout.gridWidth, GRID_GAP, TILE_SIZE_MIN, TILE_SIZE_MAX),
+  );
+  let tileIndex = $derived(
+    tileStopIndex(tileStopList, gridLayout.gridWidth, GRID_GAP, ui.tileSize),
+  );
+  let tileStop = $derived(tileStopList[tileIndex]);
+  let tileLabel = $derived(
+    tileStop
+      ? `${Math.round(tileStop.rendered)}px · ${tileStop.columns} across`
+      : `${ui.tileSize}px`,
+  );
+  let tileAria = $derived(
+    tileStop
+      ? `${tileStop.columns} columns, ${Math.round(tileStop.rendered)} pixel tiles`
+      : `${ui.tileSize} pixels`,
   );
 
   // Slider filled track: the native range paints one uniform track, so the
@@ -852,14 +880,21 @@
             <div class="glabel">Sizes</div>
             <label class="ctl">
               <span class="ctlhead"
-                ><span>Tile size</span><span class="val">{ui.tileSize}px</span></span
+                ><span>Tile size</span><span class="val">{tileLabel}</span></span
               >
               <input
-                type="range" min="120" max="320" step="4"
-                value={ui.tileSize}
-                aria-valuetext={`${ui.tileSize} pixels`}
-                style:background={fill(ui.tileSize, 120, 320)}
-                oninput={(e) => (ui.tileSize = +e.currentTarget.value)}
+                type="range"
+                min="0"
+                max={Math.max(0, tileStopList.length - 1)}
+                step="1"
+                value={tileIndex}
+                aria-valuetext={tileAria}
+                style:background={fill(tileIndex, 0, Math.max(1, tileStopList.length - 1))}
+                disabled={tileStopList.length < 2}
+                oninput={(e) => {
+                  const stop = tileStopList[+e.currentTarget.value];
+                  if (stop) ui.tileSize = stop.tileSize;
+                }}
               />
             </label>
             <label class="ctl">
@@ -911,6 +946,11 @@
                 checked={ui.playbarGradient}
                 label="Playbar artwork gradient"
                 onchange={(on) => (ui.playbarGradient = on)}
+              />
+              <Toggle
+                checked={ui.playbarWaveform}
+                label="Waveform progress bar"
+                onchange={(on) => (ui.playbarWaveform = on)}
               />
               <!-- Accent folded one level deep: the 12-dot grid was the highest
                    element count in the sidebar for the lowest-frequency
@@ -1242,8 +1282,9 @@
                 class:selected={ui.accentColor === p.hex}
                 style:background={p.hex ?? "linear-gradient(135deg, #a78bfa 50%, #7c58f0 50%)"}
                 style:box-shadow={swatchRing(p.hex, ui.accentColor === p.hex)}
-                use:tooltip={clampHint(p.hex, p.name)}
-                aria-label={clampHint(p.hex, p.name)}
+                use:tooltip={presetTip(p.hex, p.name)}
+                aria-label={presetTip(p.hex, p.name)}
+                disabled={!isAccentAvailable(p.hex, themeNow)}
                 onclick={() => (ui.accentColor = p.hex)}
               ></button>
             {/each}
@@ -1290,6 +1331,7 @@
     top: 0;
     left: 0;
     bottom: var(--playbar-h);
+    transition: bottom var(--playbar-dur, 200ms) var(--ease-out);
     z-index: 10;
     display: flex;
     flex-direction: column;
@@ -2251,6 +2293,15 @@
 
   .swatch:hover {
     outline-color: var(--text-dim);
+  }
+
+  .swatch:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .swatch:disabled:hover {
+    outline-color: transparent;
   }
 
   /* The outline channel is shared with hover/selected, so focus needs its own

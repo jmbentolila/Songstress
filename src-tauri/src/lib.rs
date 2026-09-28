@@ -441,6 +441,11 @@ async fn playback_eq(
 
 static SCAN_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Guards the waveform-peaks backfill on its own, so it can run WITHOUT holding
+/// SCAN_RUNNING (live watching resumes during the minutes-long decode) while
+/// still preventing two backfills from overlapping.
+static PEAKS_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Step 7d: set by the file watcher's debounce callback, consumed (and
 /// cleared) by the watch-scan loop. Events arriving DURING a scan keep it
 /// set, so one more scan runs after the in-flight one settles.
@@ -575,6 +580,53 @@ async fn scan_inner(
                 sidecar_counts.adopted_gradient,
                 sidecar_counts.adopted_colors
             );
+        }
+        // Waveform peaks: a FULL rescan precomputes the WHOLE library; an
+        // IMPORT precomputes only the files it just indexed. A plain
+        // incremental / watcher scan does NEITHER — a trivial file change must
+        // not launch a whole-library decode; those tracks fill in lazily on
+        // first play. Parallel across cores (one left free for playback/UI),
+        // and keyed on (track_id, mtime_ns), so a re-run skips what it already
+        // has and an interrupted run resumes.
+        // Skipped ENTIRELY when the waveform style is off: a line-mode user must
+        // not pay a whole-library re-read + decode for a feature they never use.
+        let waveform_on = library::settings::all(&conn)
+            .ok()
+            .and_then(|m| m.get("playbarWaveform").cloned())
+            .and_then(|v| serde_json::from_str::<bool>(&v).ok())
+            .unwrap_or(false);
+        if (full || only.is_some()) && waveform_on {
+            if PEAKS_RUNNING.swap(true, Ordering::SeqCst) {
+                eprintln!("[scan] peaks skipped (a backfill is already running)");
+            } else {
+                // Release the SCAN lock for this long phase. A watcher rescan
+                // waits out SCAN_RUNNING (the dirty flag stays set), so holding
+                // it would DEFER every live change for minutes; releasing it lets
+                // the watcher's fast incremental pass run concurrently. The
+                // PEAKS_RUNNING guard keeps two backfills from overlapping, and
+                // the connections carry a busy_timeout so the concurrent writers
+                // queue instead of colliding.
+                SCAN_RUNNING.store(false, Ordering::SeqCst);
+                let t_peaks = std::time::Instant::now();
+                let rows = match &only {
+                    Some(paths) => {
+                        let list: Vec<std::path::PathBuf> = paths.iter().cloned().collect();
+                        library::peaks::pending_paths(&conn, &list).unwrap_or_default()
+                    }
+                    None => library::peaks::pending_all(&conn).unwrap_or_default(),
+                };
+                let n = rows.len();
+                library::peaks::backfill(&conn, rows, &mut |done, total| {
+                    let _ = emitter.emit(
+                        "scan-progress",
+                        serde_json::json!({ "phase": "peaks", "done": done, "total": total }),
+                    );
+                });
+                eprintln!("[scan] peaks {n} tracks in {:?}", t_peaks.elapsed());
+                PEAKS_RUNNING.store(false, Ordering::SeqCst);
+            }
+        } else if full || only.is_some() {
+            eprintln!("[scan] peaks skipped (waveform style off)");
         }
         eprintln!(
             "[scan] files {:?} (added {} updated {} removed {} skipped {}) · artwork {:?}",
@@ -1197,6 +1249,55 @@ fn kde_window_decoration() -> WindowDecoration {
 // through (debounced). init_settings seeds first-run localStorage migration.
 
 // --- Menu model (Step 3): Rust-owned; see menu.rs ---------------------------
+
+/// Waveform peaks for a track: recomputed only when the file changed since the
+/// cached row (keyed on mtime), else decoded once with symphonia and stored.
+/// The DECODE runs OUTSIDE the DB lock — it is tens to hundreds of ms of CPU
+/// and must not stall settings reads (the scan opens its own connection for
+/// the same reason).
+#[tauri::command]
+async fn track_peaks(
+    state: tauri::State<'_, AppState>,
+    track_id: String,
+) -> Result<Vec<u8>, String> {
+    let (path, mtime_ns, duration_sec) = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT path, mtime_ns, duration_sec FROM tracks WHERE id = ?1",
+            [&track_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?
+    };
+    if let Ok(conn) = state.db.lock() {
+        if let Some(data) = library::peaks::cached(&conn, &track_id, mtime_ns) {
+            return Ok(data);
+        }
+    }
+    // Decode on a BLOCKING pool thread. A ~200ms of CPU decode in a SYNC command
+    // would run on the MAIN thread and stall every other command while it
+    // worked — including the playbar's own update, which is what made it look
+    // stuck. spawn_blocking keeps the main thread and the async runtime free.
+    let t0 = std::time::Instant::now();
+    let data = tauri::async_runtime::spawn_blocking(move || {
+        library::peaks::compute(Path::new(&path), duration_sec)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    // Logged only on a MISS (a cache hit returned above): makes prefetch vs.
+    // decode vs. cache-hit observable in the journal instead of only felt.
+    eprintln!("[peaks] decoded {track_id} in {:?}", t0.elapsed());
+    if let Ok(conn) = state.db.lock() {
+        let _ = library::peaks::store(&conn, &track_id, mtime_ns, &data);
+    }
+    Ok(data)
+}
 
 #[tauri::command]
 fn get_menu() -> Vec<menu::Menu> {
@@ -2614,6 +2715,17 @@ pub fn run() {
             std::fs::create_dir_all(&db_dir).expect("create data dir");
             let conn = library::db::open(&db_dir.join("songstress.db"))
                 .expect("open library database");
+            // Cached waveform bytes change meaning when the decode metric changes.
+            // Expire the derived rows once per behavior revision before any command
+            // can treat them as current: user audio and library rows are untouched.
+            match library::peaks::ensure_algo_version(&conn) {
+                Ok(0) => {}
+                Ok(cleared) => eprintln!(
+                    "[peaks] cleared {cleared} cached waveform(s) for algorithm v{}",
+                    library::peaks::PEAKS_ALGO_VERSION
+                ),
+                Err(e) => eprintln!("[peaks] could not verify cached waveform version: {e}"),
+            }
             // Migration v2 made staging a column instead of a folder. Rows the
             // copy era left under the cache directory are pending too, and the
             // pile has to survive the upgrade — a door that went quiet overnight
@@ -2799,6 +2911,7 @@ pub fn run() {
             set_setting,
             init_settings,
             set_album_gradient,
+            track_peaks,
             scan_library,
             get_library,
             get_music_folders,

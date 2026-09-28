@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRows, columnCount } from "./buildRows";
+import { buildRows, columnCount, tileStopIndex, tileStops } from "./buildRows";
 import type { Album } from "./types";
 
 function album(id: string): Album {
@@ -18,6 +18,22 @@ describe("columnCount", () => {
   it("clamps to at least one column", () => {
     expect(columnCount(0, 180, 20)).toBe(1);
     expect(columnCount(500, -1, 20)).toBe(1);
+  });
+});
+
+describe("tileStops", () => {
+  it("returns the first nominal size for each layout", () => {
+    const stops = tileStops(980, 20, 120, 320);
+    expect(stops.map((stop) => stop.tileSize)).toEqual([120, 123, 147, 181, 231, 314]);
+    expect(stops.map((stop) => stop.columns)).toEqual([7, 6, 5, 4, 3, 2]);
+    expect(stops[2].rendered).toBeCloseTo(180, 6);
+  });
+
+  it("maps a stored size to the stop with the same layout", () => {
+    const stops = tileStops(980, 20, 120, 320);
+    expect(tileStopIndex(stops, 980, 20, 180)).toBe(2);
+    expect(tileStopIndex(stops, 980, 20, 320)).toBe(5);
+    expect(tileStopIndex([], 980, 20, 180)).toBe(0);
   });
 });
 

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { accentVariants, hexToHsl, hslToHex, relativeLuminance, ACCENT_PRESETS } from "./accent";
+import {
+  accentVariants,
+  fallbackAccentForTheme,
+  hexToHsl,
+  hslToHex,
+  isAccentAvailable,
+  relativeLuminance,
+  ACCENT_PRESETS,
+  BLACK_PRESET_HEX,
+  WHITE_PRESET_HEX,
+} from "./accent";
 
 describe("hexToHsl / hslToHex", () => {
   it("converts stock dark accent", () => {
@@ -48,19 +58,23 @@ describe("accentVariants", () => {
     expect(l).toBeGreaterThanOrEqual(0.45);
   });
 
-  it("keeps in-range lightness unchanged", () => {
-    const v = accentVariants("#f76b15", "light"); // L≈0.53
-    expect(v.accent).toBe("#f76b15");
+  it("darkens light-theme accents by ten lightness points", () => {
+    const [h, s, l] = hexToHsl("#f76b15"); // L≈0.53
+    const v = accentVariants("#f76b15", "light");
+    expect(v.accent).toBe(hslToHex(h, s, l - 0.1));
+    const [, , darkL] = hexToHsl(accentVariants("#f76b15", "dark").accent);
+    expect(darkL).toBeCloseTo(0.7, 2);
   });
 
-  it("active wash uses the theme alpha (in-range colors pass through)", () => {
+  it("active wash uses the darkened light-theme accent", () => {
     expect(accentVariants("#a78bfa", "dark").active).toBe("rgba(167, 139, 250, 0.18)");
-    expect(accentVariants("#f76b15", "light").active).toBe("rgba(247, 107, 21, 0.14)");
+    expect(accentVariants("#f76b15", "light").active).toBe("rgba(210, 84, 7, 0.14)");
   });
 
-  it("accent text flips by luminance", () => {
-    expect(accentVariants("#ffb224", "light").accentText).toBe("#1b1b1f");
+  it("accent text follows the darkened light-theme luminance", () => {
+    expect(accentVariants("#ffb224", "light").accentText).toBe("#ffffff");
     expect(accentVariants("#3b82f6", "light").accentText).toBe("#ffffff");
+    expect(accentVariants("#ffb224", "dark").accentText).toBe("#1b1b1f");
   });
 
   it("presets carry one hex each, stock is null", () => {
@@ -72,8 +86,21 @@ describe("accentVariants", () => {
     const black = accentVariants("#000000", "dark");
     const [, , bl] = hexToHsl(black.accent);
     expect(bl).toBeGreaterThanOrEqual(0.7); // lifted to readable gray
+    const lightBlack = accentVariants("#000000", "light");
+    const [, , lbl] = hexToHsl(lightBlack.accent);
+    expect(lbl).toBeCloseTo(0.35, 2); // clamped, then darkened
     const white = accentVariants("#ffffff", "light");
     const [, , wl] = hexToHsl(white.accent);
-    expect(wl).toBeLessThanOrEqual(0.6); // sunk to readable gray
+    expect(wl).toBeCloseTo(0.5, 2); // sunk, then darkened
+  });
+
+  it("white is unavailable in light mode and falls back to black", () => {
+    expect(isAccentAvailable(WHITE_PRESET_HEX, "light")).toBe(false);
+    expect(isAccentAvailable(WHITE_PRESET_HEX, "dark")).toBe(true);
+    expect(isAccentAvailable(BLACK_PRESET_HEX, "light")).toBe(true);
+    expect(isAccentAvailable(null, "light")).toBe(true);
+    expect(fallbackAccentForTheme(WHITE_PRESET_HEX, "light")).toBe(BLACK_PRESET_HEX);
+    expect(fallbackAccentForTheme(WHITE_PRESET_HEX, "dark")).toBe(WHITE_PRESET_HEX);
+    expect(fallbackAccentForTheme(BLACK_PRESET_HEX, "light")).toBe(BLACK_PRESET_HEX);
   });
 });

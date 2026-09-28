@@ -78,11 +78,26 @@ pub const MIGRATIONS: &[&str] = &[
      ALTER TABLE tracks ADD COLUMN label TEXT;
      ALTER TABLE tracks ADD COLUMN grouping TEXT;
      ALTER TABLE tracks ADD COLUMN album_artist TEXT;",
+    // v7 — waveform peaks for the playbar's waveform progress bar. Computed
+    // LAZILY by the `track_peaks` command (symphonia decode) and cached here,
+    // keyed on (track_id, mtime_ns) so a re-encode invalidates them. A
+    // SEPARATE table on purpose: the main library dump never carries blobs,
+    // and a track's peaks are derived data, not library content.
+    "CREATE TABLE track_peaks (
+         track_id TEXT PRIMARY KEY,
+         mtime_ns INTEGER NOT NULL,
+         buckets  INTEGER NOT NULL,
+         data     BLOB NOT NULL
+     );",
 ];
 
 fn apply_migrations(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
+        // busy_timeout lets a concurrent writer (e.g. a watcher rescan running
+        // during a peaks backfill) WAIT for the write lock instead of failing
+        // instantly with SQLITE_BUSY. WAL allows one writer at a time.
         "PRAGMA journal_mode = WAL;
+         PRAGMA busy_timeout = 5000;
          CREATE TABLE IF NOT EXISTS schema_migrations (
              version    INTEGER PRIMARY KEY,
              applied_at TEXT NOT NULL DEFAULT (datetime('now'))

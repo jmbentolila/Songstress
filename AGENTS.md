@@ -39,7 +39,9 @@ fallback, so no picker package is required (verified 2026-09-26: `rpm -qpR` on
 Songstress-0.13.4-1 requires mpv + libwebkit2gtk-4.1 + libgtk-3 and nothing
 else; `zenity` appears nowhere in the source). GNOME-only box right now:
 the kdialog branch is verified by argv-identity (byte-identical args), never by
-a live pick — say so, don't claim it.
+a live pick — say so, don't claim it. Waveform peaks decode with **symphonia**
+(pure Rust, statically linked), which adds NO system package — so
+`depends = ["mpv"]` still holds; do not reach for ffmpeg/gstreamer for decode.
 
 ## Commands
 
@@ -288,6 +290,24 @@ public/covers/            album art for the fake library (real folder.jpg files)
   measured fine, so it is per-element, no rule of thumb). Dialect that never
   lies on this engine: prefixed `user-select`, plain `transform`. Audit with
   `grep 'user-select' src/ ; grep -rnE '^\s*(translate|rotate|scale):' src/`.
+  **`transform` on a RANGE INPUT is a third bite (2026-09-28):** the straight-line
+  seek had `top: 50%` + `translateY(-50%)`; getComputedStyle reported the matrix
+  while the box ignored it, so the line sat 2px low. Center such a box with
+  `top: 0; bottom: 0; margin: auto 0`, never a transform.
+- **Animating an INHERITED registered custom property is a document-wide tax
+  (2026-09-28).** The playbar-style toggle eased `--playbar-h` (a `@property` of
+  syntax `<length>`) and ran at **~36ms/frame (~27fps)** because every frame
+  invalidated computed styles across the whole tree; pinning individual layers
+  did NOT help — the cost was the property itself. Fix: change the token
+  INSTANTLY and let each consumer transition its OWN concrete property
+  (`height` / `bottom`) on a shared duration token (`--playbar-dur`, 0ms under
+  reduced motion) — same visual, ~50–60fps. Reach for `@property` animation only
+  when nothing inherits the property.
+- **A transparent absolutely-positioned layer still HIT-TESTS (2026-09-28).** The
+  waveform and the straight line are stacked variants; the inactive `.wave` at
+  `opacity: 0` swallowed every pointer event, so the line could not be dragged or
+  clicked. The inactive variant needs `pointer-events: none` — `opacity: 0` is
+  not `display: none`.
 - **WebKitGTK backdrop-filter does NOT blur in-window content** (verified
   2026-08-27, 2.52/DMABUF): a 32px-bold probe element under the playbar
   stayed pixel-sharp through `blur(80px)` — radius changes are invisible.

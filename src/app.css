@@ -2,7 +2,13 @@
   --tile-size: 180px;
   --sidebar-row-size: 36px;
   --sidebar-width: 260px;
-  --playbar-h: 84px;
+  --playbar-h: 84px; /* the straight-line default; the waveform overrides it */
+  /* Playbar shelf + its followers ease on the progress-style toggle. The
+   * duration lives HERE, but each consumer transitions its OWN concrete
+   * property (height / bottom) — animating the inherited --playbar-h itself
+   * forced a document-wide style recalc every frame (~36ms/frame, ~27fps),
+   * while concrete transitions run at 60fps. Reduced motion zeroes it. */
+  --playbar-dur: 260ms;
   --gap: 20px;
   /* The window rung exists so the modal scrim can be clipped to it: `.app`
      clips its own background to this radius, but a position:fixed descendant
@@ -66,6 +72,21 @@ html[data-theme="dark"] {
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
 }
 
+/* The waveform progress bar needs a taller shelf than the straight line: the
+ * line keeps the original 84px, the waveform gets the prototype's 101.4px
+ * (84 × 1.15 × 1.05). Same data-attribute pattern as html[data-de]: App.svelte
+ * writes it from ui.playbarWaveform, and every consumer of --playbar-h (grid
+ * clip, sidebar, edge shadows, the playbar itself) follows. */
+html[data-playbar="wave"] {
+  --playbar-h: 101.4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --playbar-dur: 0ms;
+  }
+}
+
 html[data-theme="light"] {
   color-scheme: light;
   --text: #232329;
@@ -78,8 +99,8 @@ html[data-theme="light"] {
   --hover: rgba(30, 30, 40, 0.06);
   --sk-base: rgba(30, 30, 40, 0.05);
   --sk-hi: rgba(30, 30, 40, 0.11);
-  --active: rgba(124, 88, 240, 0.14);
-  --accent: #7c58f0;
+  --active: rgba(71, 21, 234, 0.14);
+  --accent: #4715ea;
   --caution: #b26a12;
   --caution-line: rgba(178, 106, 18, 0.55);
   --caution-wash: rgba(178, 106, 18, 0.12);
@@ -280,8 +301,8 @@ html[data-de="gnome"][data-theme="dark"] {
 }
 
 html[data-de="gnome"][data-theme="light"] {
-  --accent: #1c71d8;
-  --active: rgba(28, 113, 216, 0.14);
+  --accent: #1659ab;
+  --active: rgba(22, 89, 171, 0.14);
 }
 
 * {

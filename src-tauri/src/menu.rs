@@ -69,6 +69,10 @@ pub struct MenuState {
     pub theme: String,
     #[serde(default)]
     pub playbar_gradient: bool,
+    /// Playbar progress style: false = the straight line (default), true = the
+    /// waveform variant. Chosen in Appearance; also drives --playbar-h.
+    #[serde(default)]
+    pub playbar_waveform: bool,
     /// Expanded-panel artwork gradient (Step 9b) — on is the shipped look.
     #[serde(default = "default_on")]
     pub album_gradient: bool,
@@ -107,6 +111,7 @@ impl Default for MenuState {
             staged_count: 0,
             theme: default_theme(),
             playbar_gradient: false,
+            playbar_waveform: false,
             album_gradient: true,
             shuffle: "off".into(),
             repeat: "off".into(),
@@ -299,6 +304,12 @@ pub fn build() -> Vec<Menu> {
                     Some(s.playbar_gradient),
                 ),
                 item(
+                    "appearance.playbar-waveform",
+                    "Waveform progress bar",
+                    true,
+                    Some(s.playbar_waveform),
+                ),
+                item(
                     "appearance.album-gradient",
                     "Album artwork gradient",
                     true,
@@ -353,6 +364,14 @@ pub async fn activate(id: &str, engine: &crate::mpv::Mpv) -> bool {
 mod tests {
     use super::*;
 
+    // The menu model is GLOBAL STATE (`menu::STATE`) and cargo runs tests in
+    // PARALLEL, so without this lock one test's `set_state` leaks into another's
+    // `build()` and the assertions flake (seen: `repeat: track` bleeding across).
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn guard() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn find<'a>(menus: &'a [Menu], menu_id: &str, item_id: &str) -> &'a MenuItem {
         menus
             .iter()
@@ -377,6 +396,7 @@ mod tests {
 
     #[test]
     fn play_pause_label_follows_state() {
+        let _g = guard();
         set_state(MenuState::default());
         let menus = build();
         let play = find(&menus, "playback", "playback.play-pause");
@@ -396,6 +416,7 @@ mod tests {
 
     #[test]
     fn library_items_gate_on_scan_and_staging() {
+        let _g = guard();
         set_state(MenuState {
             scanning: true,
             staged_count: 2,
@@ -429,6 +450,7 @@ mod tests {
 
     #[test]
     fn theme_is_three_radios_following_the_mode_not_the_resolution() {
+        let _g = guard();
         // Default is `system` (the app's default mode) — the old bool could
         // not express this state at all.
         let menus = build();
@@ -460,9 +482,10 @@ mod tests {
 
     #[test]
     fn sections_mirror_the_sidebar_panes() {
+        let _g = guard();
         // Playback: transport | modes | equalizer | reset → 3 breaks.
         // Library: import | scan | storage → 2 breaks.
-        // Appearance: theme | playbar+album+accent | more+reset → 2 breaks.
+        // Appearance: theme | playbar+waveform+album+accent | more+reset → 2 breaks.
         set_state(MenuState::default());
         let menus = build();
         assert_eq!(n_seps(&menus, "playback"), 3);
@@ -485,6 +508,7 @@ mod tests {
 
     #[test]
     fn playbar_gradient_toggle_follows_state() {
+        let _g = guard();
         set_state(MenuState {
             playbar_gradient: true,
             ..MenuState::default()
@@ -497,7 +521,29 @@ mod tests {
     }
 
     #[test]
+    fn playbar_waveform_toggle_follows_state() {
+        let _g = guard();
+        // The straight line is the default; the row reports the chosen style.
+        set_state(MenuState::default());
+        let menus = build();
+        assert_eq!(
+            find(&menus, "appearance", "appearance.playbar-waveform").checked,
+            Some(false)
+        );
+        set_state(MenuState {
+            playbar_waveform: true,
+            ..MenuState::default()
+        });
+        let menus = build();
+        assert_eq!(
+            find(&menus, "appearance", "appearance.playbar-waveform").checked,
+            Some(true)
+        );
+    }
+
+    #[test]
     fn album_gradient_toggle_follows_state() {
+        let _g = guard();
         // On is the default (the shipped look); the toggle reports state.
         let menus = build();
         assert_eq!(
@@ -517,6 +563,7 @@ mod tests {
 
     #[test]
     fn eq_items_follow_state() {
+        let _g = guard();
         set_state(MenuState::default());
         let menus = build();
         assert_eq!(find(&menus, "playback", "playback.eq").label, "Equalizer: Off");
@@ -543,6 +590,7 @@ mod tests {
 
     #[test]
     fn transport_rows_carry_glyphs_that_track_state() {
+        let _g = guard();
         // The Global Menu's transport wears the desktop's own media icons
         // (owner request 2026-09-04) — and they must not lie about what a
         // click does: Play shows ▶, Pause shows ⏸, repeat/shuffle glyphs

@@ -25,7 +25,7 @@ export const scanner = $state({
 });
 
 type Kind = "scan" | "full" | "import" | "save" | "discard" | "folder";
-type Phase = "scan" | "artwork" | "import";
+type Phase = "scan" | "artwork" | "import" | "peaks";
 
 /** A determinate indicator that vanishes at 85% reads as an interruption: the
  * backend's last progress event is usually short of the end, so unmounting the
@@ -72,7 +72,13 @@ export function initScanner() {
   void listen("scan-progress", (e) => {
     const p = e.payload as { phase?: string; done: number; total: number };
     scanner.phase =
-      p.phase === "artwork" ? "artwork" : p.phase === "import" ? "import" : "scan";
+      p.phase === "artwork"
+        ? "artwork"
+        : p.phase === "import"
+          ? "import"
+          : p.phase === "peaks"
+            ? "peaks"
+            : "scan";
     scanner.done = p.done;
     scanner.total = p.total;
   });

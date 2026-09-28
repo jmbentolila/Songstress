@@ -88,6 +88,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Playbar survives a retag that moves the playing row to another album (library-wide track resolution + re-anchor) | ✅ 2026-09-26 · **0.14.0** |
 | Import lands on the first album of the batch just imported, not the first pending one | ✅ 2026-09-26 · **0.14.0** |
 | Artwork deletion: ✕ on every tile on hover, in-modal confirmation dropping from the owning surface, immediate delete, most-files cover fallback, spinner while it runs, unreadable files skipped and named | ✅ 2026-09-26 · **0.14.0** (the artwork flow also banks "The In-Modal Confirmation Rule" in DESIGN.md) |
+| Playbar progress style: straight line (default) or waveform; Appearance + Global Menu toggle, persisted; peaks decoded with symphonia and cached in SQLite (migration v7) | ✅ 2026-09-28 · **0.15.0** (uncommitted at time of writing) |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5544,3 +5545,118 @@ Four refinements landed together after the first end-to-end use of the delete:
   Confirmation Rule") and AGENTS.md.
 
 Gates: cargo 135, vitest 133, svelte-check 0, build ok.
+
+---
+
+## Playbar progress style: straight line or waveform (2026-09-28, owner-driven)
+
+An Appearance toggle — "Waveform progress bar" — chooses the playbar's seek
+control: the shipped **straight line** (native range, gradient fill, accent
+thumb) or a **waveform** of 80 mirrored pill bars, played portion in accent and
+the rest a faint wash. Mirrored in the Global Menu (`appearance.playbar-waveform`),
+persisted as `playbarWaveform`, reset by "Reset appearance". Default = the line.
+
+- **Height follows the style.** Line mode keeps the original 84px shelf; the
+  waveform needs the taller 101.4px (84 × 1.15 × 1.05, the owner's two bumps).
+  `html[data-playbar]` carries the choice; every consumer of `--playbar-h` follows.
+- **Quiet state = the waveform at minimum height**, not a separate dotted line:
+  `WAVE_FLOOR` (0.05) is a small NON-zero amplitude, so the bars rest as a beaded
+  line and expand straight out of it. (First attempt was a separate dotted line
+  built from 80 degenerate round-cap segments — their caps merged into a
+  bead-line; replaced by an HTML dotted rule, then dropped entirely for this
+  unified approach. One mechanism, one animation.)
+- **Bars animate.** A track change MORPHS from the heights on screen into the new
+  silhouette; an entrance rises from the floor and an exit collapses back at the
+  SAME 460ms / 0.35 stagger (the exit ran at 260ms and read as a snap). The tween
+  reads a PLAIN mirror of the animated array, never the `$state`, or the effect
+  re-enters every frame.
+- **Both variants stay mounted and stacked** (absolute), cross-faded by an `.on`
+  class, so the toggle never squeezes the lane; the inactive one is `disabled`
+  AND `pointer-events: none` (a transparent absolute layer still hit-tests —
+  without that the line could not be dragged).
+- **Bars are stroked lines with round caps + `vector-effect: non-scaling-stroke`**,
+  so the pill ends stay circular under the non-uniform viewBox scale.
+
+### Peaks are REAL: symphonia decode + a SQLite cache (migration v7)
+
+`track_peaks(trackId)` looks the track up, returns the cached `track_peaks.data`
+when its `mtime_ns` still matches, else decodes with **symphonia** (pure Rust — the
+RPM stays `depends = ["mpv"]`), reduces to 256 mono values blending each
+bucket's peak with its RMS (`sqrt(peak · rms)`), normalizes them so the loudest
+blend is 255, and caches them. **The decode runs OUTSIDE the DB
+lock** (it is ~200ms of CPU and must not stall settings reads). Measured on a real
+library track: **203ms decode, 1ms cached**. The frontend (`lib/peaks.ts`) caches
+per session and resamples 256 → 80 bars taking the MAX per group, so a transient
+survives. Formats: mp3/flac/m4a(AAC·ALAC)/ogg(Vorbis)/wav AND **aiff** (the
+`symphonia` `aiff` feature — it maps to the already-compiled
+`symphonia-format-riff`, and `sample/untitled-song.aiff` pins it in a test).
+The ONE gap is **Opus** (`.opus`, and Opus-in-`.ogg`): symphonia 0.5 ships no
+Opus decoder at all, so those degrade to the
+quiet floor line rather than fabricating data.
+
+### Prefetch + full-rescan backfill (2026-09-28)
+
+The first play of an uncached track waited ~200ms on the decode, so the playbar
+looked slow to update. Three additions:
+- **`track_peaks` is now `async` + `spawn_blocking`.** As a SYNC command it ran on
+  the MAIN thread, so each decode stalled EVERY other command — the playbar's own
+  updates included. Off-thread now.
+- **Album prefetch** (`lib/peaks.ts`): the PlayBar warms the rest of the current
+  album's peaks, next tracks first, ONE AT A TIME (so a burst never competes with
+  playback), so an album is instant after its first track.
+- **Full-rescan backfill** (`peaks::backfill`): a FULL rescan precomputes peaks
+  for the WHOLE library; an IMPORT precomputes just the files it indexed; a
+  watcher/incremental scan does NEITHER (a trivial change must not launch a
+  whole-library decode — those fill in lazily on play). Parallel with headroom
+  for playback/UI: **`cores−1` above 10 cores, else HALF** (16 → 15, 8 → 4, 4 →
+  2). Chunked at 64 so it persists incrementally and resumes if interrupted.
+  Progress rides the scan phase as "Precomputing waveforms".
+- **It does NOT hold `SCAN_RUNNING`.** The scan lock is released before the peaks
+  phase (guarded instead by its own `PEAKS_RUNNING`), so a watcher rescan — which
+  WAITS OUT `SCAN_RUNNING` — is not deferred for minutes; it runs its fast
+  incremental pass concurrently. Connections now carry `PRAGMA busy_timeout` so
+  the concurrent writers queue rather than colliding with SQLITE_BUSY.
+- **Gated on the `playbarWaveform` setting** — a line-mode user never pays a
+  library re-read for a feature they do not use (`[scan] peaks skipped (waveform
+  style off)`). The frontend peaks cache is capped at 256 tracks; the SQLite
+  table is the real store, so a re-fetch is ~1ms. Display aggregation changed
+  from a per-group MAXIMUM to a group RMS without recomputing the backend
+  cache: the same bytes now show more of the quiet structure instead of letting
+  every loud sub-bucket fill the cell.
+
+### Scrub-affordance trial — reverted at owner request
+
+A neutral waveform preview cursor plus provisional elapsed-time readout was
+implemented, evaluated, and removed. The shipped behavior keeps the native
+range control and uses the accent boundary only for committed playback.
+
+The cache is the SQLite `track_peaks` table, so it is **persistent** across
+sessions — the table IS the precache; nothing is recomputed unless a file's mtime
+changes. Stored rows also carry a `peaksAlgo` decode-metric revision: app startup
+deletes only the derived rows on a metric mismatch, then backfills/prefetches
+them, so an old peak-only row can never pose as the current peak–RMS blend.
+
+### Light-mode accents: darker + no white (2026-09-28, owner-driven)
+
+Light-mode contrast on the waveform traced to two accent problems: the
+unplayed wash compounds to ~11% ink, and the played side inherits whatever
+accent is chosen — a stored White clamped to mid gray (~1.3:1 on the
+playbar). Two changes, both light-mode-only:
+- **Every light accent darkens 10 HSL lightness points** after the theme
+  clamp (`accentVariants` + the stock `--accent` tokens, GNOME fallback
+  included). Stock light purple moves `#7c58f0` → `#4715ea`; `--active`
+  follows the darkened color. Dark theme untouched.
+- **White is disabled in light mode.** Its swatch renders dimmed with an
+  "unavailable in light theme" label, and a stored white selection entering
+  light mode falls back to Black (store-level, so it persists).
+
+### Tile-size slider snaps to effective layouts (2026-09-28, owner-driven)
+
+The slider used to walk nominal pixels 120–320 while the grid only reflowed
+at column-count thresholds. It now offers one detent per layout that the
+measured grid width actually produces (`tileStops`/`tileStopIndex` in
+`buildRows.ts`, width published by AlbumGrid through a session-only layout
+store). The readout names the rendered result (`212px · 5 across`); moving
+the thumb always moves tiles. Keyboard arrows step one layout at a time.
+
+Gates: cargo 142, vitest 140, svelte-check 0, build ok.

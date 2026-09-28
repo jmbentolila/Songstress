@@ -1,6 +1,6 @@
 [package]
 name = "songstress"
-version = "0.14.0"
+version = "0.15.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -51,7 +51,12 @@ blake3 = "1"
 walkdir = "2"
 notify = "7"
 lofty = "0.22"
+# Pure-Rust audio decode for waveform peaks — keeps the RPM's system
+# dependency list at `mpv` only (symphonia is statically linked).
+symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "alac", "aiff"] }
 rayon = "1"
+# setpriority for the peaks backfill threads (run BELOW the UI/mpv).
+libc = "0.2"
 tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "time", "process"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 futures-util = "0.3"

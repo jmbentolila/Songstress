@@ -5,9 +5,66 @@ export type GridRow =
   | { kind: "expanded"; album: Album }
   | { kind: "ghost"; id: string };
 
+export const GRID_GAP = 20;
+export const TILE_SIZE_MIN = 120;
+export const TILE_SIZE_MAX = 320;
+
 export function columnCount(width: number, tileSize: number, gap: number): number {
   if (width <= 0 || tileSize <= 0) return 1;
   return Math.max(1, Math.floor((width + gap) / (tileSize + gap)));
+}
+
+export interface TileStop {
+  /** Nominal tile-size value that first produces this layout. */
+  tileSize: number;
+  columns: number;
+  /** Rendered tile width once the columns stretch across `width`. */
+  rendered: number;
+}
+
+/**
+ * Every nominal tile size that actually changes the grid layout: the minimum
+ * plus the first value yielding each new column count. Values between stops
+ * only rewrite the setting without moving a single tile.
+ */
+export function tileStops(
+  width: number,
+  gap: number,
+  min = TILE_SIZE_MIN,
+  max = TILE_SIZE_MAX,
+): TileStop[] {
+  if (!(width > 0) || !(gap >= 0) || !(max >= min)) return [];
+  const stops: TileStop[] = [];
+  for (let tileSize = Math.ceil(min); tileSize <= max; tileSize++) {
+    const columns = columnCount(width, tileSize, gap);
+    if (stops.length === 0 || stops[stops.length - 1].columns !== columns) {
+      stops.push({
+        tileSize,
+        columns,
+        rendered: (width - (columns - 1) * gap) / columns,
+      });
+    }
+  }
+  return stops;
+}
+
+/** Index of the stop producing the same layout as `tileSize`. Falls back to
+ * the nearest nominal stop when the width changed out from under the value. */
+export function tileStopIndex(stops: TileStop[], width: number, gap: number, tileSize: number): number {
+  if (stops.length === 0) return 0;
+  const columns = columnCount(width, tileSize, gap);
+  const exact = stops.findIndex((stop) => stop.columns === columns);
+  if (exact >= 0) return exact;
+  let best = 0;
+  let bestDist = Math.abs(stops[0].tileSize - tileSize);
+  for (let i = 1; i < stops.length; i++) {
+    const dist = Math.abs(stops[i].tileSize - tileSize);
+    if (dist < bestDist) {
+      best = i;
+      bestDist = dist;
+    }
+  }
+  return best;
 }
 
 /**

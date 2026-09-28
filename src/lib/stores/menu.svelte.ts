@@ -52,6 +52,7 @@ function handleAction(id: string) {
     "appearance.theme-light": () => { ui.theme = "light"; },
     "appearance.theme-dark": () => { ui.theme = "dark"; },
     "appearance.playbar-gradient": () => { ui.playbarGradient = !ui.playbarGradient; },
+    "appearance.playbar-waveform": () => { ui.playbarWaveform = !ui.playbarWaveform; },
     "appearance.album-gradient": () => { ui.albumGradient = !ui.albumGradient; },
     // Rows the menu cannot render: open the sidebar stack AT the pane (the
     // size sliders) or the pane's sub layer (the accent picker).
@@ -134,6 +135,7 @@ type MenuState = {
    *  reported from the menu (the old bool flattened it away). */
   theme: string;
   playbarGradient: boolean;
+  playbarWaveform: boolean;
   albumGradient: boolean;
   shuffle: string;
   repeat: string;
@@ -155,6 +157,7 @@ export function pushMenuState() {
     stagedCount: library.albums.reduce((n, a) => n + (a.staged ? 1 : 0), 0),
     theme: ui.theme,
     playbarGradient: ui.playbarGradient,
+    playbarWaveform: ui.playbarWaveform,
     albumGradient: ui.albumGradient,
   };
   void invoke("set_menu_state", { state }).catch(() => {});

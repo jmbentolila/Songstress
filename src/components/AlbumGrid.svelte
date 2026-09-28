@@ -2,12 +2,13 @@
   import { tick } from "svelte";
   import { fade } from "svelte/transition";
   import { ui } from "../lib/stores/ui.svelte";
+  import { layout } from "../lib/stores/layout.svelte";
   import { library } from "../lib/stores/library.svelte";
   import { currentTrack } from "../lib/stores/playback.svelte";
   import { tooltip } from "../lib/tooltip";
   import { extractArtColors } from "../lib/artColors";
   import { artSrc } from "../lib/artSrc";
-  import { buildRows, columnCount } from "../lib/buildRows";
+  import { buildRows, columnCount, GRID_GAP } from "../lib/buildRows";
   import { skeletonRows, libraryLoading } from "../lib/loadingState";
   import { scanner } from "../lib/stores/scanner.svelte";
   import { albumTitleMatches, albumTrackMatches, fold } from "../lib/search";
@@ -18,10 +19,16 @@
   import GridSkeleton from "./GridSkeleton.svelte";
   import StencilMark from "./StencilMark.svelte";
 
-  const GAP = 20;
+  const GAP = GRID_GAP;
 
   let gridWidth = $state(0);
   let stageHeight = $state(0);
+
+  // Publish the measured grid width for the Appearance tile-size slider, so
+  // its stops are the nominal sizes that actually change this layout.
+  $effect(() => {
+    layout.gridWidth = gridWidth;
+  });
 
   /** Nothing to show + something in flight → the placeholder owns the stage.
    * The facts are spelled out (rather than read from the stores inside a helper)
@@ -683,6 +690,9 @@
        content on this WebKitGTK, and a per-row `filter: blur()` smears
        the whole row — so don't show the content behind the bar at all. */
     bottom: var(--playbar-h);
+    /* Follows the playbar shelf on the progress-style toggle (concrete
+       transition; see --playbar-dur in app.css). */
+    transition: bottom var(--playbar-dur, 200ms) var(--ease-out);
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: none;

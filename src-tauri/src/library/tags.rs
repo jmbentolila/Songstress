@@ -1880,7 +1880,7 @@ mod tests {
 
         // Two files start disagreeing; the third stays silent. Absence is
         // not a contender — exactly two values must show, count 1 each.
-        let mut tag_file = |p: &Path, g: &str| {
+        let tag_file = |p: &Path, g: &str| {
             let mut tagged = lofty::read_from_path(p).unwrap();
             tagged.primary_tag_mut().unwrap().set_genre(g.to_string());
             tagged.save_to_path(p, Default::default()).unwrap();

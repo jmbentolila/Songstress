@@ -13,6 +13,8 @@
   } from "../lib/stores/playback.svelte";
   import { library } from "../lib/stores/library.svelte";
   import { artSrc } from "../lib/artSrc";
+  import { peaksPath, resample, shapeAmplitude, WAVE_BARS, WAVE_FLOOR } from "../lib/waveform";
+  import { prefetchPeaks, trackPeaks } from "../lib/peaks";
   import { cubicOut } from "svelte/easing";
 
   /** The popovers unfold UP from their anchor button and fold back down
@@ -94,6 +96,119 @@
       ? Math.min(100, Math.max(0, (playback.positionSec / playback.durationSec) * 100))
       : 0,
   );
+
+  // Waveform peaks come from the backend (`track_peaks`: symphonia decode +
+  // SQLite cache), resampled to the lane's bar count. TWO effects: one FETCHES
+  // for the current track, one TWEENS the rendered bars toward whatever
+  // `waveTarget` currently holds.
+  //
+  // The bars ANIMATE. A track change is a MORPH from the heights currently on
+  // screen straight into the new silhouette — never a dip to zero between.
+  // Only two edges animate from the quiet baseline: an entrance (no track ->
+  // track) and an exit (track -> no track). One tween shape covers all three,
+  // because `start` IS the current screen state: quiet on an entrance, the old
+  // peaks on a switch, the live peaks on an exit. The tween reads the PLAIN
+  // `animNow` mirror, never the $state, so its effect depends on `waveTarget`
+  // ALONE — reading $state inside a rAF loop would re-enter it every frame.
+  let trackId = $derived(track?.id ?? "");
+
+  const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const idlePeaks = () => new Array<number>(WAVE_BARS).fill(WAVE_FLOOR);
+  let animNow: number[] = idlePeaks();
+  let animPeaks = $state<number[]>(animNow);
+  // The resolved silhouette for the CURRENT track (floor until peaks arrive).
+  let waveTarget = $state<number[]>(idlePeaks());
+  let waveRaf = 0;
+
+  // Fetch on track change — only while the waveform style is on, so a
+  // line-mode user never pays the decode. A cancelled fetch (fast track
+  // switch) is dropped rather than racing the newer one. Off = keep the target
+  // at the floor, so toggling the style on rises cleanly once peaks arrive.
+  $effect(() => {
+    const id = trackId;
+    if (!ui.playbarWaveform) {
+      waveTarget = idlePeaks();
+      return;
+    }
+    if (!id) {
+      waveTarget = idlePeaks();
+      return;
+    }
+    let cancelled = false;
+    void trackPeaks(id).then((raw) => {
+      if (cancelled) return;
+      // No peaks (unsupported codec) degrades to the quiet floor line. The
+      // resample averages each group's energy; shapeAmplitude adds headroom +
+      // gamma so a loud master reads as a waveform rather than a rectangle.
+      waveTarget = raw.length ? resample(raw, WAVE_BARS).map(shapeAmplitude) : idlePeaks();
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // Warm the peaks for the rest of the current ALBUM, so each next track's
+  // waveform is ready before it plays — otherwise the first play of every
+  // track waits ~200ms on the decode before the bars can start their morph.
+  // Next tracks go first, then the ones already behind us. Line mode decodes
+  // nothing.
+  $effect(() => {
+    const id = trackId;
+    const albumId = track?.albumId;
+    if (!ui.playbarWaveform || !id || !albumId) return;
+    const ids = library.tracksOf(albumId).map((t) => t.id);
+    const i = ids.indexOf(id);
+    // Only the NEXT few, not the whole album: a full-album burst decodes for
+    // tens of seconds in an opt-0 dev build and competes with the UI. Three
+    // ahead keeps the chain warm (each track warms the one after it).
+    prefetchPeaks(i >= 0 ? ids.slice(i + 1, i + 4) : []);
+  });
+
+  // Tween the rendered bars toward `waveTarget`.
+  $effect(() => {
+    const target = waveTarget;
+    const start = animNow.slice();
+    cancelAnimationFrame(waveRaf);
+    // Line mode renders no lane, so park the bars at the quiet floor — a
+    // toggle back to waveform then RISES from there. Reduced motion lands on
+    // the target instantly. Reading ui.playbarWaveform re-runs this on toggle.
+    if (!ui.playbarWaveform) {
+      animNow = idlePeaks();
+      animPeaks = idlePeaks();
+      return;
+    }
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      animNow = target;
+      animPeaks = target;
+      return;
+    }
+    // Rise and fall share ONE timing so the collapse is the mirror of the
+    // entrance — the exit used to run at 260ms and read as a snap next to the
+    // 460ms rise (owner note). Same duration, same per-bar stagger, same ease.
+    const DUR = 460;
+    const STAGGER = 0.35; // last bar starts up to 0.35 late
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const t = clamp01((now - t0) / DUR);
+      const vals = target.map((v, i) => {
+        const d = (i / (target.length - 1)) * STAGGER;
+        const lt = cubicOut(clamp01((t - d) / (1 - d)));
+        return start[i] + (v - start[i]) * lt;
+      });
+      animNow = vals;
+      animPeaks = vals;
+      if (t < 1) waveRaf = requestAnimationFrame(tick);
+      else {
+        animNow = target;
+        animPeaks = target;
+      }
+    };
+    waveRaf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(waveRaf);
+  });
+
+  let wavePath = $derived(peaksPath(animPeaks));
+  let waveClipW = $derived((seekPct / 100) * animPeaks.length);
 
   // Marquee key: anything that changes what the two lines SAY restarts the
   // overflow check (track switch, rescan rename, Full-Rescan backfill).
@@ -355,18 +470,63 @@
     </div>
     <div class="seek">
       <span class="time">{fmt(playback.positionSec)}</span>
-      <input
-        type="range"
-        min="0"
-        max={Math.max(1, playback.durationSec)}
-        step="0.5"
-        value={playback.positionSec}
-        disabled={!track}
-        oninput={(e) => seekTo(+e.currentTarget.value)}
-        style:background={`linear-gradient(to right, var(--accent) ${seekPct}%, var(--hover) ${seekPct}%)`}
-        aria-label="Seek"
-        use:tooltip={"Seek — ←/→ = ±5s"}
-      />
+      <div class="seek-lane">
+        <!-- The two variants stay MOUNTED and STACKED (absolute) so the
+             toggle cross-fades them in place — an #if/#else swap would put
+             both in the flex row and squeeze the lane mid-transition. The
+             inactive one is disabled: no tab stop, no a11y entry, no pointer
+             events; it also sits at opacity 0. -->
+        <!-- The straight-line seek (the shipped default): a native range
+             whose fill gradient IS the track — with appearance:none the
+             gradient spans the whole box rather than the thumb's inset
+             travel, so 100% means filled to the edge. -->
+        <input
+          class="seek-line"
+          class:on={!ui.playbarWaveform}
+          type="range"
+          min="0"
+          max={Math.max(1, playback.durationSec)}
+          step="0.5"
+          value={playback.positionSec}
+          disabled={ui.playbarWaveform || !track}
+          oninput={(e) => seekTo(+e.currentTarget.value)}
+          style:background={`linear-gradient(to right, var(--accent) ${seekPct}%, var(--hover) ${seekPct}%)`}
+          aria-label="Seek"
+          use:tooltip={"Seek — ←/→ = ±5s"}
+        />
+        <div class="wave" class:on={ui.playbarWaveform}>
+          <div class="wave-visual">
+            <svg
+              class="wave-svg"
+              viewBox={`0 0 ${WAVE_BARS} 100`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <defs>
+                <clipPath id="pb-wave-clip">
+                  <rect x="0" y="0" width={waveClipW} height="100" />
+                </clipPath>
+              </defs>
+              <path class="wave-base" d={wavePath} />
+              <path class="wave-play" d={wavePath} clip-path="url(#pb-wave-clip)" />
+            </svg>
+          </div>
+          <!-- The native range stays the CONTROL (keyboard, ARIA, drag, the
+               ←/→ hook, tooltip); it is transparent over the bars. -->
+          <input
+            class="wave-input"
+            type="range"
+            min="0"
+            max={Math.max(1, playback.durationSec)}
+            step="0.5"
+            value={playback.positionSec}
+            disabled={!ui.playbarWaveform || !track}
+            oninput={(e) => seekTo(+e.currentTarget.value)}
+            aria-label="Seek"
+            use:tooltip={"Seek — ←/→ = ±5s"}
+          />
+        </div>
+      </div>
       <span class="time">{fmt(playback.durationSec)}</span>
     </div>
   </div>
@@ -654,6 +814,10 @@
     align-items: center;
     gap: 20px;
     height: var(--playbar-h);
+    /* Concrete property transition — see --playbar-dur in app.css. */
+    transition: height var(--playbar-dur, 200ms) var(--ease-out);
+    /* Waveform lane height, capped so it always fits below the transport. */
+    --wave-h: min(32px, calc(var(--playbar-h) - 58px));
     flex: none;
     padding: 0 18px;
     border-top: 1px solid var(--border);
@@ -853,37 +1017,169 @@
     max-width: 520px;
   }
 
-  /* Glass slider, same treatment as the volume slider (which had this exact
-   * bug: the native accent-color range insets the thumb's travel but not its
-   * track, so near 100% a sliver of unfilled bar stays visible past the
-   * thumb. With appearance:none the fill gradient IS the whole box). */
-  .seek input {
+  /* The shared lane for both progress variants. Height is capped against the
+   * playbar so the bars ALWAYS clear the transport row: 58px = transport (30)
+   * + column gap (6) + breathing. It rides --playbar-h, so the lane grows as
+   * the shelf does. */
+  .seek-lane {
+    position: relative;
     flex: 1;
+    min-width: 0;
+    height: var(--wave-h);
+    transition: height var(--playbar-dur, 200ms) var(--ease-out);
+  }
+
+  /* Both variants are absolute + stacked and cross-faded by .on. The .wave
+   * keeps its own 85% lane opacity inside this 0..1 wrapper. */
+  .wave {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    /* The INACTIVE variant must not swallow the pointer: a transparent
+     * absolutely-positioned layer still hit-tests, which is why the straight
+     * line underneath could not be dragged or clicked. */
+    pointer-events: none;
+    transition: opacity 200ms var(--ease-out);
+  }
+
+  .wave.on {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .wave-visual {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    /* The lane is present whenever the waveform style is on — bars rest at the
+     * floor when nothing plays, under the 85% ceiling the owner asked to try. */
+    opacity: 0.85;
+  }
+
+  .wave-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Bars are stroked LINES, not filled rects: a round cap plus
+   * non-scaling-stroke gives a true circular pill end under the non-uniform
+   * viewBox scale. A bar at the floor is a zero-length segment — a round dot. */
+  .wave-base,
+  .wave-play {
+    fill: none;
+    stroke-linecap: round;
+    stroke-width: 3;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .wave-base {
+    /* Effective alpha compounds: 0.64 (--text-dim) × 0.2 (here) × 0.85 (lane). */
+    stroke: var(--text-dim);
+    opacity: 0.2;
+  }
+
+  .wave-play {
+    stroke: var(--accent);
+  }
+
+  /* The native range is transparent and sits ON TOP: the accent/unaccent
+   * boundary is the playhead, the thumb is invisible. Same a11y and drag
+   * behaviour as before, none of the native chrome. */
+  .wave-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
     -webkit-appearance: none;
     appearance: none;
-    height: 4px;
-    border-radius: 999px;
-    background: var(--hover);
+    background: transparent;
     cursor: pointer;
   }
 
-  .seek input::-webkit-slider-thumb {
+  .wave-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 2px;
+    height: 100%;
+    background: transparent;
+  }
+
+  .wave-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: var(--radius-control);
+  }
+
+  .wave-input:disabled {
+    cursor: default;
+  }
+
+  /* The straight-line seek (ui.playbarWaveform = false). Same treatment the
+   * volume slider got: appearance:none so the fill gradient is the whole box
+   * (the native accent-color range insets the thumb's travel but not its
+   * track, leaving a sliver of unfilled bar past the thumb near 100%). */
+  .seek-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    /* Centred with auto margins, NOT `top: 50%` + `translateY(-50%)`: this
+     * WebKitGTK reports that transform in computed style but does not apply
+     * it to the box, so the line sat 2px below the timestamp centre. */
+    top: 0;
+    bottom: 0;
+    margin: auto 0;
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--hover);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 200ms var(--ease-out);
+  }
+
+  .seek-line.on {
+    opacity: 1;
+  }
+
+  /* The thumb is the straight line's PLAYHEAD. It eases in only when the line
+   * is the chosen style AND a track is loaded — the line goes `disabled` in
+   * every other case (waveform selected, or nothing to position) — so it
+   * animates in/out on the style toggle and on track start/end, mirroring the
+   * waveform's rest → expanded change. */
+  .seek-line::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 14px;
     height: 14px;
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    transition: transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
   }
 
-  .seek input:focus-visible {
+  .seek-line:disabled::-webkit-slider-thumb {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+
+  .seek-line:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 4px;
   }
 
-  .seek input:disabled {
+  .seek-line.on:disabled {
     opacity: 0.35;
     cursor: default;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .seek-line,
+    .seek-line::-webkit-slider-thumb,
+    .wave {
+      transition: none;
+    }
   }
 
   .time {

@@ -6,6 +6,7 @@
 pub mod artwork;
 pub mod db;
 pub mod import;
+pub mod peaks;
 pub mod scan;
 pub mod settings;
 pub mod sidecar;
