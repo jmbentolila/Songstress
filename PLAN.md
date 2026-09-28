@@ -88,7 +88,8 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Playbar survives a retag that moves the playing row to another album (library-wide track resolution + re-anchor) | ✅ 2026-09-26 · **0.14.0** |
 | Import lands on the first album of the batch just imported, not the first pending one | ✅ 2026-09-26 · **0.14.0** |
 | Artwork deletion: ✕ on every tile on hover, in-modal confirmation dropping from the owning surface, immediate delete, most-files cover fallback, spinner while it runs, unreadable files skipped and named | ✅ 2026-09-26 · **0.14.0** (the artwork flow also banks "The In-Modal Confirmation Rule" in DESIGN.md) |
-| Playbar progress style: straight line (default) or waveform; Appearance + Global Menu toggle, persisted; peaks decoded with symphonia and cached in SQLite (migration v7) | ✅ 2026-09-28 · **0.15.0** (uncommitted at time of writing) |
+| Playbar progress style: straight line (default) or waveform; Appearance + Global Menu toggle, persisted; peaks decoded with symphonia and cached in SQLite (migration v7) | ✅ 2026-09-28 · **0.15.0** |
+| Own screen dropper overlay, tracklist EQ marker, light-mode accent/grid tuning, tile-stop slider, clippy-clean Rust 2024 | ✅ 2026-09-28 · **0.16.0** · RPM built, `rpm -qpR` = mpv + webkit2gtk + gtk3 only |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
