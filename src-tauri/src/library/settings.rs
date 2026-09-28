@@ -4,7 +4,9 @@ use std::collections::HashMap;
 /// All settings at once (startup hydration).
 pub fn all(conn: &Connection) -> rusqlite::Result<HashMap<String, String>> {
     let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
     let mut out = HashMap::new();
     for row in rows {
         let (k, v) = row?;
@@ -49,13 +51,12 @@ pub const ALBUM_GRADIENT_PREFIX: &str = "albumGradient:";
 pub fn album_gradient(conn: &Connection, album_id: &str) -> Option<[String; 2]> {
     let key = format!("{ALBUM_GRADIENT_PREFIX}{album_id}");
     let raw: String = conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [&key], |r| r.get(0))
+        .query_row("SELECT value FROM settings WHERE key = ?1", [&key], |r| {
+            r.get(0)
+        })
         .ok()?;
     let pair: Vec<String> = serde_json::from_str(&raw).ok()?;
-    match <[String; 2]>::try_from(pair) {
-        Ok(pair) => Some(pair),
-        Err(_) => None,
-    }
+    <[String; 2]>::try_from(pair).ok()
 }
 
 /// Set (Some) or clear (None) one album's gradient override.
@@ -98,7 +99,9 @@ pub fn migrate_panel_gradients(conn: &Connection) -> rusqlite::Result<usize> {
             // this migration must not undo what the sidecar adopted.
             let key = format!("{ALBUM_GRADIENT_PREFIX}{album_id}");
             let exists: bool = conn
-                .query_row("SELECT 1 FROM settings WHERE key = ?1", [&key], |_| Ok(true))
+                .query_row("SELECT 1 FROM settings WHERE key = ?1", [&key], |_| {
+                    Ok(true)
+                })
                 .unwrap_or(false);
             if !exists {
                 set_album_gradient(conn, album_id, Some(&pair))?;
@@ -193,7 +196,11 @@ mod tests {
             !all(&conn).expect("all").contains_key("panelGradients"),
             "the blob is retired"
         );
-        assert_eq!(migrate_panel_gradients(&conn).expect("again"), 0, "idempotent");
+        assert_eq!(
+            migrate_panel_gradients(&conn).expect("again"),
+            0,
+            "idempotent"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

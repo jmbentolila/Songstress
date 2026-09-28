@@ -10,10 +10,10 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
+use wayland_backend::sys::client::ObjectId;
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
-use wayland_backend::sys::client::ObjectId;
 use wayland_protocols_plasma::appmenu::client::org_kde_kwin_appmenu::OrgKdeKwinAppmenu;
 use wayland_protocols_plasma::appmenu::client::org_kde_kwin_appmenu_manager::OrgKdeKwinAppmenuManager;
 
@@ -37,14 +37,11 @@ impl Dispatch<WlRegistry, ()> for RegistryState {
             interface,
             version,
         } = event
-        {
-            if interface == OrgKdeKwinAppmenuManager::interface().name {
+            && interface == OrgKdeKwinAppmenuManager::interface().name {
                 let max = OrgKdeKwinAppmenuManager::interface().version;
                 let ver = version.min(max);
-                state.appmenu_manager =
-                    Some(registry.bind(name, ver, qh, ()));
+                state.appmenu_manager = Some(registry.bind(name, ver, qh, ()));
             }
-        }
     }
 }
 
@@ -168,9 +165,9 @@ unsafe fn register_foreign(
     surface: usize,
     service: &str,
     object_path: &str,
-) -> Result<(), String> {
-    use wayland_protocols_plasma::appmenu::client::org_kde_kwin_appmenu::OrgKdeKwinAppmenu;
+) -> Result<(), String> { unsafe {
     use wayland_backend::sys::client::Backend as SysBackend;
+    use wayland_protocols_plasma::appmenu::client::org_kde_kwin_appmenu::OrgKdeKwinAppmenu;
 
     let backend = SysBackend::from_foreign_display(display as *mut _);
     let conn = Connection::from_backend(backend);
@@ -188,8 +185,8 @@ unsafe fn register_foreign(
 
     let surface_id = ObjectId::from_ptr(WlSurface::interface(), surface as *mut _)
         .map_err(|e| format!("adopt wl_surface: {e}"))?;
-    let surface = WlSurface::from_id(&conn, surface_id)
-        .map_err(|e| format!("resolve wl_surface: {e}"))?;
+    let surface =
+        WlSurface::from_id(&conn, surface_id).map_err(|e| format!("resolve wl_surface: {e}"))?;
 
     // KWin links an appmenu object to its window ONLY at create time and only
     // if the window is already MAPPED (findWindow searches mapped windows).
@@ -228,4 +225,4 @@ unsafe fn register_foreign(
     std::mem::forget(manager);
     std::mem::forget(surface);
     Ok(())
-}
+}}

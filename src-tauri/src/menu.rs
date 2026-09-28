@@ -193,16 +193,23 @@ pub fn build() -> Vec<Menu> {
                 // them in-window; out-of-window this menu IS the transport.
                 item(
                     "playback.play-pause",
-                    if s.playing == Some(true) { "Pause" } else { "Play" },
+                    if s.playing == Some(true) {
+                        "Pause"
+                    } else {
+                        "Play"
+                    },
                     s.has_track,
                     None,
                 )
                 .with_icon(pp_icon),
                 item("playback.stop", "Stop", s.has_track, None).with_icon("media-playback-stop"),
-                item("playback.previous", "Previous", s.has_track, None).with_icon("media-skip-backward"),
+                item("playback.previous", "Previous", s.has_track, None)
+                    .with_icon("media-skip-backward"),
                 item("playback.next", "Next", s.has_track, None).with_icon("media-skip-forward"),
-                item("playback.album-prev", "Previous album", s.has_track, None).with_icon("go-previous-skip"),
-                item("playback.album-next", "Next album", s.has_track, None).with_icon("go-next-skip"),
+                item("playback.album-prev", "Previous album", s.has_track, None)
+                    .with_icon("go-previous-skip"),
+                item("playback.album-next", "Next album", s.has_track, None)
+                    .with_icon("go-next-skip"),
                 sep(),
                 // Cycling stage items (click advances to the next stage);
                 // checkmark = stage active. Frontend owns the cycling. Order
@@ -265,8 +272,18 @@ pub fn build() -> Vec<Menu> {
             label: "Library".into(),
             items: vec![
                 // Sections mirror the sidebar's Library pane: Import | Scan | Storage.
-                item("library.add-files", "Import music files…", !s.scanning, None),
-                item("library.add-folder", "Import music folder…", !s.scanning, None),
+                item(
+                    "library.add-files",
+                    "Import music files…",
+                    !s.scanning,
+                    None,
+                ),
+                item(
+                    "library.add-folder",
+                    "Import music folder…",
+                    !s.scanning,
+                    None,
+                ),
                 item(
                     "library.manage-imports",
                     "Manage imported music…",
@@ -276,11 +293,20 @@ pub fn build() -> Vec<Menu> {
                 sep(),
                 item(
                     "library.rescan",
-                    if s.scanning { "Scanning…" } else { "Scan for changes" },
+                    if s.scanning {
+                        "Scanning…"
+                    } else {
+                        "Scan for changes"
+                    },
                     !s.scanning,
                     None,
                 ),
-                item("library.rescan-full", "Re-read all files", !s.scanning, None),
+                item(
+                    "library.rescan-full",
+                    "Re-read all files",
+                    !s.scanning,
+                    None,
+                ),
                 sep(),
                 item("library.choose-folder", "Music folders…", true, None),
             ],
@@ -293,7 +319,11 @@ pub fn build() -> Vec<Menu> {
             id: "appearance".into(),
             label: "Appearance".into(),
             items: vec![
-                radio("appearance.theme-system", "Theme: System", s.theme == "system"),
+                radio(
+                    "appearance.theme-system",
+                    "Theme: System",
+                    s.theme == "system",
+                ),
                 radio("appearance.theme-light", "Theme: Light", s.theme == "light"),
                 radio("appearance.theme-dark", "Theme: Dark", s.theme == "dark"),
                 sep(),
@@ -409,7 +439,10 @@ mod tests {
             ..MenuState::default()
         });
         let menus = build();
-        assert_eq!(find(&menus, "playback", "playback.play-pause").label, "Pause");
+        assert_eq!(
+            find(&menus, "playback", "playback.play-pause").label,
+            "Pause"
+        );
         assert!(find(&menus, "playback", "playback.play-pause").enabled);
         assert!(find(&menus, "playback", "playback.stop").enabled);
     }
@@ -439,7 +472,10 @@ mod tests {
         let menus = build();
         let manage = find(&menus, "library", "library.manage-imports");
         assert!(manage.enabled);
-        assert_eq!(manage.label, "Manage imported music…", "no count in the label (owner, 2026-09-03)");
+        assert_eq!(
+            manage.label, "Manage imported music…",
+            "no count in the label (owner, 2026-09-03)"
+        );
 
         set_state(MenuState::default());
         let menus = build();
@@ -566,15 +602,27 @@ mod tests {
         let _g = guard();
         set_state(MenuState::default());
         let menus = build();
-        assert_eq!(find(&menus, "playback", "playback.eq").label, "Equalizer: Off");
+        assert_eq!(
+            find(&menus, "playback", "playback.eq").label,
+            "Equalizer: Off"
+        );
         assert_eq!(find(&menus, "playback", "playback.eq").checked, Some(false));
-        assert_eq!(find(&menus, "playback", "playback.eq-preset").label, "EQ Preset: Flat");
-        assert!(!find(&menus, "playback", "playback.eq-preset").enabled, "preset picker gated on enabled");
+        assert_eq!(
+            find(&menus, "playback", "playback.eq-preset").label,
+            "EQ Preset: Flat"
+        );
+        assert!(
+            !find(&menus, "playback", "playback.eq-preset").enabled,
+            "preset picker gated on enabled"
+        );
         assert_eq!(
             find(&menus, "playback", "playback.eq-customize").label,
             "Customize Equalizer…"
         );
-        assert!(find(&menus, "playback", "playback.eq-customize").enabled, "customize always reachable");
+        assert!(
+            find(&menus, "playback", "playback.eq-customize").enabled,
+            "customize always reachable"
+        );
 
         set_state(MenuState {
             eq_enabled: true,
@@ -582,9 +630,15 @@ mod tests {
             ..MenuState::default()
         });
         let menus = build();
-        assert_eq!(find(&menus, "playback", "playback.eq").label, "Equalizer: On");
+        assert_eq!(
+            find(&menus, "playback", "playback.eq").label,
+            "Equalizer: On"
+        );
         assert_eq!(find(&menus, "playback", "playback.eq").checked, Some(true));
-        assert_eq!(find(&menus, "playback", "playback.eq-preset").label, "EQ Preset: Rock");
+        assert_eq!(
+            find(&menus, "playback", "playback.eq-preset").label,
+            "EQ Preset: Rock"
+        );
         assert!(find(&menus, "playback", "playback.eq-preset").enabled);
     }
 
@@ -598,7 +652,9 @@ mod tests {
         set_state(MenuState::default());
         let menus = build();
         assert_eq!(
-            find(&menus, "playback", "playback.play-pause").icon.as_deref(),
+            find(&menus, "playback", "playback.play-pause")
+                .icon
+                .as_deref(),
             Some("media-playback-start")
         );
         assert_eq!(
@@ -606,11 +662,15 @@ mod tests {
             Some("media-playback-stop")
         );
         assert_eq!(
-            find(&menus, "playback", "playback.previous").icon.as_deref(),
+            find(&menus, "playback", "playback.previous")
+                .icon
+                .as_deref(),
             Some("media-skip-backward")
         );
         assert_eq!(
-            find(&menus, "playback", "playback.album-next").icon.as_deref(),
+            find(&menus, "playback", "playback.album-next")
+                .icon
+                .as_deref(),
             Some("go-next-skip")
         );
         set_state(MenuState {
@@ -620,7 +680,9 @@ mod tests {
         });
         let menus = build();
         assert_eq!(
-            find(&menus, "playback", "playback.play-pause").icon.as_deref(),
+            find(&menus, "playback", "playback.play-pause")
+                .icon
+                .as_deref(),
             Some("media-playback-pause")
         );
         // Checkable rows carry glyphs alongside the checkmark (owner's

@@ -17,6 +17,7 @@
     clearPanelGradient,
   } from "../lib/stores/ui.svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { artGradient, normalizeHex } from "../lib/gradient";
   import { tooltip } from "../lib/tooltip";
   import { announcer } from "../lib/stores/announcer.svelte";
@@ -82,9 +83,12 @@
   const pick1 = $derived(n1 ? `#${n1}` : "#000000");
   const pick2 = $derived(n2 ? `#${n2}` : "#000000");
 
-  // Screen dropper (portal crosshair, Rust side): fills the row it was
-  // pressed from. Cancel is silence (null); only a real failure speaks.
-  // Hidden where there is no portal (browser dev) — the hex fields stay.
+  // Screen dropper: our OWN fullscreen overlay (crosshair + magnifier loupe
+  // over a portal screenshot) — the compositor's PickColor crosshair went
+  // away because Mutter's shows no hotspot. `begin_screen_pick` raises the
+  // overlay; the picked hex (or null = cancelled = silence) arrives later as
+  // a `screen-picked` event. Only a real failure speaks. Hidden where there
+  // is no portal (browser dev) — the hex fields stay.
   let picking = $state<1 | 2 | null>(null);
   // A click owes an answer: failures print HERE, not just to the console
   // (a dead button with no word was the whole bug report, 2026-09-15).
@@ -93,18 +97,22 @@
     if (!isTauri || picking !== null) return;
     picking = which;
     pickerError = "";
-    try {
-      const hex = await invoke<string | null>("pick_screen_color");
-      if (hex) {
-        if (which === 1) t1 = hex;
-        else t2 = hex;
+    const unlisten = await listen<string | null>("screen-picked", (e) => {
+      unlisten();
+      picking = null;
+      if (e.payload) {
+        if (which === 1) t1 = e.payload;
+        else t2 = e.payload;
       }
+    });
+    try {
+      await invoke("begin_screen_pick");
     } catch (e) {
+      unlisten();
+      picking = null;
       console.error(e);
       pickerError = "The screen color picker could not open.";
       announcer.say(pickerError);
-    } finally {
-      picking = null;
     }
   }
 </script>

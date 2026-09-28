@@ -203,7 +203,9 @@ wallpaper rather than opaque fills.
 - **Slate Night** (`rgba(22,22,28,·)`): the dark-theme glass field. Two
   tiers: grid backdrop at **0.8** and chrome (sidebar, playbar, popovers)
   at **0.7** — both are user-tuned alphas, not defaults. Light theme
-  mirrors as **Porcelain Mist** (`rgba(246,246,249,·)`).
+  mirrors as **Porcelain Mist** (`rgba(246,246,249,·)`), except the grid
+  field, deepened to `rgba(236,236,241,·)` so tiles sit on something
+  with a little more body.
 - **Chalk & Ink** (`#f4f4f6` / `#232329`): text at full strength; at
   **0.64 alpha** (`chalk-dim` / `ink-dim`) for secondary captions,
   counts, and at-rest controls.
@@ -277,7 +279,7 @@ size (user-tunable 120–320px nominal, default 180px) with 20px gaps; an expand
 album becomes a full-width panel row that pushes subsequent rows down.
 The Tile size slider offers only the nominal stops that actually change the
 column count for the measured grid width — one detent per layout — and its
-readout names the rendered result (`212px · 5 across`), never a pixel value
+readout names the layout (`5 across`), never a pixel value
 that moves no tile.
 Sidebar artist rows are user-tunable height (28–52px, default 36px);
 menu rows are fixed 40px.
@@ -306,6 +308,8 @@ supporting roles: anchoring physical objects, and casting light.
 - **Popover seat** (`0 8px 28px rgba(0,0,0,0.35)`): menu/popover surfaces.
 - **Cast light** (linear gradients, not shadows): 26px @ 0.22 from the
   window top and 34px @ 0.30 from the playbar shelf, onto the grid —
+  softened to 0.14 / 0.18 in light mode, where the dark-tuned alphas
+  read too heavy —
   chrome casting onto content so the glass reads as floating.
 
 ### Named Rules
@@ -464,7 +468,9 @@ answer to "where am I".
   right (11px dim, tabular); active = `--active` wash + 600 weight.
 - **Track row (expanded panel):** number (tabular, 12px dim) · title
   (13px, ellipsis) · duration (12px dim, tabular); current track = accent
-  text + 600 weight with a ▶/❚❚ glyph replacing the number; missing file =
+  text + 600 weight with a 4-bar mini equalizer replacing the number —
+  bouncing on staggered transform-only loops while playing, frozen while
+  paused, static under reduced motion; missing file =
   Amber Caution alert triangle replacing the number.
 - **Sidebar menu stack:** four absolute layers (home → Settings root → pane →
   sub-pane) sliding transform-only on `cubic-bezier(0.32, 0.72, 0, 1)` @ 320ms.

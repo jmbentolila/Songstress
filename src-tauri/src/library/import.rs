@@ -34,7 +34,11 @@ pub fn staged_tracks(
         clauses.push("album_id = ?1");
     }
     if track_id.is_some() {
-        clauses.push(if album_id.is_some() { "id = ?2" } else { "id = ?1" });
+        clauses.push(if album_id.is_some() {
+            "id = ?2"
+        } else {
+            "id = ?1"
+        });
     }
     if !clauses.is_empty() {
         sql.push_str(" AND ");
@@ -87,7 +91,10 @@ fn norm_title(s: &str) -> String {
 }
 
 /// (artist id, artist name, album title) of an album row.
-pub fn album_identity(conn: &Connection, album_id: &str) -> Result<(String, String, String), String> {
+pub fn album_identity(
+    conn: &Connection,
+    album_id: &str,
+) -> Result<(String, String, String), String> {
     conn.query_row(
         "SELECT al.artist_id, ar.name, al.title FROM albums al
          JOIN artists ar ON ar.id = al.artist_id WHERE al.id = ?1",
@@ -149,7 +156,10 @@ pub fn album_destination(
     //    disk, and the scan that follows a save collapses any year disagreement
     //    into one folder consensus anyway.
     let mut merge: HashMap<PathBuf, usize> = HashMap::new();
-    for (_t, p) in rows.iter().filter(|(t, _)| norm_title(t) == norm_title(&title)) {
+    for (_t, p) in rows
+        .iter()
+        .filter(|(t, _)| norm_title(t) == norm_title(&title))
+    {
         if let Some(d) = dirname(p).filter(|d| under_any(d, roots)) {
             *merge.entry(d).or_default() += 1;
         }
@@ -175,7 +185,10 @@ pub fn album_destination(
             artist_folders.entry(parent).or_default().insert(album_dir);
         }
     }
-    if let Some((folder, _)) = artist_folders.into_iter().max_by_key(|(_, dirs)| dirs.len()) {
+    if let Some((folder, _)) = artist_folders
+        .into_iter()
+        .max_by_key(|(_, dirs)| dirs.len())
+    {
         return Ok(Destination {
             folder: folder.join(sanitize_path(&title)),
             rule: "artist",
@@ -230,8 +243,12 @@ fn collection_parent(conn: &Connection, roots: &[PathBuf]) -> Result<Option<Path
             // collection home. It is one album out of 249, so a tally by
             // distinct album is never going to mistake that for the majority,
             // which is why the count is by album and not by file.
-            let Some(artist_dir) = dirname(&album_dir) else { continue };
-            let Some(home) = dirname(&artist_dir) else { continue };
+            let Some(artist_dir) = dirname(&album_dir) else {
+                continue;
+            };
+            let Some(home) = dirname(&artist_dir) else {
+                continue;
+            };
             by_parent.entry(home).or_default().insert(row.0);
         }
     }
@@ -351,9 +368,8 @@ enum MovePlan {
 
 fn content_hash(p: &Path) -> Result<blake3::Hash, String> {
     use std::io::Read;
-    let mut f = std::io::BufReader::new(
-        std::fs::File::open(p).map_err(|e| format!("open {p:?}: {e}"))?,
-    );
+    let mut f =
+        std::io::BufReader::new(std::fs::File::open(p).map_err(|e| format!("open {p:?}: {e}"))?);
     let mut hasher = blake3::Hasher::new();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
@@ -460,12 +476,11 @@ fn relink(conn: &Connection, from: &Path, to: &Path) -> Result<(), String> {
 /// track keeps its album alive — which is how one save used to leave the same
 /// album in the grid twice, one tile with the missing icon.
 fn forget_row(conn: &Connection, path: &Path) -> Result<(), String> {
-    conn
-        .execute(
-            "DELETE FROM tracks WHERE path = ?1",
-            [path.to_string_lossy().as_ref()],
-        )
-        .map_err(|e| format!("forget {path:?}: {e}"))?;
+    conn.execute(
+        "DELETE FROM tracks WHERE path = ?1",
+        [path.to_string_lossy().as_ref()],
+    )
+    .map_err(|e| format!("forget {path:?}: {e}"))?;
     Ok(())
 }
 
@@ -478,7 +493,7 @@ fn prune_staged_dirs(root: &Path) {
         .filter(|e| e.file_type().is_dir())
         .map(|e| e.path().to_path_buf())
         .collect();
-    dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     for d in dirs {
         if d != root && std::fs::remove_dir(&d).is_ok() {
             // was empty
@@ -542,7 +557,8 @@ pub fn save_to_library(
         match plan_move(src, &dest.folder.join(name))? {
             MovePlan::Place(at) => {
                 if let Some(parent) = at.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("mkdir {parent:?}: {e}"))?;
                 }
                 move_into(src, &at)?;
                 // The row follows the file, keeping its id: a scan that gets
@@ -628,7 +644,7 @@ pub fn resolve_collision(src: &Path, dest: &Path) -> Result<Option<PathBuf>, Str
             None => parent.join(format!("{stem} ({n})")),
         };
         match std::fs::metadata(&cand) {
-            Err(_) => return Ok(Some(cand)), // free
+            Err(_) => return Ok(Some(cand)),                 // free
             Ok(m) if m.len() == src_size => return Ok(None), // already imported under a suffix
             Ok(_) => continue,
         }
@@ -761,8 +777,11 @@ pub fn discard(
     // and the door the user just emptied lights up again. Those 28 rows of
     // debris in this library were born exactly this way.
     for p in staged {
-        conn.execute("DELETE FROM tracks WHERE path = ?1", [p.display().to_string()])
-            .map_err(|e| format!("forget {p:?}: {e}"))?;
+        conn.execute(
+            "DELETE FROM tracks WHERE path = ?1",
+            [p.display().to_string()],
+        )
+        .map_err(|e| format!("forget {p:?}: {e}"))?;
     }
     Ok(n)
 }
@@ -793,7 +812,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("songstress-import-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("songstress-import-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("mkdir");
         dir
@@ -808,7 +828,7 @@ mod tests {
         data.extend_from_slice(&frame);
         // Filler also varies the LENGTH so size-based dedupe can tell
         // "editions" apart in the collision tests.
-        data.extend(std::iter::repeat(filler).take(filler as usize));
+        data.extend(std::iter::repeat_n(filler, filler as usize));
         std::fs::write(path, data).expect("write mp3");
     }
 
@@ -829,7 +849,10 @@ mod tests {
         let got = import_targets(&[src.join("Cool Album"), src.join("loose.mp3")]).unwrap();
         assert_eq!(got.len(), 3, "two album files + one loose, no cover.jpg");
         assert!(got.contains(&src.join("Cool Album/01 - A.mp3")));
-        assert!(!import_dir(&cache).exists(), "import writes nothing of its own");
+        assert!(
+            !import_dir(&cache).exists(),
+            "import writes nothing of its own"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -885,7 +908,12 @@ mod tests {
             conn.execute(
                 "INSERT INTO tracks(id, album_id, title, path, mtime_ns, size, duration_sec)
                  VALUES(?1,?2,?3,?4,0,1,1)",
-                params![format!("{id}-t{i}"), id, format!("track {i}"), p.to_string_lossy()],
+                params![
+                    format!("{id}-t{i}"),
+                    id,
+                    format!("track {i}"),
+                    p.to_string_lossy()
+                ],
             )
             .unwrap();
         }
@@ -905,8 +933,20 @@ mod tests {
         let zed = root.join("zed.mp3");
         let alpha = root.join("alpha.mp3");
         let zed2 = root.join("zed2.mp3");
-        seed_album(&conn, "al-zed", "Zed", "Zebra", &[zed.clone(), zed2.clone()]);
-        seed_album(&conn, "al-alpha", "Ann", "Aardvark", &[alpha.clone()]);
+        seed_album(
+            &conn,
+            "al-zed",
+            "Zed",
+            "Zebra",
+            &[zed.clone(), zed2.clone()],
+        );
+        seed_album(
+            &conn,
+            "al-alpha",
+            "Ann",
+            "Aardvark",
+            std::slice::from_ref(&alpha),
+        );
 
         // Picked in this order: Zed, Alpha, Zed again.
         let groups = album_groups(&conn, &[zed, alpha, zed2]).expect("groups");
@@ -917,7 +957,10 @@ mod tests {
             "file order, not alphabetical (Aardvark would come first)"
         );
         assert_eq!(groups[0].tracks, 2, "both Zed files count");
-        assert_eq!((groups[0].artist.as_str(), groups[0].title.as_str()), ("Zed", "Zebra"));
+        assert_eq!(
+            (groups[0].artist.as_str(), groups[0].title.as_str()),
+            ("Zed", "Zebra")
+        );
     }
 
     #[test]
@@ -941,7 +984,7 @@ mod tests {
             "Impera",
             &[staging.join("Impera/01 Imperium.mp3")],
         );
-        let d = album_destination(&conn, &[music.clone()], &music, &staged).unwrap();
+        let d = album_destination(&conn, std::slice::from_ref(&music), &music, &staged).unwrap();
         assert_eq!(d.folder, music.join("Music Files/Ghost/Impera"));
         assert_eq!(d.rule, "merge");
         assert_eq!(d.merged_into.as_deref(), Some("Impera"));
@@ -980,7 +1023,8 @@ mod tests {
             "Prequelle",
             &[music.join("Music Files/Ghost/Prequelle/Ashes.mp3")],
         );
-        let d = album_destination(&conn, &[music.clone()], &music, "al-impera").unwrap();
+        let d =
+            album_destination(&conn, std::slice::from_ref(&music), &music, "al-impera").unwrap();
         assert_eq!(d.rule, "merge", "the album is on disk: join it");
         assert_eq!(d.folder, music.join("Ghost/Impera"));
         let _ = std::fs::remove_dir_all(&root);
@@ -1013,7 +1057,7 @@ mod tests {
             "Impera",
             &[staging.join("Impera/01 Imperium.mp3")],
         );
-        let d = album_destination(&conn, &[music.clone()], &music, &staged).unwrap();
+        let d = album_destination(&conn, std::slice::from_ref(&music), &music, &staged).unwrap();
         // Not <music>/Ghost/Impera — that is the answer that split this user's
         // Ghost catalogue across two halves of the tree.
         assert_eq!(d.folder, music.join("Music Files/Ghost/Impera"));
@@ -1034,7 +1078,7 @@ mod tests {
             "For The Dead",
             &[staging.join("For The Dead/01.mp3")],
         );
-        let d = album_destination(&conn, &[music.clone()], &music, &staged).unwrap();
+        let d = album_destination(&conn, std::slice::from_ref(&music), &music, &staged).unwrap();
         assert_eq!(d.folder, music.join("Kadavar/For The Dead"));
         assert_eq!(d.rule, "new");
         let _ = std::fs::remove_dir_all(&root);
@@ -1079,7 +1123,7 @@ mod tests {
             "For The Dead",
             &[staging.join("For The Dead/01.mp3")],
         );
-        let d = album_destination(&conn, &[music.clone()], &music, &staged).unwrap();
+        let d = album_destination(&conn, std::slice::from_ref(&music), &music, &staged).unwrap();
         assert_eq!(d.folder, music.join("Music Files/Kadavar/For The Dead"));
         assert_eq!(d.rule, "new");
         let _ = std::fs::remove_dir_all(&root);
@@ -1111,7 +1155,7 @@ mod tests {
             &[staging.join("Impera/01 Imperium.mp3")],
         );
         mark_staged(&conn, &[staging.join("Impera/01 Imperium.mp3")]).unwrap();
-        let d = album_destination(&conn, &[music.clone()], &music, &staged).unwrap();
+        let d = album_destination(&conn, std::slice::from_ref(&music), &music, &staged).unwrap();
         assert_eq!(d.rule, "new");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1154,7 +1198,7 @@ mod tests {
             "Ghostlights",
             &[music.join("Music Files/Avantasia/Ghostlights/1-01.mp3")],
         );
-        let plan = staged_plan(&conn, &[music.clone()], &music).unwrap();
+        let plan = staged_plan(&conn, std::slice::from_ref(&music), &music).unwrap();
         assert_eq!(plan.len(), 1, "only the staged album is listed");
         assert_eq!(plan[0].tracks.len(), 2);
         assert_eq!(plan[0].title, "Impera");
@@ -1197,13 +1241,25 @@ mod tests {
 
         // Save: copies to <music>/<Artist>/<Album>/song.mp3, removes staged.
         // (Untagged tiny_mp3 → scanner placeholders.)
-        let report =
-            save_to_library(&conn, &cache, &[music.clone()], &music, &staged, |_, _| {}).unwrap();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(report.moved, 1);
         assert_eq!(report.duplicates, 0);
-        assert!(music.join("Unknown Artist/Unknown Album/song.mp3").is_file());
+        assert!(music
+            .join("Unknown Artist/Unknown Album/song.mp3")
+            .is_file());
         assert!(!staged[0].exists(), "staged original removed");
-        assert!(!import_dir(&cache).join("source").exists(), "empty folder pruned");
+        assert!(
+            !import_dir(&cache).join("source").exists(),
+            "empty folder pruned"
+        );
 
         // Saving the same content again (re-import) dedupes by hash.
         write_legacy_copy(&cache, "source/song.mp3", 1);
@@ -1217,8 +1273,15 @@ mod tests {
         .unwrap();
         mark_legacy_staged(&conn, &import_dir(&cache)).unwrap();
         let staged = staged_tracks(&conn, None, None).unwrap();
-        let report =
-            save_to_library(&conn, &cache, &[music.clone()], &music, &staged, |_, _| {}).unwrap();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(
             report.moved, 0,
             "identical library file → already there, nothing moved"
@@ -1254,8 +1317,15 @@ mod tests {
         let staged = staged_tracks(&conn, None, None).unwrap();
         assert_eq!(staged.len(), 2);
 
-        let report =
-            save_to_library(&conn, &cache, &[music.clone()], &music, &staged, |_, _| {}).unwrap();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(report.moved, 2);
 
         // Exactly what save_imports does afterwards: rescan every root.
@@ -1274,17 +1344,20 @@ mod tests {
             .flatten()
             .collect();
         let albums: i64 = conn
-            .query_row(
-                "SELECT COUNT(DISTINCT album_id) FROM tracks",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COUNT(DISTINCT album_id) FROM tracks", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(paths.len(), 2, "one row per saved track, no ghost");
         assert_eq!(albums, 1, "and one album tile, not two");
-        assert_eq!(counts.missing, 0, "nothing points at the deleted staging copy");
+        assert_eq!(
+            counts.missing, 0,
+            "nothing points at the deleted staging copy"
+        );
         assert!(
-            paths.iter().all(|p| p.starts_with(&music.to_string_lossy().as_ref().to_string())),
+            paths
+                .iter()
+                .all(|p| p.starts_with(&music.to_string_lossy().as_ref().to_string())),
             "every row lives in the library: {paths:?}"
         );
         assert!(music
@@ -1324,8 +1397,15 @@ mod tests {
         // The file goes missing behind the library's back (a ghost row).
         std::fs::remove_file(&staged[0]).unwrap();
 
-        let report =
-            save_to_library(&conn, &cache, &[music.clone()], &music, &staged, |_, _| {}).unwrap();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(report.moved, 1, "the file that exists still saves");
         assert_eq!(report.vanished, 1, "the one that does not is reported");
         let left: i64 = conn
@@ -1356,7 +1436,7 @@ mod tests {
         tiny_mp3(&b, 2);
 
         let mut conn = empty_db(&root);
-        import_in_place(&mut conn, &folder, &[a.clone()]);
+        import_in_place(&mut conn, &folder, std::slice::from_ref(&a));
         import_in_place(&mut conn, &folder, &[a.clone(), b.clone()]);
         import_in_place(&mut conn, &folder, &[a.clone(), b.clone()]);
 
@@ -1367,7 +1447,9 @@ mod tests {
         let pending = staged_tracks(&conn, None, None).unwrap();
         assert_eq!(pending.len(), 2, "and the pile holds each file once");
         let albums: i64 = conn
-            .query_row("SELECT COUNT(DISTINCT album_id) FROM tracks", [], |r| r.get(0))
+            .query_row("SELECT COUNT(DISTINCT album_id) FROM tracks", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(albums, 1, "one album, not a staged twin of it");
         let _ = std::fs::remove_dir_all(&root);
@@ -1423,10 +1505,7 @@ mod tests {
         }
         mark_staged(&conn, &files).unwrap();
 
-        assert_eq!(
-            discard(&conn, &import_dir(&cache), &files).unwrap(),
-            2
-        );
+        assert_eq!(discard(&conn, &import_dir(&cache), &files).unwrap(), 2);
         for f in &files {
             assert!(f.is_file(), "their file, their call: {f:?}");
         }
@@ -1447,8 +1526,14 @@ mod tests {
     /// in the library before. Same order as `import_music`.
     fn import_in_place(conn: &mut Connection, folder: &Path, files: &[PathBuf]) {
         let only: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
-        crate::library::scan::run_scan_files(conn, &[folder.to_path_buf()], Some(&only), |_, _| {}, false)
-            .unwrap();
+        crate::library::scan::run_scan_files(
+            conn,
+            &[folder.to_path_buf()],
+            Some(&only),
+            |_, _| {},
+            false,
+        )
+        .unwrap();
         mark_staged(conn, files).unwrap();
     }
 
@@ -1463,7 +1548,7 @@ mod tests {
         tiny_mp3(&a, 1);
 
         let mut conn = empty_db(&root);
-        import_in_place(&mut conn, &downloads, &[a.clone()]);
+        import_in_place(&mut conn, &downloads, std::slice::from_ref(&a));
 
         let path: String = conn
             .query_row("SELECT path FROM tracks", [], |r| r.get(0))
@@ -1499,7 +1584,7 @@ mod tests {
         let mut conn = empty_db(&root);
         let only = crate::library::scan::run_scan_files(
             &mut conn,
-            &[folder.clone()],
+            std::slice::from_ref(&folder),
             Some(&std::collections::HashSet::from([asked.clone()])),
             |_, _| {},
             false,
@@ -1530,12 +1615,19 @@ mod tests {
         tiny_mp3(&file, 1);
 
         let mut conn = empty_db(&root);
-        import_in_place(&mut conn, &downloads, &[file.clone()]);
+        import_in_place(&mut conn, &downloads, std::slice::from_ref(&file));
         let staged = staged_tracks(&conn, None, None).unwrap();
         assert_eq!(staged.len(), 1);
 
-        let report =
-            save_to_library(&conn, &cache, &[music.clone()], &music, &staged, |_, _| {}).unwrap();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(report.moved, 1);
         let landed = music.join("Unknown Artist/Unknown Album/01 Imperium.mp3");
         assert!(landed.is_file(), "moved into the library");
@@ -1544,7 +1636,10 @@ mod tests {
         let staged: i64 = conn
             .query_row("SELECT staged FROM tracks", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(staged, 0, "a saved album is not pending; the door must empty");
+        assert_eq!(
+            staged, 0,
+            "a saved album is not pending; the door must empty"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1567,19 +1662,25 @@ mod tests {
         let mut conn = empty_db(&root);
         crate::library::scan::run_scan_files(
             &mut conn,
-            &[music.clone()],
+            std::slice::from_ref(&music),
             None,
             |_, _| {},
             false,
         )
         .unwrap();
-        import_in_place(&mut conn, &downloads, &[mine.clone()]);
+        import_in_place(&mut conn, &downloads, std::slice::from_ref(&mine));
         let staged = staged_tracks(&conn, None, None).unwrap();
         assert_eq!(staged.len(), 1);
 
-        let report =
-            save_to_library(&conn, &cache, &[root.join("music")], &root.join("music"), &staged, |_, _| {})
-                .unwrap();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            &[root.join("music")],
+            &root.join("music"),
+            &staged,
+            |_, _| {},
+        )
+        .unwrap();
         assert_eq!(report.moved, 0);
         assert_eq!(report.duplicates, 1, "reported, not swallowed");
         assert!(!mine.exists(), "theirs went");

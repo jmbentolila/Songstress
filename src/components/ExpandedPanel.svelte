@@ -691,6 +691,22 @@
             </p>
           </header>
 
+          {#snippet eqIcon(still: boolean)}
+            <!-- Mini equalizer in place of the track number: the bouncing
+                 and resting layers stay MOUNTED and STACKED, cross-faded by
+                 .on — killing the animation outright would teleport, so the
+                 play/pause flip dissolves instead. Bars are transform-only
+                 (scaleY), currentColor so they follow the row's accent;
+                 aria-hidden, the sr-only label carries state. -->
+            <span class="eq-swap" aria-hidden="true"
+              ><span class="eq" class:on={!still}
+                ><i></i><i></i><i></i><i></i></span
+              ><span class="eq still" class:on={still}
+                ><i></i><i></i><i></i><i></i></span
+              ></span
+            >
+          {/snippet}
+
           {#key displayAlbum.id}
           <!-- Album switch (same-row host flip) swaps the whole tracklist
              block atomically. Without the key, the keyed each treats it as
@@ -731,8 +747,8 @@
                         >
                                                     <span class="num" class:missing={track.missing} use:tooltip={track.missing ? "File missing — double-click to locate it" : undefined}>
                             {#if isCurrent(track.id)}
-                              <span aria-hidden="true">{playback.isPlaying ? "▶" : "❚❚"}</span
-                              ><span class="sr-only">Now playing</span>
+                              {@render eqIcon(!playback.isPlaying)}
+                              <span class="sr-only">{playback.isPlaying ? "Now playing" : "Paused"}</span>
                             {:else if track.missing}
                               <svg class="alert" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 L14.6 13.4 H1.4 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /><path d="M8 6.6 V9.6 M8 11.4 V11.5" stroke="currentColor" stroke-linecap="round" /></svg>
                             {:else}
@@ -775,8 +791,8 @@
                 >
                                         <span class="num" class:missing={track.missing} use:tooltip={track.missing ? "File missing — double-click to locate it" : undefined}>
                       {#if isCurrent(track.id)}
-                        <span aria-hidden="true">{playback.isPlaying ? "▶" : "❚❚"}</span
-                        ><span class="sr-only">Now playing</span>
+                        {@render eqIcon(!playback.isPlaying)}
+                        <span class="sr-only">{playback.isPlaying ? "Now playing" : "Paused"}</span>
                       {:else if track.missing}
                         <svg class="alert" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 L14.6 13.4 H1.4 Z" fill="none" stroke="currentColor" stroke-linejoin="round" /><path d="M8 6.6 V9.6 M8 11.4 V11.5" stroke="currentColor" stroke-linecap="round" /></svg>
                       {:else}
@@ -1131,6 +1147,81 @@
 
   .track.current .num {
     color: var(--accent);
+  }
+
+  /* Mini equalizer replacing the current track's number: four 2px bars in
+     the 22px number slot, bouncing on staggered transform-only loops while
+     playing, frozen while paused — the two layers cross-fade so the flip
+     dissolves instead of teleporting. Reduced motion: static bars, instant
+     flip. */
+  .eq-swap {
+    position: relative;
+    display: inline-flex;
+    width: 14px;
+    height: 12px;
+  }
+  .eq {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 560ms var(--ease-out);
+  }
+  .eq.on {
+    opacity: 1;
+  }
+  .eq:not(.on) i {
+    animation-play-state: paused;
+  }
+  .eq i {
+    width: 2px;
+    height: 12px;
+    border-radius: var(--radius-pill);
+    background: currentColor;
+    transform-origin: bottom;
+    animation: eq-loop 0.9s ease-in-out infinite;
+  }
+  .eq i:nth-child(2) {
+    animation-duration: 0.7s;
+    animation-delay: -0.25s;
+  }
+  .eq i:nth-child(3) {
+    animation-duration: 1.1s;
+    animation-delay: -0.55s;
+  }
+  .eq i:nth-child(4) {
+    animation-duration: 0.8s;
+    animation-delay: -0.4s;
+  }
+  .eq.still i {
+    animation: none;
+    transform: scaleY(0.35);
+  }
+  .eq.still i:nth-child(2) {
+    transform: scaleY(0.7);
+  }
+  .eq.still i:nth-child(3) {
+    transform: scaleY(0.5);
+  }
+  @keyframes eq-loop {
+    0%,
+    100% {
+      transform: scaleY(0.25);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .eq {
+      transition: none;
+    }
+    .eq i {
+      animation: none;
+      transform: scaleY(0.45);
+    }
   }
 
   .title {

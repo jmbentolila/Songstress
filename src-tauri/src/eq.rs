@@ -6,8 +6,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Center frequency of each band (Hz), index = slider position left→right.
-pub const BANDS: [f64; 10] =
-    [31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0];
+pub const BANDS: [f64; 10] = [
+    31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0,
+];
 
 pub const MAX_GAIN_DB: f64 = 12.0;
 
@@ -89,7 +90,12 @@ mod tests {
     use super::*;
 
     fn eq(enabled: bool, preamp: f64, gains: [f64; 10]) -> Eq {
-        Eq { enabled, preamp_db: preamp, gains, preset: None }
+        Eq {
+            enabled,
+            preamp_db: preamp,
+            gains,
+            preset: None,
+        }
     }
 
     #[test]
@@ -132,9 +138,15 @@ mod tests {
         let mut gains = [0.0; 10];
         gains[2] = 2.0;
         let with = af_chain(&eq(true, -3.0, gains)).expect("chain");
-        assert!(with.starts_with("lavfi=[aresample=48000,volume=-3.0dB,"), "got {with}");
+        assert!(
+            with.starts_with("lavfi=[aresample=48000,volume=-3.0dB,"),
+            "got {with}"
+        );
         let without = af_chain(&eq(true, 0.0, gains)).expect("chain");
-        assert!(without.starts_with("lavfi=[aresample=48000,equalizer="), "got {without}");
+        assert!(
+            without.starts_with("lavfi=[aresample=48000,equalizer="),
+            "got {without}"
+        );
     }
 
     #[test]

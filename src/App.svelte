@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScreenPick from "./components/ScreenPick.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import AlbumGrid from "./components/AlbumGrid.svelte";
   import PlayBar from "./components/PlayBar.svelte";
@@ -21,6 +22,12 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { invoke } from "@tauri-apps/api/core";
   import { isTauri } from "./lib/window";
+
+  // Screen-pick overlay window (from the tag editor's dropper): it loads the
+  // same bundle at #screen-pick and renders ONLY the picker — none of the
+  // library UI, which has no business in a fullscreen loupe.
+  const pickOverlay =
+    typeof location !== "undefined" && location.hash === "#screen-pick";
 
   startViewportGuard();
   void initSettings();
@@ -160,6 +167,9 @@
   });
 </script>
 
+{#if pickOverlay}
+  <ScreenPick />
+{:else}
 <div class="app">
   <!-- A modal claims the window, so the window's other contents are inert: without
        this, `aria-modal` is a claim the code does not honour and Tab walks the grid,
@@ -191,6 +201,7 @@
   <ManageImports />
   <ContextMenu />
 </div>
+{/if}
 
 <style>
   .app {
@@ -243,6 +254,16 @@
       linear-gradient(to bottom, rgba(0, 0, 0, 0.22), transparent 26px) top /
         100% 26px no-repeat,
       linear-gradient(to top, rgba(0, 0, 0, 0.3), transparent 34px) bottom /
+        100% 34px no-repeat;
+  }
+
+  /* Light mode casts softer shadows: the dark-tuned alphas sit too heavy
+     on the porcelain field. */
+  :global(html[data-theme="light"]) .edge-shadows {
+    background:
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.14), transparent 26px) top /
+        100% 26px no-repeat,
+      linear-gradient(to top, rgba(0, 0, 0, 0.18), transparent 34px) bottom /
         100% 34px no-repeat;
   }
 

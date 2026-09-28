@@ -229,27 +229,24 @@ fn runtime_dir(identifier: &str) -> PathBuf {
 /// another silent instance).
 fn reap_previous(identifier: &str) {
     let pidfile = runtime_dir(identifier).join("mpv.pid");
-    if let Ok(txt) = std::fs::read_to_string(&pidfile) {
-        if let Ok(pid) = txt.trim().parse::<u32>() {
+    if let Ok(txt) = std::fs::read_to_string(&pidfile)
+        && let Ok(pid) = txt.trim().parse::<u32>() {
             kill_pid_guarded(pid);
         }
-    }
 }
 
 /// Kill the running engine — called on app exit, since mpv is a detached
 /// child that would otherwise keep playing after the window closes.
 pub fn kill_engine(identifier: &str) {
-    if let Ok(txt) = std::fs::read_to_string(runtime_dir(identifier).join("mpv.pid")) {
-        if let Ok(pid) = txt.trim().parse::<u32>() {
+    if let Ok(txt) = std::fs::read_to_string(runtime_dir(identifier).join("mpv.pid"))
+        && let Ok(pid) = txt.trim().parse::<u32>() {
             kill_pid_guarded(pid);
         }
-    }
 }
 
 fn kill_pid_guarded(pid: u32) {
     // Only kill if it's really our mpv (pid reuse guard).
-    let cmdline =
-        std::fs::read_to_string(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+    let cmdline = std::fs::read_to_string(format!("/proc/{pid}/cmdline")).unwrap_or_default();
     if cmdline.contains("input-ipc-server=") && cmdline.contains("songstress") {
         let _ = std::process::Command::new("kill")
             .args(["-9", &pid.to_string()])
@@ -306,8 +303,7 @@ pub fn current_volume() -> f64 {
 }
 
 /// Last observed mpv `path` — ground truth for the resync check below.
-static CURRENT_PATH: LazyLock<Mutex<Option<String>>> =
-    LazyLock::new(|| Mutex::new(None));
+static CURRENT_PATH: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
 fn store_path(p: Option<String>) {
     *CURRENT_PATH.lock().unwrap() = p;
@@ -430,8 +426,7 @@ impl Mpv {
             // `path` is the resync ground truth (2026-09-11 wrap desync):
             // it changes on every file boundary, whatever Rust thinks.
             (5, "path"),
-        ]
-        {
+        ] {
             let cmd = serde_json::json!(["observe_property", id, prop]);
             if let Err(e) = this.command(cmd).await {
                 eprintln!("[mpv] observe_property({prop}) failed: {e}");
@@ -478,7 +473,10 @@ impl Mpv {
                                         last_pos_emit = Instant::now();
                                         emit(
                                             "playback-position",
-                                            &PositionEvent { pos, dur: current_duration() },
+                                            &PositionEvent {
+                                                pos,
+                                                dur: current_duration(),
+                                            },
                                         );
                                     }
                                 }
@@ -489,10 +487,8 @@ impl Mpv {
                                 }
                             }
                             "pause" => {
-                                let paused = msg
-                                    .get("data")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
+                                let paused =
+                                    msg.get("data").and_then(|v| v.as_bool()).unwrap_or(false);
                                 this.state.lock().unwrap().paused = paused;
                                 emit("playback-paused", &paused);
                             }
@@ -561,10 +557,18 @@ impl Mpv {
                             match action {
                                 Some(EofAction::Advance { top_up, pre }) => {
                                     for p in pre {
-                                        this.fire(serde_json::json!(["loadfile", p, "append-play"]));
+                                        this.fire(serde_json::json!([
+                                            "loadfile",
+                                            p,
+                                            "append-play"
+                                        ]));
                                     }
                                     if let Some(p) = top_up {
-                                        this.fire(serde_json::json!(["loadfile", p, "append-play"]));
+                                        this.fire(serde_json::json!([
+                                            "loadfile",
+                                            p,
+                                            "append-play"
+                                        ]));
                                     }
                                     this.emit_changed();
                                     this.emit_queue_changed();
@@ -579,7 +583,9 @@ impl Mpv {
                                     let end = PLAYLIST_WINDOW.min(paths.len());
                                     for p in &paths[1..end] {
                                         this.fire(serde_json::json!([
-                                            "loadfile", p, "append-play"
+                                            "loadfile",
+                                            p,
+                                            "append-play"
                                         ]));
                                     }
                                     this.emit_changed();
@@ -713,7 +719,9 @@ impl Mpv {
     /// later command queues behind the drain). Responses for unregistered ids
     /// are dropped by resolve().
     fn fire(&self, args: serde_json::Value) {
-        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let payload = serde_json::json!({ "command": args, "request_id": id });
         let _ = self.tx.send(format!("{payload}\n"));
     }
@@ -733,9 +741,17 @@ impl Mpv {
     async fn load_queue(&self, start: usize, order_paths: &[String], replace_current: bool) {
         // NOTE: playlist-clear takes no argument (`playlist-remove` is the
         // one that wants "current") — passing one errors out the whole play.
-        self.command(serde_json::json!(["playlist-clear"])).await.ok();
+        self.command(serde_json::json!(["playlist-clear"]))
+            .await
+            .ok();
         if replace_current {
-            self.command(serde_json::json!(["loadfile", &order_paths[start], "replace"])).await.ok();
+            self.command(serde_json::json!([
+                "loadfile",
+                &order_paths[start],
+                "replace"
+            ]))
+            .await
+            .ok();
         }
         // User queue entries sit BETWEEN the current track and the order
         // window — appending them first yields exactly that playlist order.
@@ -754,7 +770,10 @@ impl Mpv {
         // rebuild wiped it from mpv's playlist, so re-append it.
         let wrapped: Vec<String> = {
             let st = self.state.lock().unwrap();
-            st.wrapped.as_ref().map(|w| w.iter().map(|i| i.path.clone()).collect()).unwrap_or_default()
+            st.wrapped
+                .as_ref()
+                .map(|w| w.iter().map(|i| i.path.clone()).collect())
+                .unwrap_or_default()
         };
         let end = PLAYLIST_WINDOW.min(wrapped.len());
         for path in &wrapped[..end] {
@@ -829,7 +848,7 @@ impl Mpv {
                 // Consume the current queue entry (if any), promote the front.
                 if st.from_queue {
                     let i = st.index;
-                st.order.remove(i);
+                    st.order.remove(i);
                 } else {
                     st.index += 1;
                 }
@@ -848,7 +867,11 @@ impl Mpv {
                 let i = st.index;
                 st.order.remove(i);
                 st.from_queue = false;
-                st.index = if st.index == 0 { st.order.len() - 1 } else { st.index - 1 };
+                st.index = if st.index == 0 {
+                    st.order.len() - 1
+                } else {
+                    st.index - 1
+                };
             } else {
                 let mut t = st.index as i64 + delta;
                 if delta > 0 && t >= st.order.len() as i64 {
@@ -869,7 +892,11 @@ impl Mpv {
             st.paused = false;
             // The queue rebuild discards any pre-appended next pass.
             st.wrapped = None;
-            (from, st.index, st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+            (
+                from,
+                st.index,
+                st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>(),
+            )
         };
         eprintln!(
             "[mpv] jump delta={delta} idx={from}->{index} file={}",
@@ -976,7 +1003,10 @@ impl Mpv {
             st.from_queue = true;
             st.paused = false;
             st.wrapped = None;
-            (st.index, st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>())
+            (
+                st.index,
+                st.order.iter().map(|i| i.path.clone()).collect::<Vec<_>>(),
+            )
         };
         eprintln!(
             "[mpv] queue_jump pos={pos} idx={index} file={}",
@@ -993,24 +1023,30 @@ impl Mpv {
 
     pub async fn set_paused(&self, paused: bool) -> Result<(), String> {
         self.state.lock().unwrap().paused = paused;
-        self.command(serde_json::json!(["set_property", "pause", paused])).await?;
+        self.command(serde_json::json!(["set_property", "pause", paused]))
+            .await?;
         emit("playback-paused", &paused);
         Ok(())
     }
 
     pub async fn seek_to(&self, sec: f64) -> Result<(), String> {
-        self.command(serde_json::json!(["seek", sec, "absolute"])).await?;
+        self.command(serde_json::json!(["seek", sec, "absolute"]))
+            .await?;
         store_position(sec);
         crate::mpris::emit_seeked(sec);
         emit(
             "playback-position",
-            &PositionEvent { pos: sec, dur: current_duration() },
+            &PositionEvent {
+                pos: sec,
+                dur: current_duration(),
+            },
         );
         Ok(())
     }
 
     pub async fn set_volume(&self, vol: f64) -> Result<(), String> {
-        self.command(serde_json::json!(["set_property", "volume", vol])).await?;
+        self.command(serde_json::json!(["set_property", "volume", vol]))
+            .await?;
         store_volume(vol);
         Ok(())
     }
@@ -1022,7 +1058,9 @@ impl Mpv {
     /// gapless transitions.
     pub async fn set_af(&self, chain: Option<String>) -> Result<(), String> {
         self.command(serde_json::json!([
-            "set_property", "af", chain.unwrap_or_default()
+            "set_property",
+            "af",
+            chain.unwrap_or_default()
         ]))
         .await?;
         Ok(())
@@ -1037,8 +1075,8 @@ impl Mpv {
         anchored_order: Option<(Vec<OrderItem>, usize)>,
     ) -> Result<(), String> {
         let playing = { self.state.lock().unwrap().current().is_some() };
-        if let Some((order, start)) = anchored_order {
-            if playing && !order.is_empty() {
+        if let Some((order, start)) = anchored_order
+            && playing && !order.is_empty() {
                 {
                     let mut st = self.state.lock().unwrap();
                     st.order = order;
@@ -1058,7 +1096,6 @@ impl Mpv {
                 // Current file keeps playing; only the upcoming queue swaps.
                 self.load_queue(start, &paths, false).await;
             }
-        }
         self.state.lock().unwrap().shuffle = stage;
         Ok(())
     }
@@ -1098,8 +1135,13 @@ impl Mpv {
                 self.fire(serde_json::json!(["loadfile", p, "append-play"]));
             }
         }
-        let loop_val = if stage == RepeatStage::Track { "inf" } else { "no" };
-        self.command(serde_json::json!(["set_property", "loop-file", loop_val])).await?;
+        let loop_val = if stage == RepeatStage::Track {
+            "inf"
+        } else {
+            "no"
+        };
+        self.command(serde_json::json!(["set_property", "loop-file", loop_val]))
+            .await?;
         Ok(())
     }
 
@@ -1159,7 +1201,10 @@ fn arm_wrap(st: &mut PlayState) -> Vec<String> {
 pub enum EofAction {
     /// Keep playing (mpv already advanced); fire the pre-wrap appends, then
     /// at most one window top-up — IN THIS ORDER.
-    Advance { top_up: Option<String>, pre: Vec<String> },
+    Advance {
+        top_up: Option<String>,
+        pre: Vec<String>,
+    },
     /// mpv is idle (wrap without pre-arm): playlist-clear + reload from 0.
     Reload(Vec<String>),
     Stop,
@@ -1205,16 +1250,14 @@ fn resync_index(order: &[OrderItem], index: usize, actual: &str) -> Option<usize
 }
 
 pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
-    if st.current().is_none() {
-        return None; // idle transition (we called stop())
-    }
+    st.current()?;
     let was_queued = st.from_queue;
     if was_queued {
         // The ended entry was a promoted queue entry: consume it. What mpv
         // advanced into (playlist position 1) is the queue front, or the
         // order entry that slides into `index` when the queue is empty.
         let i = st.index;
-                st.order.remove(i);
+        st.order.remove(i);
         st.from_queue = false;
     }
     if let Some(next) = st.queue.pop_front() {
@@ -1237,8 +1280,8 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
         // order entry, the index is now out of bounds: mpv either advanced
         // into the pre-armed pass (promote it) or went idle (stop).
         if st.index >= st.order.len() {
-            if st.repeat == RepeatStage::Album {
-                if let Some(wrapped) = st.wrapped.take() {
+            if st.repeat == RepeatStage::Album
+                && let Some(wrapped) = st.wrapped.take() {
                     st.order = wrapped;
                     st.index = 0;
                     // No top-up: the pre-armed pass was appended whole (up
@@ -1246,9 +1289,11 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
                     // window behind the new current is already full —
                     // appending order[31] again would DUPLICATE it in mpv's
                     // playlist (audible repeat + UI running +1 ahead).
-                    return Some(EofAction::Advance { top_up: None, pre: Vec::new() });
+                    return Some(EofAction::Advance {
+                        top_up: None,
+                        pre: Vec::new(),
+                    });
                 }
-            }
             *st = PlayState {
                 shuffle: st.shuffle,
                 repeat: st.repeat,
@@ -1257,23 +1302,31 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
             return Some(EofAction::Stop);
         }
         // current = order[index]; the order window slid by one.
-        if st.index + 1 == st.order.len() && st.repeat == RepeatStage::Album {
-            if let Some(wrapped) = st.wrapped.take() {
+        if st.index + 1 == st.order.len() && st.repeat == RepeatStage::Album
+            && let Some(wrapped) = st.wrapped.take() {
                 // mpv advanced into the pre-armed pass: promote it wholesale.
                 // Same no-top-up rationale as above: the armed 32 already
                 // fill mpv's window behind the new current.
                 st.order = wrapped;
                 st.index = 0;
-                return Some(EofAction::Advance { top_up: None, pre: Vec::new() });
+                return Some(EofAction::Advance {
+                    top_up: None,
+                    pre: Vec::new(),
+                });
             }
-        }
-        let top_up = st.order.get(st.index + PLAYLIST_WINDOW - 1).map(|i| i.path.clone());
+        let top_up = st
+            .order
+            .get(st.index + PLAYLIST_WINDOW - 1)
+            .map(|i| i.path.clone());
         let pre = pre_arm_if_last(st);
         return Some(EofAction::Advance { top_up, pre });
     }
     if st.index + 1 < st.order.len() {
         st.index += 1;
-        let top_up = st.order.get(st.index + PLAYLIST_WINDOW - 1).map(|i| i.path.clone());
+        let top_up = st
+            .order
+            .get(st.index + PLAYLIST_WINDOW - 1)
+            .map(|i| i.path.clone());
         let pre = pre_arm_if_last(st);
         Some(EofAction::Advance { top_up, pre })
     } else if let Some(wrapped) = st.wrapped.take() {
@@ -1281,7 +1334,10 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
         // No top-up (see above): the armed entries already fill the window.
         st.order = wrapped;
         st.index = 0;
-        Some(EofAction::Advance { top_up: None, pre: Vec::new() })
+        Some(EofAction::Advance {
+            top_up: None,
+            pre: Vec::new(),
+        })
     } else if st.repeat == RepeatStage::Album {
         // No pre-arm (repeat set during the last track): idle mpv — reload.
         if st.shuffle != ShuffleStage::Off {
@@ -1292,7 +1348,9 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
             Rng::shuffle(&mut st.order, seed);
         }
         st.index = 0;
-        Some(EofAction::Reload(st.order.iter().map(|i| i.path.clone()).collect()))
+        Some(EofAction::Reload(
+            st.order.iter().map(|i| i.path.clone()).collect(),
+        ))
     } else {
         *st = PlayState {
             shuffle: st.shuffle,
@@ -1303,7 +1361,7 @@ pub fn eof_advance(st: &mut PlayState) -> Option<EofAction> {
     }
 }
 
-fn number<'a>(msg: &'a serde_json::Value, key: &str) -> Option<f64> {
+fn number(msg: &serde_json::Value, key: &str) -> Option<f64> {
     msg.get(key).and_then(|v| v.as_f64())
 }
 
@@ -1329,7 +1387,11 @@ mod tests {
                 album_index: 1,
             },
         ];
-        assert_eq!(st.current_track_id(), Some("tr-1"), "index 0 of a set order");
+        assert_eq!(
+            st.current_track_id(),
+            Some("tr-1"),
+            "index 0 of a set order"
+        );
         st.index = 5;
         assert_eq!(st.current_track_id(), None, "out of range → none");
     }
@@ -1362,7 +1424,10 @@ mod tests {
         let mut c = a.clone();
         Rng::shuffle(&mut c, 42);
         assert_eq!(b, c, "same seed → same order");
-        assert_ne!(b, a, "64 items shuffling to identity is astronomically unlikely");
+        assert_ne!(
+            b, a,
+            "64 items shuffling to identity is astronomically unlikely"
+        );
     }
 
     #[test]
@@ -1372,10 +1437,7 @@ mod tests {
         assert!(resolve(42, r#"{"error":"success"}"#));
         assert!(!resolve(42, "again"), "already consumed");
         assert!(!resolve(9999, "nobody waiting"));
-        assert_eq!(
-            futures_block(rx).as_deref(),
-            Some(r#"{"error":"success"}"#)
-        );
+        assert_eq!(futures_block(rx).as_deref(), Some(r#"{"error":"success"}"#));
     }
 
     /// oneshot receiver is not sync-pollable without a runtime; a tiny single-
@@ -1395,9 +1457,11 @@ mod tests {
 
     #[test]
     fn socket_path_is_under_runtime_dir() {
-        // SAFETY-ish: tests run multi-threaded, but no other test reads this
+        // SAFETY: tests run multi-threaded, but no other test reads this
         // var concurrently; worst case the fallback branch is exercised.
-        std::env::set_var("XDG_RUNTIME_DIR", "/tmp/opencode");
+        unsafe {
+            std::env::set_var("XDG_RUNTIME_DIR", "/tmp/opencode");
+        }
         let prod = socket_path(crate::profile::PROD_ID);
         assert!(prod.starts_with("/tmp/opencode"));
         assert!(prod.ends_with("songstress/mpv.sock"));
@@ -1444,7 +1508,10 @@ mod tests {
         assert!(st.from_queue);
         assert!(st.queue.is_empty());
         assert_eq!(st.order[1].track_id, "q1", "promoted INTO the order");
-        assert_eq!(st.order[2].track_id, "b", "order entries shifted, not replaced");
+        assert_eq!(
+            st.order[2].track_id, "b",
+            "order entries shifted, not replaced"
+        );
     }
 
     #[test]
@@ -1459,7 +1526,13 @@ mod tests {
             Some(EofAction::Advance { .. }) => {}
             other => panic!("expected Advance, got {other:?}"),
         }
-        assert_eq!(st.order.iter().map(|i| i.track_id.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
+        assert_eq!(
+            st.order
+                .iter()
+                .map(|i| i.track_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
         assert_eq!(st.index, 1, "index stays — the next order entry slid in");
         assert!(!st.from_queue);
         assert_eq!(st.current().unwrap().track_id, "b");
@@ -1478,7 +1551,13 @@ mod tests {
         // 2nd eof: q1 → q2 (consume + promote at the same slot)
         eof_advance(&mut st);
         assert_eq!(st.current().unwrap().track_id, "q2");
-        assert_eq!(st.order.iter().map(|i| i.track_id.as_str()).collect::<Vec<_>>(), vec!["a", "q2", "b", "c"]);
+        assert_eq!(
+            st.order
+                .iter()
+                .map(|i| i.track_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "q2", "b", "c"]
+        );
         assert!(st.from_queue);
         // 3rd eof: q2 → b (consume, queue empty, order resumes)
         eof_advance(&mut st);
@@ -1492,7 +1571,10 @@ mod tests {
         // 40 tracks: after a normal advance the window needs order[index+31].
         let ids: Vec<String> = (0..40).map(|i| format!("t{i}")).collect();
         let refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
-        let mut st = PlayState { order: order_of(&refs), ..PlayState::default() };
+        let mut st = PlayState {
+            order: order_of(&refs),
+            ..PlayState::default()
+        };
         match eof_advance(&mut st) {
             Some(EofAction::Advance { top_up, pre }) => {
                 assert_eq!(top_up.as_deref(), Some("/t32.mp3"), "index 1 + 31");
@@ -1513,13 +1595,22 @@ mod tests {
         };
         match eof_advance(&mut st) {
             Some(EofAction::Advance { pre, .. }) => {
-                assert_eq!(pre, vec!["/a.mp3"], "wrap pass = the album, NOT the queue entry");
+                assert_eq!(
+                    pre,
+                    vec!["/a.mp3"],
+                    "wrap pass = the album, NOT the queue entry"
+                );
             }
             other => panic!("expected Advance, got {other:?}"),
         }
         assert!(st.wrapped.is_some());
         assert_eq!(
-            st.wrapped.as_ref().unwrap().iter().map(|i| i.track_id.as_str()).collect::<Vec<_>>(),
+            st.wrapped
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|i| i.track_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["a"],
             "the promoted queue entry must not leak into the repeat pass"
         );
@@ -1555,7 +1646,10 @@ mod tests {
 
     #[test]
     fn eof_without_queue_behaves_as_before_and_stop_clears_the_queue() {
-        let mut st = PlayState { order: order_of(&["a", "b"]), ..PlayState::default() };
+        let mut st = PlayState {
+            order: order_of(&["a", "b"]),
+            ..PlayState::default()
+        };
         match eof_advance(&mut st) {
             Some(EofAction::Advance { top_up, pre }) => {
                 assert_eq!(top_up, None);
@@ -1572,7 +1666,10 @@ mod tests {
             queue: queued(&["q9"]),
             ..PlayState::default()
         };
-        assert!(matches!(eof_advance(&mut st), Some(EofAction::Advance { .. })));
+        assert!(matches!(
+            eof_advance(&mut st),
+            Some(EofAction::Advance { .. })
+        ));
         assert_eq!(st.current().unwrap().track_id, "q9");
         assert!(matches!(eof_advance(&mut st), Some(EofAction::Stop)));
         assert!(st.queue.is_empty(), "stop clears the queue");
@@ -1588,7 +1685,10 @@ mod tests {
             queue: queued(&["q1"]),
             ..PlayState::default()
         };
-        assert!(matches!(eof_advance(&mut st), Some(EofAction::Advance { .. })));
+        assert!(matches!(
+            eof_advance(&mut st),
+            Some(EofAction::Advance { .. })
+        ));
         assert_eq!(st.current().unwrap().track_id, "q1");
     }
 

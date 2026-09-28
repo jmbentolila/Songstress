@@ -6,7 +6,7 @@
 //! caller (`lib.rs`): a missing/broken portal must degrade to the old
 //! behavior, never to a dead button. `None` = the user cancelled, which the
 //! frontend treats as silence, not an error. Uses the `zbus` already in the
-//! tree — same request/signal pattern as `pick_color.rs`.
+//! tree — same request/signal pattern as `screen_pick.rs`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,17 +33,13 @@ trait FileChooserPortal {
 
 #[proxy(
     interface = "org.freedesktop.portal.Request",
-    default_service = "org.freedesktop.portal.Desktop",
+    default_service = "org.freedesktop.portal.Desktop"
 )]
 trait PortalRequest {
     /// (response code, results). 0 = picked (`results["uris"]` is the
     /// chosen `file://` URIs); 1 = cancelled; 2 = failed.
     #[zbus(signal)]
-    fn response(
-        &self,
-        response: u32,
-        results: HashMap<String, OwnedValue>,
-    ) -> zbus::Result<()>;
+    fn response(&self, response: u32, results: HashMap<String, OwnedValue>) -> zbus::Result<()>;
 }
 
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(0);
@@ -122,7 +118,7 @@ async fn open_portal(
         folder.push(0);
         options.insert("current_folder", Value::from(folder));
     }
-    // No parent window (same reasoning as pick_color): an empty parent is
+    // No parent window (same reasoning as screen_pick): an empty parent is
     // legal and keeps this working on Wayland and X11 alike.
     let request = portal
         .open_file("", title, options)

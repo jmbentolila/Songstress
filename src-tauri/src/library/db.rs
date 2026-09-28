@@ -145,7 +145,9 @@ mod tests {
         {
             let conn = open(&path).expect("first open");
             let v: i64 = conn
-                .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))
+                .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| {
+                    r.get(0)
+                })
                 .unwrap();
             assert_eq!(v, MIGRATIONS.len() as i64);
         }

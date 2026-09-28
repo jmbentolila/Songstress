@@ -170,7 +170,7 @@ pub fn compute(path: &Path, duration_sec: f64) -> Result<Vec<u8>, String> {
         levels.push(blend_bucket_level(peaks[i], energy[i], bucket_frames[i]));
     }
     let max = levels.iter().copied().fold(0f32, f32::max);
-    if !(max > 0.0) {
+    if max <= 0.0 {
         return Ok(vec![0u8; BUCKETS]);
     }
     Ok(levels
@@ -203,7 +203,7 @@ pub fn ensure_algo_version(conn: &Connection) -> rusqlite::Result<usize> {
     if recorded == Some(PEAKS_ALGO_VERSION) {
         return Ok(0);
     }
-    let cleared = conn.execute("DELETE FROM track_peaks", [])? as usize;
+    let cleared = conn.execute("DELETE FROM track_peaks", [])?;
     crate::library::settings::set(conn, PEAKS_ALGO_SETTING, &PEAKS_ALGO_VERSION.to_string())?;
     Ok(cleared)
 }
@@ -221,7 +221,12 @@ pub fn cached(conn: &Connection, track_id: &str, mtime_ns: i64) -> Option<Vec<u8
 }
 
 /// Persist peaks for a track (upsert: a re-decode replaces the row).
-pub fn store(conn: &Connection, track_id: &str, mtime_ns: i64, data: &[u8]) -> rusqlite::Result<()> {
+pub fn store(
+    conn: &Connection,
+    track_id: &str,
+    mtime_ns: i64,
+    data: &[u8],
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO track_peaks(track_id, mtime_ns, buckets, data) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(track_id) DO UPDATE SET
@@ -264,10 +269,7 @@ pub fn pending_all(conn: &Connection) -> rusqlite::Result<Vec<Pending>> {
 
 /// The rows for a specific set of files (an import), cached or not — the import
 /// path has just indexed these and wants their peaks immediately.
-pub fn pending_paths(
-    conn: &Connection,
-    paths: &[PathBuf],
-) -> rusqlite::Result<Vec<Pending>> {
+pub fn pending_paths(conn: &Connection, paths: &[PathBuf]) -> rusqlite::Result<Vec<Pending>> {
     let mut st =
         conn.prepare("SELECT id, path, mtime_ns, duration_sec FROM tracks WHERE path = ?1")?;
     let mut out = Vec::new();
@@ -520,9 +522,11 @@ mod tests {
         assert_eq!(n, 1);
         assert!(pending_all(&conn).unwrap().is_empty(), "cached now");
         let bytes: Vec<u8> = conn
-            .query_row("SELECT data FROM track_peaks WHERE track_id='tr1'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT data FROM track_peaks WHERE track_id='tr1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(bytes.len(), BUCKETS);
         let _ = std::fs::remove_dir_all(&dir);

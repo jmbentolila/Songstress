@@ -426,9 +426,7 @@
   );
   let tileStop = $derived(tileStopList[tileIndex]);
   let tileLabel = $derived(
-    tileStop
-      ? `${Math.round(tileStop.rendered)}px · ${tileStop.columns} across`
-      : `${ui.tileSize}px`,
+    tileStop ? `${tileStop.columns} across` : `${ui.tileSize}px`,
   );
   let tileAria = $derived(
     tileStop

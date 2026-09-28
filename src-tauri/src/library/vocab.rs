@@ -200,7 +200,12 @@ mod tests {
                     ('tr-2','al-1','b',1.0,'/m/b.flac',1,1,'Motorhead');",
         );
         let genres = column(&conn, "genre", CAP).expect("query");
-        assert_eq!(genres.len(), 2, "folding stops at ASCII case: {:?}", values(&genres));
+        assert_eq!(
+            genres.len(),
+            2,
+            "folding stops at ASCII case: {:?}",
+            values(&genres)
+        );
     }
 
     #[test]
@@ -216,7 +221,10 @@ mod tests {
         );
         let a = artists(&conn, CAP).expect("query");
         assert_eq!(values(&a), vec!["Dave Grohl", "Ghost"]);
-        assert_eq!(a[0].count, 2, "trimmed + folded: the guest spot counts twice");
+        assert_eq!(
+            a[0].count, 2,
+            "trimmed + folded: the guest spot counts twice"
+        );
     }
 
     #[test]
@@ -249,7 +257,12 @@ mod tests {
                     ('tr-4','al-1','d',1.0,'/m/d.flac',1,1,'Three');",
         );
         let two = column(&conn, "genre", 2).expect("query");
-        assert_eq!(two.len(), 2, "the folded pair still counts as one: {:?}", values(&two));
+        assert_eq!(
+            two.len(),
+            2,
+            "the folded pair still counts as one: {:?}",
+            values(&two)
+        );
         assert_eq!(two[0].count, 2, "…and is the most used after folding");
         assert_eq!(artists(&conn, 1).expect("query").len(), 1);
         assert_eq!(albums(&conn, 1).expect("query").len(), 1);
@@ -272,8 +285,8 @@ mod tests {
         use lofty::file::{AudioFile, TaggedFileExt};
         use lofty::tag::{Accessor, ItemKey};
 
-        let dir = std::env::temp_dir()
-            .join(format!("songstress-vocab-scan-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("songstress-vocab-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let album = dir.join("Ghost/Meliora (2015)");
         std::fs::create_dir_all(&album).expect("mkdir");
@@ -315,13 +328,15 @@ mod tests {
             values(&v.artist)
         );
 
-        let (g, c, l, gr, aa): (
+        /// One vocabulary row: genre, composer, label, grouping, album-artist.
+        type VocabRow = (
             Option<String>,
             Option<String>,
             Option<String>,
             Option<String>,
             Option<String>,
-        ) = conn
+        );
+        let (g, c, l, gr, aa): VocabRow = conn
             .query_row(
                 "SELECT genre, composer, label, grouping, album_artist FROM tracks LIMIT 1",
                 [],

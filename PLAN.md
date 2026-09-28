@@ -4568,6 +4568,21 @@ announcement → Escape abandoned unsaved, staged count unchanged.
   A stray `cargo test` failure in the same run passed twice on re-run
   (watcher timing flake under load, unrelated to this change).
 
+### Dropper mark II: our own overlay picker (2026-09-28, owner request)
+
+  Mutter's PickColor crosshair shows no hotspot, so aiming it is a guess —
+  and its look is compositor-owned, unchangeable. The portal crosshair is
+  gone (`pick_color.rs` deleted): `begin_screen_pick` screenshots through
+  the portal (non-interactive, no compositor UI), stashes the PNG in memory,
+  and opens a fullscreen overlay window (`index.html#screen-pick`) rendering
+  the shot under a standard crosshair cursor with a magnifier loupe (11px
+  patch at 12x, centre tile reticuled, hex readout). Click lifts the exact
+  pixel via canvas; Escape/right-click cancels silently. Three commands are
+  the pick's three beats (begin / take image / finish with hex-or-null);
+  the hex arrives on the main window as a `screen-picked` event. Known
+  limit: the shot can span monitors while the overlay covers one. Live
+  click-through is inherently interactive — owner to pick once + Esc once.
+
 ### Playbar follows panel overrides (2026-09-15, owner request)
 
   The playbar read scan colors only, so a customized album snapped back to
@@ -5658,5 +5673,43 @@ measured grid width actually produces (`tileStops`/`tileStopIndex` in
 `buildRows.ts`, width published by AlbumGrid through a session-only layout
 store). The readout names the rendered result (`212px · 5 across`); moving
 the thumb always moves tiles. Keyboard arrows step one layout at a time.
+
+### Grain +5%, tile readout simplified (2026-09-28, owner-driven)
+
+GNOME matte grain bumped 5% on both themes (dark slope .184 → .193,
+light .052 → .055, intercepts re-derived by each theme's rule). Tile-size
+readout dropped the pixel count — `5 across` only.
+
+### Light grid: softer cast shadows, deeper field (2026-09-28, owner-driven)
+
+Light-mode edge shadows eased 0.22/0.30 → 0.14/0.18; the light grid field
+deepened `246,246,249` → `236,236,241` (tokens plus `gradient.ts` SURFACE,
+so artwork mixing follows the same surface).
+
+### Current-track marker: mini equalizer (2026-09-28, owner-driven)
+
+The ▶/❚❚ glyph in the tracklist's number slot became a 4-bar animated
+equalizer: transform-only staggered loops while playing, frozen bars while
+paused, static under reduced motion — both layers stay mounted and cross-fade
+(560ms, owner-tuned) so the play/pause flip dissolves instead of teleporting.
+Screen-reader label follows state (Now playing / Paused).
+
+### Code audit (2026-09-28, owner request)
+
+  target/ at 17G is normal cargo weight: 7.8G incremental, 6.4G deps
+  (~1G of that in seven stale full songstress binaries from rebuilds),
+  2G release. Gitignored, regenerable; reclaim with `cargo clean`
+  (nuclear) or `rm -rf target/debug/incremental` (~8G, slower next build).
+  Clippy pass done (clippy + rustfmt newly installed): ~37 warnings →
+  zero. Auto-fix took the clones, casts, lifetimes and sort_by_keys;
+  hand-fixed the 10-arg test helper (named-field Stage struct), two
+  sort_by_keys, a let-else, two complex-type aliases and a NaN-sloppy
+  float comparison in peaks.rs. Edition 2021 → 2024 surfaced 25 more
+  collapsible-ifs (auto-fixed) plus one unsafe set_var in tests (now in
+  an explicit unsafe block). Production unwraps audited: mutex locks +
+  startup fail-fasts are fine, queue_jump's pops are range-guarded; one
+  fresh unwrap in screen_pick.rs replaced with if-let. `cargo fmt` also
+  normalized the tree, so this diff carries reflow churn throughout
+  src-tauri/.
 
 Gates: cargo 142, vitest 140, svelte-check 0, build ok.

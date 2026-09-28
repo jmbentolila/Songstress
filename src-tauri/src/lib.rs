@@ -10,11 +10,11 @@ mod menu;
 mod menu_dbus;
 mod mpris;
 mod mpv;
-mod pick_color;
 mod portal_files;
 pub mod profile;
-mod wayland_appmenu;
+mod screen_pick;
 mod watcher;
+mod wayland_appmenu;
 mod window_state;
 
 // Shared DB connection. Commands run on the async runtime pool and take the
@@ -90,7 +90,9 @@ fn pool_tracks(
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
             });
             match mapped {
-                Ok(rows) => rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                Ok(rows) => rows
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?,
                 Err(e) => return Err(e.to_string()),
             }
         };
@@ -179,7 +181,9 @@ async fn play_album(
                     .map_err(|e| e.to_string())?;
                 let mapped = stmt.query_map([&album_id], |r| r.get::<_, String>(0));
                 match mapped {
-                    Ok(rows) => rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                    Ok(rows) => rows
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())?,
                     Err(e) => return Err(e.to_string()),
                 }
             }
@@ -193,7 +197,9 @@ async fn play_album(
                     .map_err(|e| e.to_string())?;
                 let mapped = stmt.query_map([], |r| r.get::<_, String>(0));
                 match mapped {
-                    Ok(rows) => rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                    Ok(rows) => rows
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| e.to_string())?,
                     Err(e) => return Err(e.to_string()),
                 }
             }
@@ -201,7 +207,9 @@ async fn play_album(
         let pool = pool_tracks(&conn, &album_ids)?;
         let clicked = match shuffle {
             mpv::ShuffleStage::Off => track_index,
-            _ => pool.iter().position(|t| t.album_id == album_id && t.album_index == track_index)
+            _ => pool
+                .iter()
+                .position(|t| t.album_id == album_id && t.album_index == track_index)
                 .ok_or("clicked track not in pool")?,
         };
         (pool, clicked)
@@ -240,7 +248,9 @@ fn anchored_order(
                 .map_err(|e| e.to_string())?;
             let mapped = stmt.query_map([current_album_id], |r| r.get::<_, String>(0));
             match mapped {
-                Ok(rows) => rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                Ok(rows) => rows
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?,
                 Err(e) => return Err(e.to_string()),
             }
         }
@@ -254,7 +264,9 @@ fn anchored_order(
                 .map_err(|e| e.to_string())?;
             let mapped = stmt.query_map([], |r| r.get::<_, String>(0));
             match mapped {
-                Ok(rows) => rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?,
+                Ok(rows) => rows
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?,
                 Err(e) => return Err(e.to_string()),
             }
         }
@@ -283,15 +295,24 @@ async fn playback_set_shuffle(
         match st.current() {
             Some(item) => {
                 let conn = state.db.lock().unwrap();
-                Some(anchored_order(&conn, &item.track_id, &item.album_id, stage)?)
+                Some(anchored_order(
+                    &conn,
+                    &item.track_id,
+                    &item.album_id,
+                    stage,
+                )?)
             }
             None => None,
         }
     };
     engine.0.set_shuffle(stage, anchored.flatten()).await?;
     let conn = state.db.lock().unwrap();
-    library::settings::set(&conn, "shuffleStage", &serde_json::json!(stage.as_str()).to_string())
-        .map_err(|e| e.to_string())?;
+    library::settings::set(
+        &conn,
+        "shuffleStage",
+        &serde_json::json!(stage.as_str()).to_string(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -304,8 +325,12 @@ async fn playback_set_repeat(
     let stage = mpv::RepeatStage::parse(&stage);
     engine.0.set_repeat(stage).await?;
     let conn = state.db.lock().unwrap();
-    library::settings::set(&conn, "repeatStage", &serde_json::json!(stage.as_str()).to_string())
-        .map_err(|e| e.to_string())?;
+    library::settings::set(
+        &conn,
+        "repeatStage",
+        &serde_json::json!(stage.as_str()).to_string(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -355,7 +380,9 @@ fn tracks_by_ids(
             let mut stmt = conn
                 .prepare("SELECT path, album_id FROM tracks WHERE id = ?1")
                 .map_err(|e| e.to_string())?;
-            let mut mapped = stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?;
+            let mut mapped = stmt
+                .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(|e| e.to_string())?;
             match mapped.next() {
                 Some(r) => Some(r.map_err(|e| e.to_string())?),
                 None => continue,
@@ -394,10 +421,7 @@ async fn playback_queue(
 }
 
 #[tauri::command]
-async fn playback_queue_remove(
-    engine: tauri::State<'_, Engine>,
-    pos: usize,
-) -> Result<(), String> {
+async fn playback_queue_remove(engine: tauri::State<'_, Engine>, pos: usize) -> Result<(), String> {
     engine.0.queue_remove(pos).await
 }
 
@@ -482,7 +506,10 @@ struct ScanSummary {
 /// empty, the same screen a first launch shows. `SONGSTRESS_SCAN_STALL_AT`
 /// (0-100, default 40) chooses where in the loop it parks. Unset ⇒ inert.
 fn scan_park() -> Option<(usize, std::time::Duration)> {
-    let ms: u64 = std::env::var("SONGSTRESS_SCAN_STALL_MS").ok()?.parse().ok()?;
+    let ms: u64 = std::env::var("SONGSTRESS_SCAN_STALL_MS")
+        .ok()?
+        .parse()
+        .ok()?;
     if ms == 0 {
         return None;
     }
@@ -537,19 +564,27 @@ async fn scan_inner(
         let t_files = std::time::Instant::now();
         let park = scan_park();
         let parked = std::sync::atomic::AtomicBool::new(false);
-        let counts = library::scan::run_scan_files(&mut conn, &roots, only.as_ref(), |done, total| {
-            if let Some((at, dur)) = park {
-                if total > 0 && done * 100 >= total * at && !parked.load(Ordering::Relaxed) {
-                    parked.store(true, Ordering::Relaxed);
-                    eprintln!(
-                        "[scan] SONGSTRESS_SCAN_STALL_MS: parked at {done}/{total} for {}ms",
-                        dur.as_millis()
-                    );
-                    std::thread::sleep(dur);
-                }
-            }
-            let _ = emitter.emit("scan-progress", serde_json::json!({ "done": done, "total": total }));
-        }, full)?;
+        let counts = library::scan::run_scan_files(
+            &mut conn,
+            &roots,
+            only.as_ref(),
+            |done, total| {
+                if let Some((at, dur)) = park
+                    && total > 0 && done * 100 >= total * at && !parked.load(Ordering::Relaxed) {
+                        parked.store(true, Ordering::Relaxed);
+                        eprintln!(
+                            "[scan] SONGSTRESS_SCAN_STALL_MS: parked at {done}/{total} for {}ms",
+                            dur.as_millis()
+                        );
+                        std::thread::sleep(dur);
+                    }
+                let _ = emitter.emit(
+                    "scan-progress",
+                    serde_json::json!({ "done": done, "total": total }),
+                );
+            },
+            full,
+        )?;
         if let Some(paths) = &flag_pending {
             library::import::mark_staged(&conn, paths)?;
         }
@@ -558,7 +593,10 @@ async fn scan_inner(
         // Shares the progress channel; cheap when everything is filled.
         let t_art = std::time::Instant::now();
         library::artwork::refresh(&conn, &cache_dir, |done, total| {
-            let _ = emitter.emit("scan-progress", serde_json::json!({ "phase": "artwork", "done": done, "total": total }));
+            let _ = emitter.emit(
+                "scan-progress",
+                serde_json::json!({ "phase": "artwork", "done": done, "total": total }),
+            );
         })?;
         // Disk-side twin of the DB orphan cleanup: albums died during this
         // scan (discards, retags to a new key), their thumbs dirs must not
@@ -630,7 +668,11 @@ async fn scan_inner(
         }
         eprintln!(
             "[scan] files {:?} (added {} updated {} removed {} skipped {}) · artwork {:?}",
-            files_elapsed, counts.added, counts.updated, counts.removed, counts.skipped,
+            files_elapsed,
+            counts.added,
+            counts.updated,
+            counts.removed,
+            counts.skipped,
             t_art.elapsed()
         );
         eprintln!(
@@ -651,8 +693,9 @@ async fn scan_inner(
     // set forever — an eternal skeleton over an empty grid. That is precisely the
     // shape of the old `music root null` bug (AGENTS.md), and the placeholder is
     // only honest while this always fires.
-    let counts_or_err: Result<library::scan::ScanCounts, String> =
-        result.map_err(|e| format!("scan task failed: {e}")).and_then(|c| c);
+    let counts_or_err: Result<library::scan::ScanCounts, String> = result
+        .map_err(|e| format!("scan task failed: {e}"))
+        .and_then(|c| c);
 
     let summary = match &counts_or_err {
         Ok(counts) => ScanSummary {
@@ -697,15 +740,14 @@ async fn scan_inner(
 /// A retag that changes album identity regroups the rows (merge, move,
 /// split) exactly as a normal scan would. `scan-finished` is emitted so
 /// the frontend reloads its dump the way it does after any scan.
-fn rescan_written(
-    conn: &mut rusqlite::Connection,
-    app: &tauri::AppHandle,
-    paths: &[PathBuf],
-) {
+fn rescan_written(conn: &mut rusqlite::Connection, app: &tauri::AppHandle, paths: &[PathBuf]) {
     if paths.is_empty() {
         return;
     }
-    let mut roots: Vec<PathBuf> = paths.iter().filter_map(|p| p.parent().map(PathBuf::from)).collect();
+    let mut roots: Vec<PathBuf> = paths
+        .iter()
+        .filter_map(|p| p.parent().map(PathBuf::from))
+        .collect();
     roots.sort();
     roots.dedup();
     let only: std::collections::HashSet<PathBuf> = paths.iter().cloned().collect();
@@ -741,11 +783,17 @@ fn roots_from_settings(all: &std::collections::HashMap<String, String>) -> Vec<P
         .cloned()
         .and_then(|v| serde_json::from_str::<Option<String>>(&v).ok().flatten())
         .filter(|s| !s.trim().is_empty());
-    vec![legacy.map(PathBuf::from).unwrap_or_else(|| dirs_home().join("Music"))]
+    vec![legacy
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs_home().join("Music"))]
 }
 
 fn music_roots(state: &AppState) -> Vec<PathBuf> {
-    roots_from_settings(&library::settings::all(&state.db.lock().unwrap()).ok().unwrap_or_default())
+    roots_from_settings(
+        &library::settings::all(&state.db.lock().unwrap())
+            .ok()
+            .unwrap_or_default(),
+    )
 }
 
 /// Primary root: import-save target, picker start dir, first watch root.
@@ -779,12 +827,16 @@ async fn scan_library(
     root: Option<String>,
     full: Option<bool>,
 ) -> Result<ScanSummary, String> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let roots = scan_roots(&state, &cache_dir, root);
-    run_library_scan(app, state.db_path.clone(), cache_dir, roots, full.unwrap_or(false)).await
+    run_library_scan(
+        app,
+        state.db_path.clone(),
+        cache_dir,
+        roots,
+        full.unwrap_or(false),
+    )
+    .await
 }
 
 fn dirs_home() -> PathBuf {
@@ -855,13 +907,10 @@ pub(crate) mod colors {
             .into_iter()
             .map(|(k, (w, n))| (to_rgb(k), w, n))
             .collect();
-        buckets.sort_by(|a, b| b.1.cmp(&a.1));
+        buckets.sort_by_key(|b| std::cmp::Reverse(b.1));
         let mut clusters: Vec<(Rgb, u64, u64)> = Vec::new();
         for (color, weight, pixels) in buckets {
-            if let Some(entry) = clusters
-                .iter_mut()
-                .find(|(c, _, _)| dist(*c, color) < 64)
-            {
+            if let Some(entry) = clusters.iter_mut().find(|(c, _, _)| dist(*c, color) < 64) {
                 let total = entry.1 + weight;
                 entry.0 = [
                     ((entry.0[0] as u64 * entry.1 + color[0] as u64 * weight) / total) as u8,
@@ -934,9 +983,7 @@ pub(crate) mod colors {
             .filter(|(_, w, _)| significant(w))
             .max_by_key(|(c, w, _)| (chroma(*c), *w))
             .map(|(c, _, _)| *c);
-        let Some(hot_c) = hot else {
-            return None;
-        };
+        let hot_c = hot?;
         let hot_hue = hue_deg(hot_c);
         let mut best: Option<(Rgb, (u32, u64))> = None;
         for (c, _, n) in &clusters {
@@ -970,12 +1017,11 @@ pub(crate) mod colors {
         // the mud. Its gray-artwork shape — blue sky under white snow —
         // needs no special case now: snow has no chroma, so the vivid
         // pick lands on the sky and the far pick on the snow.)
-        let (c1_final, c2) =
-            if (chroma(anchor), lum(anchor)) <= (chroma(hot_c), lum(hot_c)) {
-                (anchor, hot_c)
-            } else {
-                (hot_c, anchor)
-            };
+        let (c1_final, c2) = if (chroma(anchor), lum(anchor)) <= (chroma(hot_c), lum(hot_c)) {
+            (anchor, hot_c)
+        } else {
+            (hot_c, anchor)
+        };
         Some((c1_final, c2))
     }
 
@@ -1031,8 +1077,8 @@ async fn album_colors(app: tauri::AppHandle, file: String) -> Result<[u8; 6], St
 // shrink+restore forces the reconfigure that remaps the webview correctly.
 #[tauri::command]
 fn fix_viewport(app: tauri::AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        if let Ok(size) = win.inner_size() {
+    if let Some(win) = app.get_webview_window("main")
+        && let Ok(size) = win.inner_size() {
             let _ = win.set_size(tauri::PhysicalSize::new(
                 size.width,
                 size.height.saturating_sub(1),
@@ -1040,7 +1086,6 @@ fn fix_viewport(app: tauri::AppHandle) {
             std::thread::sleep(std::time::Duration::from_millis(80));
             let _ = win.set_size(size);
         }
-    }
 }
 
 // --- KDE decoration-aware titlebar -----------------------------------------
@@ -1137,7 +1182,9 @@ const DEFAULT_MAXIMIZE: DecoButton = DecoButton {
     hover: [38, 148, 62],
 };
 
-fn read_ini(path: &std::path::Path) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+fn read_ini(
+    path: &std::path::Path,
+) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
     std::fs::read_to_string(path)
         .map(|text| parse_ini(&text))
         .unwrap_or_default()
@@ -1159,12 +1206,11 @@ fn parse_ini(
             // 2026-09-04 artwork-removal panic, but a header ending in
             // ']' can never slice mid-char here; the real culprit was
             // lofty's write_id3v1 — see tags.rs write_file and PLAN.md.)
-            if let Some(rest) = line.strip_prefix('[') {
-                if let Some(name) = rest.strip_suffix(']') {
+            if let Some(rest) = line.strip_prefix('[')
+                && let Some(name) = rest.strip_suffix(']') {
                     section = name.to_string();
                     continue;
                 }
-            }
         }
         if let Some((key, val)) = line.split_once('=') {
             out.entry(section.clone())
@@ -1201,11 +1247,10 @@ fn opacity_percent(raw: Option<&String>) -> u8 {
 }
 
 fn config_dir() -> std::path::PathBuf {
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.is_empty() {
             return std::path::PathBuf::from(xdg);
         }
-    }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     std::path::PathBuf::from(home).join(".config")
 }
@@ -1230,11 +1275,19 @@ fn kde_window_decoration() -> WindowDecoration {
     let spacing_left = u8_field(sizing, "ButtonSpacingLeft", 10);
 
     WindowDecoration {
-        buttons_left: get("ButtonsOnLeft").cloned().unwrap_or_else(|| "XIA".into()),
+        buttons_left: get("ButtonsOnLeft")
+            .cloned()
+            .unwrap_or_else(|| "XIA".into()),
         buttons_right: get("ButtonsOnRight").cloned().unwrap_or_default(),
         close: klassy_button(color("ButtonOverrideColorsActiveClose"), DEFAULT_CLOSE),
-        minimize: klassy_button(color("ButtonOverrideColorsActiveMinimize"), DEFAULT_MINIMIZE),
-        maximize: klassy_button(color("ButtonOverrideColorsActiveMaximize"), DEFAULT_MAXIMIZE),
+        minimize: klassy_button(
+            color("ButtonOverrideColorsActiveMinimize"),
+            DEFAULT_MINIMIZE,
+        ),
+        maximize: klassy_button(
+            color("ButtonOverrideColorsActiveMaximize"),
+            DEFAULT_MAXIMIZE,
+        ),
         bg_opacity_active: opacity_percent(color("ButtonBackgroundOpacityActive")),
         bg_opacity_inactive: opacity_percent(color("ButtonBackgroundOpacityInactive")),
         dot_size: dot,
@@ -1275,11 +1328,10 @@ async fn track_peaks(
         )
         .map_err(|e| e.to_string())?
     };
-    if let Ok(conn) = state.db.lock() {
-        if let Some(data) = library::peaks::cached(&conn, &track_id, mtime_ns) {
+    if let Ok(conn) = state.db.lock()
+        && let Some(data) = library::peaks::cached(&conn, &track_id, mtime_ns) {
             return Ok(data);
         }
-    }
     // Decode on a BLOCKING pool thread. A ~200ms of CPU decode in a SYNC command
     // would run on the MAIN thread and stall every other command while it
     // worked — including the playbar's own update, which is what made it look
@@ -1653,7 +1705,11 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
         .map(PathBuf::from)
         .map(|h| h.join("Pictures"))
         .unwrap_or_else(|_| music_root(&state));
-    let start = if pictures.is_dir() { pictures } else { music_root(&state) };
+    let start = if pictures.is_dir() {
+        pictures
+    } else {
+        music_root(&state)
+    };
     let image_globs: &[&str] = &["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.tiff"];
     Ok(open_files(
         "Choose Cover Image or Audio File",
@@ -1668,15 +1724,6 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
     )
     .await?
     .and_then(|mut v| v.pop()))
-}
-
-/// Screen color picker (Step 9b: the dropper in the panel-gradient editor).
-/// Raises the compositor's crosshair through the portal — no screenshot
-/// files, no foreign dialogs. `None` = the user cancelled (Esc), which the
-/// frontend treats as silence, not an error.
-#[tauri::command]
-async fn pick_screen_color() -> Result<Option<String>, String> {
-    pick_color::pick_color().await
 }
 
 /// Read a picked image into base64 for `ArtChange.upload`. An AUDIO path
@@ -1746,7 +1793,10 @@ fn validate_new_root(roots: &[PathBuf], path: &Path) -> Result<(), String> {
 }
 
 fn persist_roots(state: &AppState, roots: &[PathBuf]) -> Result<(), String> {
-    let list: Vec<String> = roots.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let list: Vec<String> = roots
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
     library::settings::set(
         &state.db.lock().unwrap(),
         "musicDirs",
@@ -1782,8 +1832,7 @@ fn rewatch(state: &AppState) {
     *WATCH_HANDLE.lock().unwrap() = Some(handle);
 }
 
-static WATCH_HANDLE: std::sync::Mutex<Option<watcher::WatchHandle>> =
-    std::sync::Mutex::new(None);
+static WATCH_HANDLE: std::sync::Mutex<Option<watcher::WatchHandle>> = std::sync::Mutex::new(None);
 
 /// Current music folders (effective roots, Step 7c).
 #[tauri::command]
@@ -1826,7 +1875,10 @@ async fn add_music_folder(
     let roots = scan_roots(&state, &cache_dir, None);
     run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
     Ok(Some(
-        music_roots(&state).into_iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+        music_roots(&state)
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
     ))
 }
 
@@ -1862,7 +1914,10 @@ async fn remove_music_folder(
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let roots = scan_roots(&state, &cache_dir, None);
     run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
-    Ok(music_roots(&state).into_iter().map(|p| p.to_string_lossy().into_owned()).collect())
+    Ok(music_roots(&state)
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
 }
 
 // --- Import staging ---------------------------------------------------------
@@ -1874,7 +1929,9 @@ async fn remove_music_folder(
 
 /// Multi-file picker for IMPORT staging. Returns None on cancel.
 #[tauri::command]
-async fn choose_import_files(state: tauri::State<'_, AppState>) -> Result<Option<Vec<String>>, String> {
+async fn choose_import_files(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<Vec<String>>, String> {
     let start = music_root(&state);
     // KDE filter syntax "globs|Label"; MIME globs (audio/*) miss files
     // whose mime info is missing, extensions never do.
@@ -1947,44 +2004,42 @@ async fn relink_track(
         .map(|d| library::import::import_dir(&d))
         .map_err(|e| e.to_string())?;
 
-    let final_path = if roots.iter().any(|r| new_path.starts_with(r))
-        || new_path.starts_with(&import_root)
-    {
-        new_path.clone()
-    } else {
-        let album_id: String = {
-            let conn = state.db.lock().unwrap();
-            conn.query_row(
-                "SELECT album_id FROM tracks WHERE id = ?1",
-                [&track_id],
-                |r| r.get::<_, String>(0),
-            )
-            .map_err(|_| "unknown track".to_string())?
-        };
-        let name = new_path
-            .file_name()
-            .map(|n| n.to_os_string())
-            .unwrap_or_default();
-        // The resolver the import system uses: merge into the album's own
-        // folder if it exists, else the artist's layout, else the library's
-        // majority layout, else the primary root.
-        let dest = {
-            let conn = state.db.lock().unwrap();
-            library::import::album_destination(&conn, &roots, &music_dir, &album_id)?
-                .folder
-        }
-        .join(name);
-        match library::import::resolve_collision(&new_path, &dest)? {
-            Some(d) => {
-                if let Some(p) = d.parent() {
-                    std::fs::create_dir_all(p).map_err(|e| format!("mkdir {p:?}: {e}"))?;
-                }
-                std::fs::copy(&new_path, &d).map_err(|e| format!("copy: {e}"))?;
-                d
+    let final_path =
+        if roots.iter().any(|r| new_path.starts_with(r)) || new_path.starts_with(&import_root) {
+            new_path.clone()
+        } else {
+            let album_id: String = {
+                let conn = state.db.lock().unwrap();
+                conn.query_row(
+                    "SELECT album_id FROM tracks WHERE id = ?1",
+                    [&track_id],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(|_| "unknown track".to_string())?
+            };
+            let name = new_path
+                .file_name()
+                .map(|n| n.to_os_string())
+                .unwrap_or_default();
+            // The resolver the import system uses: merge into the album's own
+            // folder if it exists, else the artist's layout, else the library's
+            // majority layout, else the primary root.
+            let dest = {
+                let conn = state.db.lock().unwrap();
+                library::import::album_destination(&conn, &roots, &music_dir, &album_id)?.folder
             }
-            None => return Err("the library already has an identical file".into()),
-        }
-    };
+            .join(name);
+            match library::import::resolve_collision(&new_path, &dest)? {
+                Some(d) => {
+                    if let Some(p) = d.parent() {
+                        std::fs::create_dir_all(p).map_err(|e| format!("mkdir {p:?}: {e}"))?;
+                    }
+                    std::fs::copy(&new_path, &d).map_err(|e| format!("copy: {e}"))?;
+                    d
+                }
+                None => return Err("the library already has an identical file".into()),
+            }
+        };
 
     let conn = state.db.lock().unwrap();
     let changed = conn
@@ -2089,10 +2144,7 @@ async fn import_music(
     state: tauri::State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<library::import::ImportReport, String> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let db_path = state.db_path.clone();
     let requested: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     let files = library::import::import_targets(&requested)?;
@@ -2174,10 +2226,7 @@ async fn save_imports(
     album_id: Option<String>,
     track_id: Option<String>,
 ) -> Result<library::import::SaveReport, String> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let db_path = state.db_path.clone();
     let staged = tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
@@ -2230,10 +2279,7 @@ async fn discard_imports(
     album_id: Option<String>,
     track_id: Option<String>,
 ) -> Result<usize, String> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let db_path = state.db_path.clone();
     let staged = tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
@@ -2430,8 +2476,8 @@ async fn tag_vocabulary(
 
 #[tauri::command]
 async fn get_track_file(
-  state: tauri::State<'_, AppState>,
-  track_id: String,
+    state: tauri::State<'_, AppState>,
+    track_id: String,
 ) -> Result<library::tags::TrackFile, String> {
     let db_path = state.db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -2475,7 +2521,9 @@ async fn save_track_tags(
                 |r| r.get(0),
             )
             .map_err(|_| "unknown track".to_string())?;
-        let file_path = library::tags::track_file(&conn, &track_id).map(|f| f.path).unwrap_or_default();
+        let file_path = library::tags::track_file(&conn, &track_id)
+            .map(|f| f.path)
+            .unwrap_or_default();
         let art = art.unwrap_or_default();
         let changed = art != library::tags::ArtChange::Keep;
         library::tags::save_track_tags(&conn, &track_id, &tags, &art)?;
@@ -2486,7 +2534,11 @@ async fn save_track_tags(
         if changed {
             let _ = library::artwork::refresh_one(&conn, &cache_dir, &album_id);
         }
-        rescan_written(&mut conn, &app, std::slice::from_ref(&PathBuf::from(file_path)));
+        rescan_written(
+            &mut conn,
+            &app,
+            std::slice::from_ref(&PathBuf::from(file_path)),
+        );
         Ok(())
     })
     .await
@@ -2510,13 +2562,13 @@ async fn save_album_tags(
             let mut stmt = conn
                 .prepare("SELECT path FROM tracks WHERE album_id = ?1")
                 .map_err(|e| e.to_string())?;
-            let out = stmt
+            
+            stmt
                 .query_map([&album_id], |r| r.get::<_, String>(0))
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
                 .map(PathBuf::from)
-                .collect();
-            out
+                .collect()
         };
         let art = art.unwrap_or_default();
         let changed = art != library::tags::ArtChange::Keep;
@@ -2606,12 +2658,14 @@ pub fn run() {
         .register_uri_scheme_protocol("thumb", |ctx, request| {
             // thumb://<album_id>/<size>.webp — served from the app cache dir
             // with a size fallback chain (512 → 256 → 96).
-            let response = |status: u16, body: Vec<u8>| tauri::http::Response::builder()
-                .status(status)
-                .header("Content-Type", "image/webp")
-                .header("Cache-Control", "max-age=31536000, immutable")
-                .body(body)
-                .unwrap();
+            let response = |status: u16, body: Vec<u8>| {
+                tauri::http::Response::builder()
+                    .status(status)
+                    .header("Content-Type", "image/webp")
+                    .header("Cache-Control", "max-age=31536000, immutable")
+                    .body(body)
+                    .unwrap()
+            };
             let uri = request.uri().to_string();
             let path = uri
                 .strip_prefix("thumb://")
@@ -2648,8 +2702,7 @@ pub fn run() {
             let mut sizes: Vec<u32> = vec![size_n];
             sizes.extend(chain.iter().copied());
             for candidate in sizes {
-                let path =
-                    library::artwork::thumb_path(&cache_dir, album_id, candidate);
+                let path = library::artwork::thumb_path(&cache_dir, album_id, candidate);
                 if let Ok(bytes) = std::fs::read(&path) {
                     return response(200, bytes);
                 }
@@ -2696,11 +2749,10 @@ pub fn run() {
                 for delay_ms in [600u64, 2500] {
                     std::thread::sleep(std::time::Duration::from_millis(delay_ms));
                     if let Ok(size) = win.inner_size() {
-                        let _ = win
-                            .set_size(tauri::PhysicalSize::new(
-                                size.width,
-                                size.height.saturating_sub(1),
-                            ));
+                        let _ = win.set_size(tauri::PhysicalSize::new(
+                            size.width,
+                            size.height.saturating_sub(1),
+                        ));
                         std::thread::sleep(std::time::Duration::from_millis(80));
                         let _ = win.set_size(size);
                     }
@@ -2708,13 +2760,10 @@ pub fn run() {
             });
             // Phase 2 M1: open (and migrate) the library DB for the shared
             // app state before any command can run.
-            let db_dir = app
-                .path()
-                .app_data_dir()
-                .expect("app data dir");
+            let db_dir = app.path().app_data_dir().expect("app data dir");
             std::fs::create_dir_all(&db_dir).expect("create data dir");
-            let conn = library::db::open(&db_dir.join("songstress.db"))
-                .expect("open library database");
+            let conn =
+                library::db::open(&db_dir.join("songstress.db")).expect("open library database");
             // Cached waveform bytes change meaning when the decode metric changes.
             // Expire the derived rows once per behavior revision before any command
             // can treat them as current: user audio and library rows are untouched.
@@ -2730,14 +2779,12 @@ pub fn run() {
             // copy era left under the cache directory are pending too, and the
             // pile has to survive the upgrade — a door that went quiet overnight
             // would read as the app having thrown the import away.
-            if let Ok(cache) = app.path().app_cache_dir() {
-                if let Err(e) = library::import::mark_legacy_staged(
-                    &conn,
-                    &library::import::import_dir(&cache),
-                ) {
+            if let Ok(cache) = app.path().app_cache_dir()
+                && let Err(e) =
+                    library::import::mark_legacy_staged(&conn, &library::import::import_dir(&cache))
+                {
                     eprintln!("[staging] could not flag pre-existing imports: {e}");
                 }
-            }
             // Persisted volume (JSON number in settings) drives the mpv spawn
             // flag — the first track must not blare at the default 80.
             let volume: f64 = library::settings::all(&conn)
@@ -2856,11 +2903,10 @@ pub fn run() {
                         if SCAN_RUNNING.load(Ordering::SeqCst) {
                             continue; // dirty stays set → rescan after it settles
                         }
-                        if let Some(t) = last {
-                            if t.elapsed() < WATCH_MIN_INTERVAL {
+                        if let Some(t) = last
+                            && t.elapsed() < WATCH_MIN_INTERVAL {
                                 continue; // dirty stays set → scan when due
                             }
-                        }
                         WATCH_DIRTY.store(false, Ordering::SeqCst);
                         last = Some(std::time::Instant::now());
                         let cache_dir = app_h.path().app_cache_dir().unwrap_or_default();
@@ -2949,7 +2995,9 @@ pub fn run() {
             get_art_candidates,
             delete_artwork,
             pick_image,
-            pick_screen_color,
+            screen_pick::begin_screen_pick,
+            screen_pick::take_pick_image,
+            screen_pick::finish_screen_pick,
             read_image
         ])
         .on_window_event(|window, event| {
@@ -3003,7 +3051,10 @@ mod tests {
         let mut count = 0;
         for entry in std::fs::read_dir(dir).expect("covers dir") {
             let path = entry.expect("entry").path();
-            if !matches!(path.extension().and_then(|e| e.to_str()), Some("jpg") | Some("png")) {
+            if !matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("jpg") | Some("png")
+            ) {
                 continue;
             }
             let out = colors::extract(&path)
@@ -3132,7 +3183,10 @@ mod tests {
         let out = synth(|_, _| [128, 128, 128]);
         let (c1, c2) = ([out[0], out[1], out[2]], [out[3], out[4], out[5]]);
         let chroma = |c: [u8; 3]| c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2]);
-        assert!(chroma(c1) <= 32 && chroma(c2) <= 32, "stays gray, got {c1:?} {c2:?}");
+        assert!(
+            chroma(c1) <= 32 && chroma(c2) <= 32,
+            "stays gray, got {c1:?} {c2:?}"
+        );
         assert!(
             (c2[0] as u16 + c2[1] as u16 + c2[2] as u16)
                 > (c1[0] as u16 + c1[1] as u16 + c1[2] as u16),
@@ -3251,7 +3305,10 @@ mod tests {
         assert!(super::roots_from_settings(&bad).is_empty());
 
         // Missing both keys → ~/Music fallback.
-        assert_eq!(super::roots_from_settings(&std::collections::HashMap::new()).len(), 1);
+        assert_eq!(
+            super::roots_from_settings(&std::collections::HashMap::new()).len(),
+            1
+        );
     }
 
     #[test]
@@ -3371,13 +3428,21 @@ mod tests {
         use std::path::PathBuf;
         let d = |s: &str| PathBuf::from(s);
         // One dir → itself (single-album artist lands ON the album folder).
-        assert_eq!(super::common_parent(&[d("/m/a/One")]).unwrap(), d("/m/a/One"));
-        assert_eq!(super::common_parent(&[d("/m/a/One"), d("/m/a/Two")]).unwrap(), d("/m/a"));
+        assert_eq!(
+            super::common_parent(&[d("/m/a/One")]).unwrap(),
+            d("/m/a/One")
+        );
+        assert_eq!(
+            super::common_parent(&[d("/m/a/One"), d("/m/a/Two")]).unwrap(),
+            d("/m/a")
+        );
         // The b / bc trap: shared PREFIX STRING ≠ shared component — /m/b
         // and /m/bee must resolve to /m, not /m/b.
-        assert_eq!(super::common_parent(&[d("/m/b"), d("/m/bee")]).unwrap(), d("/m"));
+        assert_eq!(
+            super::common_parent(&[d("/m/b"), d("/m/bee")]).unwrap(),
+            d("/m")
+        );
         // No shared root component at all → None, never "".
         assert_eq!(super::common_parent(&[] as &[PathBuf]), None);
     }
 }
-

@@ -325,7 +325,10 @@ impl Dbusmenu {
             return owned(false);
         }
         match find_item(id) {
-            Some(item) => item_props(&item).get(&name).cloned().unwrap_or(owned(false)),
+            Some(item) => item_props(&item)
+                .get(&name)
+                .cloned()
+                .unwrap_or(owned(false)),
             None => owned(false),
         }
     }

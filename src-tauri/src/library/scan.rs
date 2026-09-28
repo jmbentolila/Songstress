@@ -127,8 +127,7 @@ fn parse_file(path: &Path) -> Result<ParsedTrack, String> {
         .unwrap_or_default();
 
     let opt_string = |v: Option<Cow<'_, str>>| -> Option<String> {
-        v.map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+        v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
     };
     // ItemKey lookups (no accessor for these): Composer / Label / the grouping
     // frame are the same keys tags::write_file writes, so the round trip is
@@ -192,7 +191,9 @@ fn ensure_artist(
         return Ok(id.clone());
     }
     let existing: Option<String> = conn
-        .query_row("SELECT id FROM artists WHERE sort_name = ?1", [&key], |r| r.get(0))
+        .query_row("SELECT id FROM artists WHERE sort_name = ?1", [&key], |r| {
+            r.get(0)
+        })
         .ok();
     let id = existing.unwrap_or_else(|| stable_id("ar", &[&key]));
     conn.execute(
@@ -268,7 +269,11 @@ pub fn run_scan_files(
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
@@ -288,20 +293,22 @@ pub fn run_scan_files(
     for (i, entry) in files.into_iter().enumerate() {
         progress(i + 1, total);
         seen.insert(entry.path.clone());
-        if !full {
-            if let Some((old_mtime, old_size)) = existing.get(&entry.path) {
-                if *old_mtime == entry.mtime_ns && *old_size == entry.size {
+        if !full
+            && let Some((old_mtime, old_size)) = existing.get(&entry.path)
+                && *old_mtime == entry.mtime_ns && *old_size == entry.size {
                     counts.skipped += 1;
                     continue;
                 }
-            }
-        }
         // full mode: existing files fall through with fresh=false and are
         // counted as updated by the group write loop.
         match parse_file(Path::new(&entry.path)) {
             Ok(parsed) => {
                 let fresh = !existing.contains_key(&entry.path);
-                work.push(Work { entry, parsed, fresh });
+                work.push(Work {
+                    entry,
+                    parsed,
+                    fresh,
+                });
             }
             Err(e) => counts.errors.push(e),
         }
@@ -400,8 +407,8 @@ pub fn run_scan_files(
     // and by Phil Collins (untagged) merged, since Pass 3 treats unknown as
     // matching anything. Mixed track artists stay None → Various Artists.
     for s in &mut subs {
-        s.artist = consensus_ci(s.tracks.iter().map(|(_, p, _)| p.album_artist.clone()))
-            .or_else(|| {
+        s.artist =
+            consensus_ci(s.tracks.iter().map(|(_, p, _)| p.album_artist.clone())).or_else(|| {
                 let mut distinct: Vec<String> = Vec::new();
                 for (_, p, _) in s.tracks.iter() {
                     if let Some(a) = &p.artist {
@@ -462,7 +469,7 @@ pub fn run_scan_files(
             let mut merged = AlbumGroup {
                 artist: members.iter().find_map(|&i| subs[i].artist.clone()),
                 title: subs[members[0]].title.clone(),
-                year: consensus(members.iter().map(|&i| subs[i].year.clone())),
+                year: consensus(members.iter().map(|&i| subs[i].year)),
                 tracks: Vec::new(),
             };
             for &i in members {
@@ -524,7 +531,11 @@ pub fn run_scan_files(
     tx.execute(
         "INSERT INTO artists(id, name, sort_name) VALUES (?1, ?2, ?3)
          ON CONFLICT(id) DO NOTHING",
-        rusqlite::params![VARIOUS_ARTISTS_ID, VARIOUS_ARTISTS_NAME, norm(VARIOUS_ARTISTS_NAME)],
+        rusqlite::params![
+            VARIOUS_ARTISTS_ID,
+            VARIOUS_ARTISTS_NAME,
+            norm(VARIOUS_ARTISTS_NAME)
+        ],
     )
     .map_err(|e| e.to_string())?;
 
@@ -550,8 +561,8 @@ pub fn run_scan_files(
                 _ => VARIOUS_ARTISTS_NAME.to_string(),
             }
         };
-        let artist_id = ensure_artist(&tx, &mut artist_cache, &artist_name)
-            .map_err(|e| e.to_string())?;
+        let artist_id =
+            ensure_artist(&tx, &mut artist_cache, &artist_name).map_err(|e| e.to_string())?;
 
         // Retag-adopt: a changed group whose (artist, normalized title)
         // matches an EXISTING album joins it regardless of year — year is
@@ -671,7 +682,11 @@ pub fn run_scan_files(
     let removed_existing: Vec<String> = if only.is_some() {
         Vec::new()
     } else {
-        existing.keys().filter(|p| !seen.contains(*p)).cloned().collect()
+        existing
+            .keys()
+            .filter(|p| !seen.contains(*p))
+            .cloned()
+            .collect()
     };
     counts.missing = removed_existing.len();
 
@@ -743,23 +758,28 @@ mod tests {
         }
     }
 
+    /// Fixture staging descriptor: `stage` took ten positional `&str`s,
+    /// which reads as alphabet soup at the call site — named fields say
+    /// which string is which.
+    struct Stage<'a> {
+        root: &'a Path,
+        src: &'a str,
+        rel_dir: &'a str,
+        file_name: &'a str,
+        albumartist: Option<&'a str>,
+        artist: &'a str,
+        album: &'a str,
+        title: &'a str,
+        year: Option<&'a str>,
+        disc_track: (&'a str, &'a str),
+    }
+
     /// Copy a fixture track into `rel_dir` under the scenario root and retag.
-    fn stage(
-        root: &Path,
-        src: &str,
-        rel_dir: &str,
-        file_name: &str,
-        albumartist: Option<&str>,
-        artist: &str,
-        album: &str,
-        title: &str,
-        year: Option<&str>,
-        disc_track: (&str, &str),
-    ) {
-        let dir = root.join(rel_dir);
+    fn stage(s: Stage) {
+        let dir = s.root.join(s.rel_dir);
         std::fs::create_dir_all(&dir).expect("mkdir");
-        let dest = dir.join(file_name);
-        std::fs::copy(fixtures_src().join(src), &dest).expect("copy");
+        let dest = dir.join(s.file_name);
+        std::fs::copy(fixtures_src().join(s.src), &dest).expect("copy");
         let mut tagged = lofty::read_from_path(&dest).expect("read");
         let has_primary = tagged.primary_tag().is_some();
         let tag = if has_primary {
@@ -767,15 +787,15 @@ mod tests {
         } else {
             tagged.first_tag_mut().expect("tag")
         };
-        set_tag(tag, ItemKey::AlbumArtist, albumartist);
-        set_tag(tag, ItemKey::TrackArtist, Some(artist));
-        set_tag(tag, ItemKey::AlbumTitle, Some(album));
-        set_tag(tag, ItemKey::TrackTitle, Some(title));
+        set_tag(tag, ItemKey::AlbumArtist, s.albumartist);
+        set_tag(tag, ItemKey::TrackArtist, Some(s.artist));
+        set_tag(tag, ItemKey::AlbumTitle, Some(s.album));
+        set_tag(tag, ItemKey::TrackTitle, Some(s.title));
         // Purge both spellings so `year: None` really means no year.
         tag.remove_key(&ItemKey::RecordingDate);
-        set_tag(tag, ItemKey::Year, year);
-        set_tag(tag, ItemKey::DiscNumber, Some(disc_track.0));
-        set_tag(tag, ItemKey::TrackNumber, Some(disc_track.1));
+        set_tag(tag, ItemKey::Year, s.year);
+        set_tag(tag, ItemKey::DiscNumber, Some(s.disc_track.0));
+        set_tag(tag, ItemKey::TrackNumber, Some(s.disc_track.1));
         tagged
             .save_to_path(&dest, lofty::config::WriteOptions::default())
             .expect("save");
@@ -795,17 +815,41 @@ mod tests {
     fn guest_tracks_stay_under_albumartist() {
         let root = temp_dir("guests");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Aurora Sky/Nightfall Sessions", "01 - Title Track.flac",
-            Some("Aurora Sky"), "Aurora Sky", "Nightfall Sessions", "Title Track", Some("2024"), ("1", "1"));
-        stage(&root, src, "Aurora Sky/Nightfall Sessions", "02 - Guest Spot.flac",
-            Some("Aurora Sky"), "Guest Singer", "Nightfall Sessions", "Guest Spot", Some("2024"), ("1", "2"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Aurora Sky/Nightfall Sessions",
+            file_name: "01 - Title Track.flac",
+            albumartist: Some("Aurora Sky"),
+            artist: "Aurora Sky",
+            album: "Nightfall Sessions",
+            title: "Title Track",
+            year: Some("2024"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Aurora Sky/Nightfall Sessions",
+            file_name: "02 - Guest Spot.flac",
+            albumartist: Some("Aurora Sky"),
+            artist: "Guest Singer",
+            album: "Nightfall Sessions",
+            title: "Guest Spot",
+            year: Some("2024"),
+            disc_track: ("1", "2"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
         let counts = run_scan(&mut conn, &root, |_, _| {}).expect("scan");
         assert_eq!(counts.errors, Vec::<String>::new());
 
-        assert_eq!(album_tracks(&conn, "Nightfall Sessions").len(), 2, "one album, both tracks");
+        assert_eq!(
+            album_tracks(&conn, "Nightfall Sessions").len(),
+            2,
+            "one album, both tracks"
+        );
         assert_eq!(
             album_artist(&conn, "Nightfall Sessions").as_deref(),
             Some("Aurora Sky"),
@@ -818,18 +862,52 @@ mod tests {
     fn partial_albumartist_majority_wins() {
         let root = temp_dir("partial-aa");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Artist X/Lost Tracks", "01 - One.flac",
-            Some("Artist X"), "Artist X", "Lost Tracks", "One", Some("2020"), ("1", "1"));
-        stage(&root, src, "Artist X/Lost Tracks", "02 - Two.flac",
-            Some("Artist X"), "Feat Guy", "Lost Tracks", "Two", None, ("1", "2"));
-        stage(&root, src, "Artist X/Lost Tracks", "03 - Three.flac",
-            None, "Another Guest", "Lost Tracks", "Three", None, ("1", "3"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Artist X/Lost Tracks",
+            file_name: "01 - One.flac",
+            albumartist: Some("Artist X"),
+            artist: "Artist X",
+            album: "Lost Tracks",
+            title: "One",
+            year: Some("2020"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Artist X/Lost Tracks",
+            file_name: "02 - Two.flac",
+            albumartist: Some("Artist X"),
+            artist: "Feat Guy",
+            album: "Lost Tracks",
+            title: "Two",
+            year: None,
+            disc_track: ("1", "2"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Artist X/Lost Tracks",
+            file_name: "03 - Three.flac",
+            albumartist: None,
+            artist: "Another Guest",
+            album: "Lost Tracks",
+            title: "Three",
+            year: None,
+            disc_track: ("1", "3"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
         run_scan(&mut conn, &root, |_, _| {}).expect("scan");
 
-        assert_eq!(album_tracks(&conn, "Lost Tracks").len(), 3, "untagged track stays in the album");
+        assert_eq!(
+            album_tracks(&conn, "Lost Tracks").len(),
+            3,
+            "untagged track stays in the album"
+        );
         assert_eq!(
             album_artist(&conn, "Lost Tracks").as_deref(),
             Some("Artist X"),
@@ -842,10 +920,30 @@ mod tests {
     fn albumartistless_mixed_artists_is_one_various_album() {
         let root = temp_dir("no-aa");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Comp", "01 - A.flac",
-            None, "Singer One", "Mixed Bag", "A", None, ("1", "1"));
-        stage(&root, src, "Comp", "02 - B.flac",
-            None, "Singer Two", "Mixed Bag", "B", None, ("1", "2"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Comp",
+            file_name: "01 - A.flac",
+            albumartist: None,
+            artist: "Singer One",
+            album: "Mixed Bag",
+            title: "A",
+            year: None,
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Comp",
+            file_name: "02 - B.flac",
+            albumartist: None,
+            artist: "Singer Two",
+            album: "Mixed Bag",
+            title: "B",
+            year: None,
+            disc_track: ("1", "2"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
@@ -864,10 +962,30 @@ mod tests {
     fn missing_or_odd_year_does_not_split() {
         let root = temp_dir("year");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Solo/Archive", "01 - Keep.flac",
-            Some("Solo"), "Solo", "Archive", "Keep", Some("1987"), ("1", "1"));
-        stage(&root, src, "Solo/Archive", "02 - Keep Too.flac",
-            Some("Solo"), "Solo", "Archive", "Keep Too", None, ("1", "2"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Solo/Archive",
+            file_name: "01 - Keep.flac",
+            albumartist: Some("Solo"),
+            artist: "Solo",
+            album: "Archive",
+            title: "Keep",
+            year: Some("1987"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Solo/Archive",
+            file_name: "02 - Keep Too.flac",
+            albumartist: Some("Solo"),
+            artist: "Solo",
+            album: "Archive",
+            title: "Keep Too",
+            year: None,
+            disc_track: ("1", "2"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
@@ -875,7 +993,9 @@ mod tests {
 
         assert_eq!(album_tracks(&conn, "Archive").len(), 2);
         let year: Option<i64> = conn
-            .query_row("SELECT year FROM albums WHERE title = 'Archive'", [], |r| r.get(0))
+            .query_row("SELECT year FROM albums WHERE title = 'Archive'", [], |r| {
+                r.get(0)
+            })
             .expect("row");
         assert_eq!(year, Some(1987), "consensus year kept");
         let _ = std::fs::remove_dir_all(&root);
@@ -885,10 +1005,30 @@ mod tests {
     fn disc_folders_merge_when_albumartist_partial() {
         let root = temp_dir("discs");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Duo/Merge Me/Disc 1", "01 - D1.flac",
-            Some("Duo"), "Duo", "Merge Me", "D1", Some("2015"), ("1", "1"));
-        stage(&root, src, "Duo/Merge Me/Disc 2", "01 - D2.flac",
-            None, "Duo", "Merge Me", "D2", Some("2015"), ("2", "1"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Duo/Merge Me/Disc 1",
+            file_name: "01 - D1.flac",
+            albumartist: Some("Duo"),
+            artist: "Duo",
+            album: "Merge Me",
+            title: "D1",
+            year: Some("2015"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Duo/Merge Me/Disc 2",
+            file_name: "01 - D2.flac",
+            albumartist: None,
+            artist: "Duo",
+            album: "Merge Me",
+            title: "D2",
+            year: Some("2015"),
+            disc_track: ("2", "1"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
@@ -910,10 +1050,30 @@ mod tests {
         // distinct, so Pass 3 partitions them).
         let root = temp_dir("singles-split");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Band A/The Singles", "01 - Alpha.flac",
-            Some("Band A"), "Band A", "The Singles", "Alpha", Some("2008"), ("1", "1"));
-        stage(&root, src, "Singer B/The Singles", "01 - Beta.flac",
-            None, "Singer B", "The Singles", "Beta", Some("2016"), ("1", "1"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Band A/The Singles",
+            file_name: "01 - Alpha.flac",
+            albumartist: Some("Band A"),
+            artist: "Band A",
+            album: "The Singles",
+            title: "Alpha",
+            year: Some("2008"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Singer B/The Singles",
+            file_name: "01 - Beta.flac",
+            albumartist: None,
+            artist: "Singer B",
+            album: "The Singles",
+            title: "Beta",
+            year: Some("2016"),
+            disc_track: ("1", "1"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
@@ -935,7 +1095,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("exists");
-        assert!(singer_b_has_it, "untagged folder lands under its track artist");
+        assert!(
+            singer_b_has_it,
+            "untagged folder lands under its track artist"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1003,7 +1166,11 @@ mod tests {
 
         // Durations are real (1s of silence each).
         let zero_dur: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tracks WHERE duration_sec <= 0", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM tracks WHERE duration_sec <= 0",
+                [],
+                |r| r.get(0),
+            )
             .expect("durations");
         assert_eq!(zero_dur, 0);
         let _ = std::fs::remove_file(&dbp);
@@ -1023,11 +1190,17 @@ mod tests {
 
         // Touch one file's mtime → exactly one update on the next scan.
         let victim = root.join("Helloween/Giants & Monsters (2021)/01 - Silent Echoes.flac");
-        let f = std::fs::File::options().append(true).open(&victim).expect("open");
+        let f = std::fs::File::options()
+            .append(true)
+            .open(&victim)
+            .expect("open");
         f.set_modified(std::time::SystemTime::now()).expect("touch");
         drop(f);
         let third = run_scan(&mut conn, &root, |_, _| {}).expect("third scan");
-        assert_eq!((third.added, third.updated, third.removed, third.skipped), (0, 1, 0, 8));
+        assert_eq!(
+            (third.added, third.updated, third.removed, third.skipped),
+            (0, 1, 0, 8)
+        );
 
         // Delete a file → its row is KEPT and flagged missing (relink or
         // explicit removal is the user's call); nothing auto-removed.
@@ -1060,20 +1233,54 @@ mod tests {
         let root = temp_dir("adopt");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
         // The compilation: two tracks, albumartist "The Band", year 2019.
-        stage(&root, src, "Comp", "01 - A.flac",
-            Some("The Band"), "Singer One", "Anison no Kokoro", "A", Some("2019"), ("1", "1"));
-        stage(&root, src, "Comp", "02 - B.flac",
-            Some("The Band"), "Singer Two", "Anison no Kokoro", "B", Some("2019"), ("1", "2"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Comp",
+            file_name: "01 - A.flac",
+            albumartist: Some("The Band"),
+            artist: "Singer One",
+            album: "Anison no Kokoro",
+            title: "A",
+            year: Some("2019"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Comp",
+            file_name: "02 - B.flac",
+            albumartist: Some("The Band"),
+            artist: "Singer Two",
+            album: "Anison no Kokoro",
+            title: "B",
+            year: Some("2019"),
+            disc_track: ("1", "2"),
+        });
         // The stray: own folder, album title matches, but a DIFFERENT
         // albumartist and year 2012 → first scan keys it apart (disagreeing
         // release artists never merge).
-        stage(&root, src, "Stray", "01 - C.flac",
-            Some("Wrong Band"), "Guest", "Anison no Kokoro", "C", Some("2012"), ("1", "1"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Stray",
+            file_name: "01 - C.flac",
+            albumartist: Some("Wrong Band"),
+            artist: "Guest",
+            album: "Anison no Kokoro",
+            title: "C",
+            year: Some("2012"),
+            disc_track: ("1", "1"),
+        });
 
         let dbp = root.join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
         run_scan(&mut conn, &root, |_, _| {}).expect("first scan");
-        assert_eq!(count_albums(&conn, "Anison no Kokoro"), 2, "split as staged");
+        assert_eq!(
+            count_albums(&conn, "Anison no Kokoro"),
+            2,
+            "split as staged"
+        );
 
         // Editor save: set the albumartist on the stray only. Its year
         // stays 2012 — adoption must not care.
@@ -1088,8 +1295,16 @@ mod tests {
         }
         run_scan(&mut conn, &root, |_, _| {}).expect("rescan");
 
-        assert_eq!(count_albums(&conn, "Anison no Kokoro"), 1, "merged via adoption");
-        assert_eq!(album_tracks(&conn, "Anison no Kokoro").len(), 3, "stray joined the compilation");
+        assert_eq!(
+            count_albums(&conn, "Anison no Kokoro"),
+            1,
+            "merged via adoption"
+        );
+        assert_eq!(
+            album_tracks(&conn, "Anison no Kokoro").len(),
+            3,
+            "stray joined the compilation"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1110,14 +1325,30 @@ mod tests {
         let r1 = temp_dir("mr1");
         let r2 = temp_dir("mr2");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(
-            &r1, src, "The Artist/Merged Album", "01 - A.flac",
-            Some("The Artist"), "The Artist", "Merged Album", "A", Some("2019"), ("1", "1"),
-        );
-        stage(
-            &r2, src, "The Artist/Merged Album", "02 - B.flac",
-            Some("The Artist"), "The Artist", "Merged Album", "B", Some("2019"), ("1", "2"),
-        );
+        stage(Stage {
+            root: &r1,
+            src,
+            rel_dir: "The Artist/Merged Album",
+            file_name: "01 - A.flac",
+            albumartist: Some("The Artist"),
+            artist: "The Artist",
+            album: "Merged Album",
+            title: "A",
+            year: Some("2019"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &r2,
+            src,
+            rel_dir: "The Artist/Merged Album",
+            file_name: "02 - B.flac",
+            albumartist: Some("The Artist"),
+            artist: "The Artist",
+            album: "Merged Album",
+            title: "B",
+            year: Some("2019"),
+            disc_track: ("1", "2"),
+        });
 
         let dbp = temp_dir("mr-db").join("t.db");
         let mut conn = crate::library::db::open(&dbp).expect("open");
@@ -1151,14 +1382,44 @@ mod tests {
     fn unnumbered_tracks_sort_alphabetically_first() {
         let root = temp_dir("order");
         let src = "Various Artists/Synth Wars (2019)/02 - Chrome Sunset.flac";
-        stage(&root, src, "Album", "01 - Zebra.flac",
-            Some("The Band"), "The Band", "Order Test", "Zebra", Some("2019"), ("1", "1"));
-        stage(&root, src, "Album", "02 - Mango.flac",
-            Some("The Band"), "The Band", "Order Test", "Mango", Some("2019"), ("1", "2"));
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Album",
+            file_name: "01 - Zebra.flac",
+            albumartist: Some("The Band"),
+            artist: "The Band",
+            album: "Order Test",
+            title: "Zebra",
+            year: Some("2019"),
+            disc_track: ("1", "1"),
+        });
+        stage(Stage {
+            root: &root,
+            src,
+            rel_dir: "Album",
+            file_name: "02 - Mango.flac",
+            albumartist: Some("The Band"),
+            artist: "The Band",
+            album: "Order Test",
+            title: "Mango",
+            year: Some("2019"),
+            disc_track: ("1", "2"),
+        });
         // Unnumbered: strip the track number after staging.
         for (file, title) in [("03 - Apple.flac", "Apple"), ("04 - Banana.flac", "Banana")] {
-            stage(&root, src, "Album", file,
-                Some("The Band"), "The Band", "Order Test", title, Some("2019"), ("1", "1"));
+            stage(Stage {
+                root: &root,
+                src,
+                rel_dir: "Album",
+                file_name: file,
+                albumartist: Some("The Band"),
+                artist: "The Band",
+                album: "Order Test",
+                title,
+                year: Some("2019"),
+                disc_track: ("1", "1"),
+            });
             let p = root.join("Album").join(file);
             let mut tagged = lofty::read_from_path(&p).expect("read");
             let tag = tagged.primary_tag_mut().expect("tag");
@@ -1261,12 +1522,22 @@ mod tests {
         std::fs::create_dir_all(&d1).expect("mkdir");
         std::fs::create_dir_all(&d2).expect("mkdir");
         let f1 = remaster_mp3(
-            &d1, "01. Adyta.mp3", "Epica",
-            "The Phantom Agony (Expanded Edition)", "Adyta", "1/2", "1/12",
+            &d1,
+            "01. Adyta.mp3",
+            "Epica",
+            "The Phantom Agony (Expanded Edition)",
+            "Adyta",
+            "1/2",
+            "1/12",
         );
         let f2 = remaster_mp3(
-            &d2, "01. Adyta (Orchestral).mp3", "Epica",
-            "The Phantom Agony (Expanded Edition)", "Adyta (Orchestral)", "2/2", "1/12",
+            &d2,
+            "01. Adyta (Orchestral).mp3",
+            "Epica",
+            "The Phantom Agony (Expanded Edition)",
+            "Adyta (Orchestral)",
+            "2/2",
+            "1/12",
         );
 
         // Import-shaped scan: walk the parents, index only the asked-for files.
@@ -1294,4 +1565,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
-

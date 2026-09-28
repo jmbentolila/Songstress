@@ -17,7 +17,12 @@ pub const THUMB_SIZES: &[u32] = &[96, 256, 512];
 
 /// Filenames checked inside an album's dominant directory, in priority order.
 const FOLDER_ART: &[&str] = &[
-    "cover.jpg", "folder.jpg", "front.jpg", "cover.png", "folder.png", "front.png",
+    "cover.jpg",
+    "folder.jpg",
+    "front.jpg",
+    "cover.png",
+    "folder.png",
+    "front.png",
 ];
 
 pub fn thumbs_dir(cache_dir: &Path) -> PathBuf {
@@ -25,7 +30,9 @@ pub fn thumbs_dir(cache_dir: &Path) -> PathBuf {
 }
 
 pub fn thumb_path(cache_dir: &Path, album_id: &str, size: u32) -> PathBuf {
-    thumbs_dir(cache_dir).join(album_id).join(format!("{size}.webp"))
+    thumbs_dir(cache_dir)
+        .join(album_id)
+        .join(format!("{size}.webp"))
 }
 
 /// The dominant directory among an album's tracks (most tracks wins; ties →
@@ -104,6 +111,10 @@ struct Job {
     source: Option<Source>,
 }
 
+/// Per-album outcome of the parallel phase: id plus the extracted color
+/// triple when the album yielded one.
+type PhaseResult = (String, Option<(String, String, String)>);
+
 enum Source {
     Folder(PathBuf),
     /// Track files to scan for the largest embedded picture.
@@ -137,7 +148,9 @@ fn album_source(conn: &Connection, album_id: &str) -> Option<Source> {
 fn process_album(job: &Job, cache_dir: &Path) -> Option<(String, String, String)> {
     let img = match job.source.as_ref()? {
         Source::Folder(path) => image::open(path).ok(),
-        Source::Embedded(paths) => embedded_art(paths).and_then(|d| image::load_from_memory(&d).ok()),
+        Source::Embedded(paths) => {
+            embedded_art(paths).and_then(|d| image::load_from_memory(&d).ok())
+        }
         Source::Bytes(data) => image::load_from_memory(data).ok(),
     }?;
 
@@ -145,7 +158,9 @@ fn process_album(job: &Job, cache_dir: &Path) -> Option<(String, String, String)
     std::fs::create_dir_all(&out_dir).ok()?;
     for size in THUMB_SIZES {
         let thumb = img.thumbnail(*size, *size);
-        thumb.save(thumb_path(cache_dir, &job.album_id, *size)).ok()?;
+        thumb
+            .save(thumb_path(cache_dir, &job.album_id, *size))
+            .ok()?;
     }
 
     let colors = colors::extract_image(&img).ok()?;
@@ -158,11 +173,7 @@ fn process_album(job: &Job, cache_dir: &Path) -> Option<(String, String, String)
     // not — which is what artwork editing requires.
     let bytes = std::fs::read(thumb_path(cache_dir, &job.album_id, 512)).ok()?;
     let h8 = blake3::hash(&bytes).to_hex()[..8].to_string();
-    Some((
-        format!("thumb://{}/512-{}.webp", job.album_id, h8),
-        c1,
-        c2,
-    ))
+    Some((format!("thumb://{}/512-{}.webp", job.album_id, h8), c1, c2))
 }
 
 /// Process every album that still lacks cover or colors. Returns how many
@@ -207,7 +218,7 @@ pub fn refresh(
     use std::sync::atomic::{AtomicUsize, Ordering};
     let done = AtomicUsize::new(0);
     let done = &done; // shared across the poller thread and rayon workers
-    let results: Vec<(String, Option<(String, String, String)>)> = std::thread::scope(|scope| {
+    let results: Vec<PhaseResult> = std::thread::scope(|scope| {
         let progress = &mut progress;
         scope.spawn(move || {
             let mut last = 0usize;
@@ -258,7 +269,9 @@ pub fn refresh(
 /// placeholder returns honestly.
 pub fn refresh_one(conn: &Connection, cache_dir: &Path, album_id: &str) -> Result<(), String> {
     let known: bool = conn
-        .query_row("SELECT 1 FROM albums WHERE id = ?1", [album_id], |_| Ok(true))
+        .query_row("SELECT 1 FROM albums WHERE id = ?1", [album_id], |_| {
+            Ok(true)
+        })
         .unwrap_or(false);
     if !known {
         return Err(format!("unknown album {album_id}"));
@@ -368,7 +381,10 @@ mod tests {
         // Private copy of the fixture tree.
         for entry in walkdir::WalkDir::new("fixtures/library") {
             let entry = entry.expect("walk");
-            let rel = entry.path().strip_prefix("fixtures/library").expect("prefix");
+            let rel = entry
+                .path()
+                .strip_prefix("fixtures/library")
+                .expect("prefix");
             let target = root.join(rel);
             if entry.file_type().is_dir() {
                 std::fs::create_dir_all(&target).expect("mkdir");
@@ -441,11 +457,11 @@ mod tests {
     }
 
     const ONE_BY_ONE_PNG: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
-        0x9C, 0x62, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x62, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
     #[test]
@@ -476,7 +492,10 @@ mod tests {
         let root = temp_dir("upper");
         for entry in walkdir::WalkDir::new("fixtures/library") {
             let entry = entry.expect("walk");
-            let rel = entry.path().strip_prefix("fixtures/library").expect("prefix");
+            let rel = entry
+                .path()
+                .strip_prefix("fixtures/library")
+                .expect("prefix");
             let target = root.join(rel);
             if entry.file_type().is_dir() {
                 std::fs::create_dir_all(&target).expect("mkdir");
@@ -511,7 +530,10 @@ mod tests {
         let root = temp_dir("prune-root");
         for entry in walkdir::WalkDir::new("fixtures/library") {
             let entry = entry.expect("walk");
-            let rel = entry.path().strip_prefix("fixtures/library").expect("prefix");
+            let rel = entry
+                .path()
+                .strip_prefix("fixtures/library")
+                .expect("prefix");
             let target = root.join(rel);
             if entry.file_type().is_dir() {
                 std::fs::create_dir_all(&target).expect("mkdir");
@@ -533,7 +555,10 @@ mod tests {
         let ghost = thumbs_dir(&cache).join("al-deadbeef");
         std::fs::create_dir_all(&ghost).expect("ghost dir");
         std::fs::write(ghost.join("512.webp"), b"x").expect("ghost file");
-        assert!(thumbs_dir(&cache).join(&live).exists(), "live thumbs on disk");
+        assert!(
+            thumbs_dir(&cache).join(&live).exists(),
+            "live thumbs on disk"
+        );
 
         prune_orphan_thumbs(&conn, &cache);
         assert!(

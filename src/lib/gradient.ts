@@ -3,7 +3,7 @@ import type { RGB } from "./artColors";
 
 export const SURFACE: Record<string, [number, number, number]> = {
   dark: [22, 22, 28],
-  light: [246, 246, 249],
+  light: [236, 236, 241],
 };
 
 export function rgbToHsl(c: RGB): RGB {

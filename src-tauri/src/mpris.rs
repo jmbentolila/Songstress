@@ -105,7 +105,13 @@ impl Player {
     fn track_path(track_id: &str) -> String {
         let safe: String = track_id
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         format!("/org/songstress/track/{safe}")
     }
@@ -126,8 +132,9 @@ impl Player {
         if let Some(id) = &track_id {
             // Object path elements only allow [A-Za-z0-9_]; blake3 ids carry
             // hyphens, so fold everything else to '_'.
-            let track_path =
-                ObjectPath::try_from(Self::track_path(id)).map(Value::from).ok();
+            let track_path = ObjectPath::try_from(Self::track_path(id))
+                .map(Value::from)
+                .ok();
             if let Some(v) = track_path {
                 out.insert("mpris:trackid".into(), Self::owned(v));
             }
@@ -175,7 +182,10 @@ impl Player {
                 "xesam:artist".into(),
                 Self::owned(Value::from(vec![artist.clone()])),
             );
-            out.insert("xesam:albumArtist".into(), Self::owned(Value::from(vec![artist])));
+            out.insert(
+                "xesam:albumArtist".into(),
+                Self::owned(Value::from(vec![artist])),
+            );
             if let Some(y) = year {
                 out.insert(
                     "xesam:contentCreated".into(),
@@ -191,14 +201,13 @@ impl Player {
                     .map(str::to_string);
                 if let Some(id) = file_id {
                     let p = library::artwork::thumb_path(&self.thumbs_dir, &id, 512);
-                    if p.exists() {
-                        if let Some(s) = p.to_str() {
+                    if p.exists()
+                        && let Some(s) = p.to_str() {
                             out.insert(
                                 "mpris:artUrl".into(),
                                 Self::owned(Value::from(format!("file://{s}"))),
                             );
                         }
-                    }
                 }
             }
         }
@@ -385,13 +394,15 @@ impl Player {
         if expected.as_deref() != Some(track_id.as_str()) {
             return; // stale SetPosition from a previous track
         }
-        let target = (position as f64 / 1_000_000.0)
-            .clamp(0.0, mpv::current_duration().max(0.0));
+        let target = (position as f64 / 1_000_000.0).clamp(0.0, mpv::current_duration().max(0.0));
         let _ = self.engine.seek_to(target).await;
     }
 
     #[zbus(signal)]
-    async fn seeked(signal_emitter: &zbus::object_server::SignalEmitter<'_>, position: i64) -> zbus::Result<()>;
+    async fn seeked(
+        signal_emitter: &zbus::object_server::SignalEmitter<'_>,
+        position: i64,
+    ) -> zbus::Result<()>;
 }
 
 pub fn emit_seeked(pos_sec: f64) {
@@ -443,12 +454,7 @@ fn persist_stage(db_path: &PathBuf, key: &str, value: &str) {
 /// Spawn the MPRIS server + its property-change watcher on the tokio runtime.
 /// Failure to claim the bus name (or any zbus error) is logged and swallowed:
 /// a broken MPRIS must never take playback down with it.
-pub fn serve(
-    engine: Arc<mpv::Mpv>,
-    db_path: PathBuf,
-    thumbs_dir: PathBuf,
-    app: tauri::AppHandle,
-) {
+pub fn serve(engine: Arc<mpv::Mpv>, db_path: PathBuf, thumbs_dir: PathBuf, app: tauri::AppHandle) {
     let bus = profile::mpris_bus_name(&app.config().identifier);
     tauri::async_runtime::spawn(async move {
         match serve_inner(engine, db_path, thumbs_dir, app).await {
@@ -492,8 +498,8 @@ async fn serve_inner(
         let emitter = iref.signal_emitter().clone();
         let iface = iref.get_mut().await;
         let ctx_changed = cur.album != last.album || cur.index != last.index;
-        let status_changed = cur.paused != last.paused
-            || cur.album.is_some() != last.album.is_some();
+        let status_changed =
+            cur.paused != last.paused || cur.album.is_some() != last.album.is_some();
         let volume_changed = (cur.volume - last.volume).abs() > f64::EPSILON;
 
         if status_changed {

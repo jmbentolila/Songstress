@@ -194,7 +194,9 @@ fn primary_folder(conn: &Connection, album_id: &str) -> Result<Option<String>, S
 /// to keep a file.
 fn albums_by_folder(conn: &Connection) -> Result<BTreeMap<String, Vec<String>>, String> {
     let ids: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT id FROM albums ORDER BY id").map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM albums ORDER BY id")
+            .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| r.get::<_, String>(0))
             .map_err(|e| e.to_string())?;
@@ -241,15 +243,13 @@ fn sync_entry(
     let recorded = file.albums.get(album_id).cloned().unwrap_or_default();
 
     // A gradient is a user override: on a scan the file wins, always.
-    if adopt {
-        if let Some(pair) = recorded.gradient.clone() {
-            if settings::album_gradient(conn, album_id).as_ref() != Some(&pair) {
+    if adopt
+        && let Some(pair) = recorded.gradient.clone()
+            && settings::album_gradient(conn, album_id).as_ref() != Some(&pair) {
                 settings::set_album_gradient(conn, album_id, Some(&pair))
                     .map_err(|e| e.to_string())?;
                 counts.adopted_gradient += 1;
             }
-        }
-    }
 
     // Colours belong to the artwork. The file answers ONLY the case where there
     // is no pair to derive from (no artwork, or extraction failed) — it is an
@@ -259,8 +259,8 @@ fn sync_entry(
         Some(pair) => Some(pair),
         None => recorded.colors.clone(),
     };
-    if derived.is_none() && adopt {
-        if let Some(pair) = colors.clone() {
+    if derived.is_none() && adopt
+        && let Some(pair) = colors.clone() {
             conn.execute(
                 "UPDATE albums SET color_c1 = ?2, color_c2 = ?3 WHERE id = ?1",
                 rusqlite::params![album_id, pair[0], pair[1]],
@@ -268,7 +268,6 @@ fn sync_entry(
             .map_err(|e| e.to_string())?;
             counts.adopted_colors += 1;
         }
-    }
 
     let state = AlbumState {
         colors,
@@ -342,10 +341,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "songstress-sidecar-{tag}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("songstress-sidecar-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir
@@ -369,7 +366,10 @@ mod tests {
         assert!(read(&dir).is_none(), "no file yet");
         assert!(write(&dir, &Sidecar::default()).expect("write"));
         let raw = std::fs::read_to_string(path_in(&dir)).expect("raw");
-        assert_eq!(raw, "{\n  \"version\": 1\n}\n", "hand-editable, version only");
+        assert_eq!(
+            raw, "{\n  \"version\": 1\n}\n",
+            "hand-editable, version only"
+        );
         assert_eq!(read(&dir), Some(Sidecar::default()));
         assert!(std::fs::read_dir(&dir)
             .expect("read dir")
@@ -457,17 +457,22 @@ mod tests {
         .expect("track");
         // The file holds an OLD override; the user has just set a new one.
         let mut seeded = Sidecar::default();
-        seeded.albums.insert(
-            "al-1".into(),
-            state(None, Some(["cee4de", "086ba0"])),
-        );
+        seeded
+            .albums
+            .insert("al-1".into(), state(None, Some(["cee4de", "086ba0"])));
         write(&album_dir, &seeded).expect("seed");
         let fresh = pair("112233", "445566");
         settings::set_album_gradient(&conn, "al-1", Some(&fresh)).expect("set");
 
-        assert!(sync_one(&conn, "al-1").expect("sync"), "the file must change");
+        assert!(
+            sync_one(&conn, "al-1").expect("sync"),
+            "the file must change"
+        );
         let got = read(&album_dir).expect("read");
-        assert_eq!(got.albums.get("al-1").unwrap().gradient, Some(fresh.clone()));
+        assert_eq!(
+            got.albums.get("al-1").unwrap().gradient,
+            Some(fresh.clone())
+        );
         assert_eq!(
             got.albums.get("al-1").unwrap().colors,
             Some(pair("cee4de", "086ba0")),
@@ -516,11 +521,7 @@ mod tests {
             conn.execute(
                 "INSERT INTO tracks(id, album_id, title, duration_sec, path, mtime_ns, size)
                  VALUES (?1, ?2, 'x', 1.0, ?3, 1, 1)",
-                rusqlite::params![
-                    id,
-                    album,
-                    dir.join(format!("{id}.flac")).to_string_lossy()
-                ],
+                rusqlite::params![id, album, dir.join(format!("{id}.flac")).to_string_lossy()],
             )
             .expect("track");
         };
@@ -532,13 +533,23 @@ mod tests {
         // The files: gradients for the two solo albums and one of the shared
         // pair; colours only where the DB has none.
         let mut seeded = Sidecar::default();
-        seeded.albums.insert("al-solo".into(), state(Some(["111111", "222222"]), Some(["ff8800", "0044cc"])));
-        seeded.albums.insert("al-artless".into(), state(Some(["333333", "444444"]), None));
+        seeded.albums.insert(
+            "al-solo".into(),
+            state(Some(["111111", "222222"]), Some(["ff8800", "0044cc"])),
+        );
+        seeded
+            .albums
+            .insert("al-artless".into(), state(Some(["333333", "444444"]), None));
         // Plus an entry for an album that no longer lives here.
-        seeded.albums.insert("al-gone".into(), state(None, Some(["999999", "888888"])));
+        seeded
+            .albums
+            .insert("al-gone".into(), state(None, Some(["999999", "888888"])));
         write(&solo, &seeded).expect("seed solo");
         let mut shared_file = Sidecar::default();
-        shared_file.albums.insert("al-shared-a".into(), state(None, Some(["ff8800", "0044cc"])));
+        shared_file.albums.insert(
+            "al-shared-a".into(),
+            state(None, Some(["ff8800", "0044cc"])),
+        );
         write(&shared, &shared_file).expect("seed shared");
 
         let first = sync_all(&conn).expect("sync");
@@ -603,7 +614,11 @@ mod tests {
         // Second run: nothing left to adopt, nothing to rewrite.
         let second = sync_all(&conn).expect("sync again");
         assert_eq!(
-            (second.adopted_gradient, second.adopted_colors, second.written),
+            (
+                second.adopted_gradient,
+                second.adopted_colors,
+                second.written
+            ),
             (0, 0, 0),
             "idempotent: a scan must not churn files"
         );

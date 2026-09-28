@@ -72,7 +72,7 @@ pub fn save(app: &AppHandle, size: PhysicalSize<u32>) {
         return;
     };
     let tmp = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(&path.parent().expect("config dir has a parent")).is_err() {
+    if std::fs::create_dir_all(path.parent().expect("config dir has a parent")).is_err() {
         return;
     }
     if std::fs::write(&tmp, json).is_ok() {

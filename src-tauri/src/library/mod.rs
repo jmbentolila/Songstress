@@ -79,14 +79,48 @@ pub fn sort_key(name: &str) -> String {
 static FOLD_MAP: std::sync::LazyLock<std::collections::HashMap<char, char>> =
     std::sync::LazyLock::new(|| {
         [
-            ('à','a'),('á','a'),('â','a'),('ã','a'),('ä','a'),('å','a'),
-            ('è','e'),('é','e'),('ê','e'),('ë','e'),
-            ('ì','i'),('í','i'),('î','i'),('ï','i'),
-            ('ò','o'),('ó','o'),('ô','o'),('õ','o'),('ö','o'),('ø','o'),
-            ('ù','u'),('ú','u'),('û','u'),('ü','u'),
-            ('ý','y'),('ÿ','y'),('ñ','n'),('ç','c'),('ð','d'),('đ','d'),
-            ('ģ','g'),('ķ','k'),('ļ','l'),('ņ','n'),('š','s'),('ž','z'),
-            ('ţ','t'),('ŗ','r'),('ē','e'),('ī','i'),('ō','o'),('ū','u'),
+            ('à', 'a'),
+            ('á', 'a'),
+            ('â', 'a'),
+            ('ã', 'a'),
+            ('ä', 'a'),
+            ('å', 'a'),
+            ('è', 'e'),
+            ('é', 'e'),
+            ('ê', 'e'),
+            ('ë', 'e'),
+            ('ì', 'i'),
+            ('í', 'i'),
+            ('î', 'i'),
+            ('ï', 'i'),
+            ('ò', 'o'),
+            ('ó', 'o'),
+            ('ô', 'o'),
+            ('õ', 'o'),
+            ('ö', 'o'),
+            ('ø', 'o'),
+            ('ù', 'u'),
+            ('ú', 'u'),
+            ('û', 'u'),
+            ('ü', 'u'),
+            ('ý', 'y'),
+            ('ÿ', 'y'),
+            ('ñ', 'n'),
+            ('ç', 'c'),
+            ('ð', 'd'),
+            ('đ', 'd'),
+            ('ģ', 'g'),
+            ('ķ', 'k'),
+            ('ļ', 'l'),
+            ('ņ', 'n'),
+            ('š', 's'),
+            ('ž', 'z'),
+            ('ţ', 't'),
+            ('ŗ', 'r'),
+            ('ē', 'e'),
+            ('ī', 'i'),
+            ('ō', 'o'),
+            ('ū', 'u'),
         ]
         .into_iter()
         .collect()
@@ -96,7 +130,10 @@ static FOLD_MAP: std::sync::LazyLock<std::collections::HashMap<char, char>> =
 mod tests {
     #[test]
     fn sort_key_mirrors_typescript_sortkey() {
-        assert_eq!(super::sort_key("  The Birthday Massacre "), "birthday massacre");
+        assert_eq!(
+            super::sort_key("  The Birthday Massacre "),
+            "birthday massacre"
+        );
         assert_eq!(super::sort_key("Björk"), "bjork");
         assert_eq!(super::sort_key("Motörhead"), "motorhead");
         // Decomposed (NFD) input folds identically.
@@ -116,7 +153,11 @@ mod tests {
         acc.sort_by_key(|t| key(1, None, t));
         assert_eq!(acc, vec!["apple", "élan", "Zebra"]);
         // Numbered tracks keep numeric order AFTER all unnumbered ones.
-        let mut mixed = vec![(1, Some(2), "Mango"), (1, None, "Banana"), (1, Some(1), "Zebra")];
+        let mut mixed = [
+            (1, Some(2), "Mango"),
+            (1, None, "Banana"),
+            (1, Some(1), "Zebra"),
+        ];
         mixed.sort_by_key(|(d, t, title)| key(*d, *t, title));
         let order: Vec<&str> = mixed.iter().map(|(_, _, t)| *t).collect();
         assert_eq!(order, vec!["Banana", "Zebra", "Mango"]);

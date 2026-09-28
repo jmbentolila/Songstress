@@ -70,7 +70,10 @@ pub fn marks_library_dirty(ev: &Event) -> bool {
     // writes — the same self-feeding bug read traffic caused (AGENTS.md). An
     // event with no path at all is unattributable, so it counts (fail open).
     let only_sidecars = !ev.paths.is_empty()
-        && ev.paths.iter().all(|p| crate::library::sidecar::is_sidecar_path(p));
+        && ev
+            .paths
+            .iter()
+            .all(|p| crate::library::sidecar::is_sidecar_path(p));
     !only_sidecars
 }
 
@@ -138,12 +141,11 @@ pub fn spawn(roots: Vec<PathBuf>, on_quiet: impl Fn() + Send + 'static) -> Watch
                 if got {
                     pending = Some(Instant::now());
                 }
-                if let Some(t) = pending {
-                    if t.elapsed() >= DEBOUNCE {
+                if let Some(t) = pending
+                    && t.elapsed() >= DEBOUNCE {
                         pending = None;
                         on_quiet();
                     }
-                }
                 std::thread::sleep(TICK);
             }
         })
@@ -245,7 +247,10 @@ mod tests {
             EventKind::Access(AccessKind::Close(AccessMode::Read)),
             EventKind::Access(AccessKind::Read),
         ] {
-            assert!(!marks_library_dirty(&Event::new(kind)), "{kind:?} must be noise");
+            assert!(
+                !marks_library_dirty(&Event::new(kind)),
+                "{kind:?} must be noise"
+            );
         }
         for kind in [
             EventKind::Create(CreateKind::Any),
@@ -256,7 +261,10 @@ mod tests {
             EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any)),
             EventKind::Any,
         ] {
-            assert!(marks_library_dirty(&Event::new(kind)), "{kind:?} must count");
+            assert!(
+                marks_library_dirty(&Event::new(kind)),
+                "{kind:?} must count"
+            );
         }
     }
 
@@ -275,7 +283,10 @@ mod tests {
 
         // The temp of an atomic write, and the rename that lands it.
         let mut tmp = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any)));
-        tmp.paths = vec![folder.join(".songstress.json.tmp-1234"), sidecar::path_in(folder)];
+        tmp.paths = vec![
+            folder.join(".songstress.json.tmp-1234"),
+            sidecar::path_in(folder),
+        ];
         assert!(!marks_library_dirty(&tmp));
 
         // A real file next to it still counts — including in the same event.
@@ -287,7 +298,8 @@ mod tests {
     /// Dropping the handle stops the thread and releases its watches.
     #[test]
     fn stop_releases_the_thread() {
-        let dir = std::env::temp_dir().join(format!("songstress-watch-stop-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("songstress-watch-stop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let (tx, rx) = mpsc::channel::<()>();

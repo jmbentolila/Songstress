@@ -103,12 +103,18 @@ mod tests {
         );
         assert_eq!(mpris_identity(DEV_ID), "Songstress (dev)");
         assert_eq!(mpris_desktop_entry(DEV_ID), DEV_ID);
-        assert_eq!(appmenu_service_name(DEV_ID), "com.yossi.songstress.dev.menu");
+        assert_eq!(
+            appmenu_service_name(DEV_ID),
+            "com.yossi.songstress.dev.menu"
+        );
     }
 
     #[test]
     fn unknown_flavor_isolates() {
         assert!(is_dev("com.example.something-else"));
-        assert_eq!(socket_dir_name("com.example.something-else"), "songstress-dev");
+        assert_eq!(
+            socket_dir_name("com.example.something-else"),
+            "songstress-dev"
+        );
     }
 }
