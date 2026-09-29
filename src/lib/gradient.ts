@@ -2,8 +2,8 @@ import type { Theme } from "./types";
 import type { RGB } from "./artColors";
 
 export const SURFACE: Record<string, [number, number, number]> = {
-  dark: [22, 22, 28],
-  light: [236, 236, 241],
+  dark: [32, 32, 40],
+  light: [246, 246, 249],
 };
 
 export function rgbToHsl(c: RGB): RGB {

@@ -272,8 +272,18 @@
     return edit.album !== base.album || edit.albumArtist !== base.albumArtist;
   });
 
+  // Header title without the fetch: the library already knows this file's
+  // title, so the header reads final on the opening frame instead of
+  // popping from "Edit tags" when meta lands.
+  const libTitle = $derived(library.trackById(trackId)?.title ?? "");
   const label = $derived(
-    edit.title ? `Edit tags — ${edit.title}` : meta ? `Edit tags — ${meta.file}` : "Edit tags",
+    edit.title
+      ? `Edit tags — ${edit.title}`
+      : libTitle
+        ? `Edit tags — ${libTitle}`
+        : meta
+          ? `Edit tags — ${meta.file}`
+          : "Edit tags",
   );
 
   function reveal() {
@@ -410,6 +420,10 @@
           </button>
         {/if}
         <span class="te-file-name" use:tooltip={meta.path}>{meta.file}</span>
+      {:else}
+        <!-- Shimmer in the file slot: the name and folder pop in after the
+             fetch, sliding Cancel/Save across. -->
+        <span class="te-file-sk sk" aria-hidden="true"></span>
       {/if}
       <!-- The path owns the slack: it clips its own head (rtl trick) and
            hides the excess before the buttons, which never move. -->
@@ -420,8 +434,10 @@
           <span class="te-dir-text te-dir-msg">{badMsg}</span>
         {:else if written && !dirty}
           <span class="te-dir-text te-dir-ok">Written ✓</span>
+        {:else if meta}
+          <span class="te-dir-text">{meta.folder}</span>
         {:else}
-          <span class="te-dir-text">{meta?.folder}</span>
+          <span class="te-dir-sk sk" aria-hidden="true"></span>
         {/if}
       </span>
       <button class="te-btn" onclick={close} use:tooltip={"Close without writing (Esc)"}>Cancel</button>

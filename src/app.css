@@ -47,7 +47,7 @@ html[data-theme="dark"] {
   color-scheme: dark;
   --text: #f4f4f6;
   --text-dim: rgba(244, 244, 246, 0.64);
-  --bg-grid: rgba(22, 22, 28, 0.8);
+  --bg-grid: rgba(32, 32, 40, 0.8);
   --bg-chrome: rgba(22, 22, 28, 0.7);
   --panel-bg: rgba(32, 32, 40, 0.5);
   --panel-bg-strong: rgba(26, 26, 33, 0.94);
@@ -91,8 +91,8 @@ html[data-theme="light"] {
   color-scheme: light;
   --text: #232329;
   --text-dim: rgba(35, 35, 41, 0.64);
-  --bg-grid: rgba(236, 236, 241, 0.8);
-  --bg-chrome: rgba(246, 246, 249, 0.7);
+  --bg-grid: rgba(246, 246, 249, 0.8);
+  --bg-chrome: rgba(236, 236, 241, 0.7);
   --panel-bg: rgba(255, 255, 255, 0.42);
   --panel-bg-strong: rgba(252, 252, 254, 0.95);
   --border: rgba(30, 30, 40, 0.12);
@@ -118,7 +118,7 @@ html[data-theme="light"] {
    App shell sets from `desktop_environment` ("gnome" on GNOME-derived
    sessions — every other desktop stays glass). */
 html[data-de="gnome"][data-theme="dark"] {
-  --bg-grid: rgb(22, 22, 28);
+  --bg-grid: rgb(32, 32, 40);
   --bg-chrome: rgb(22, 22, 28);
   --panel-bg: rgb(32, 32, 40);
   --panel-bg-strong: rgb(26, 26, 33);
@@ -134,8 +134,8 @@ html[data-de="gnome"][data-theme="dark"] {
   --tex-blend: soft-light;
 }
 html[data-de="gnome"][data-theme="light"] {
-  --bg-grid: rgb(236, 236, 241);
-  --bg-chrome: rgb(246, 246, 249);
+  --bg-grid: rgb(246, 246, 249);
+  --bg-chrome: rgb(236, 236, 241);
   --panel-bg: rgb(255, 255, 255);
   --panel-bg-strong: rgb(252, 252, 254);
   /* Light gets MULTIPLY, biased just under 1: a near-white field has almost no
@@ -234,14 +234,14 @@ html[data-de="gnome"] .glass::after {
    Washes/scrims/shadows sit ON surfaces and are untouched. */
 @media (prefers-reduced-transparency: reduce) {
   html[data-theme="dark"] {
-    --bg-grid: rgb(22, 22, 28);
+    --bg-grid: rgb(32, 32, 40);
     --bg-chrome: rgb(22, 22, 28);
     --panel-bg: rgb(32, 32, 40);
     --panel-bg-strong: rgb(26, 26, 33);
   }
   html[data-theme="light"] {
-    --bg-grid: rgb(236, 236, 241);
-    --bg-chrome: rgb(246, 246, 249);
+    --bg-grid: rgb(246, 246, 249);
+    --bg-chrome: rgb(236, 236, 241);
     --panel-bg: rgb(255, 255, 255);
     --panel-bg-strong: rgb(252, 252, 254);
   }

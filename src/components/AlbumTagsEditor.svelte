@@ -308,7 +308,11 @@
       </footer>
     {:else}
       <footer class="te-foot">
-        {#if error}
+        {#if loading}
+          <!-- Shimmer, not a zero: the caption reads "0 files" for the
+               fetch's whole length, then jumps. -->
+          <span class="te-load-pill sk" aria-hidden="true"></span>
+        {:else if error}
           <span class="te-error">{error}</span>
         {:else if bad.size}
           <span class="te-error">{badMsg}</span>

@@ -92,6 +92,8 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Own screen dropper overlay, tracklist EQ marker, light-mode accent/grid tuning, tile-stop slider, clippy-clean Rust 2024 | ✅ 2026-09-28 · **0.16.0** · RPM built, `rpm -qpR` = mpv + webkit2gtk + gtk3 only |
 | Scan progress: fused ring (two-phase monotonic arc, no mid-scan restart) + live stage line under Re-read all files | ✅ 2026-09-29 · **0.16.1** |
 | Waveform backfill decoupled from the rescan (background `peaks-progress` channel, rescan reports done in seconds) + retag refresh of rewritten files | ✅ 2026-09-29 · **0.16.1** |
+| Light contrast flipped: grid back to 246 + chrome down to 236 (yesterday's deeper grid reverted; the weight moves to the chrome tier) + dark grid up to the 32-step, same interval | ✅ 2026-09-29 · **0.16.2** |
+| Tag-editor open smoothed: content-shaped skeleton in the body's own grid (no more note→everything pop), 180ms fade+rise arrival, shimmer footer slots instead of 0/empty, track header from the library (no label pop) + ResizeObserver height easing (1s measured-px WAAPI, staged landings breathe instead of snapping) | ✅ 2026-09-29 · **0.16.2** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 

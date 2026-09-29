@@ -100,6 +100,55 @@
       panelEl?.querySelector<HTMLElement>("input, button")?.focus(),
     );
   });
+
+  // Height easing: the content lands in stages (tags, then the art
+  // inventory, sometimes chips or the receipt), and every landing used to
+  // snap the box taller — up to twice per open. A ResizeObserver eases the
+  // panel between MEASURED heights instead (this WebKitGTK has no
+  // interpolate-size, so height:auto cannot transition in CSS — explicit
+  // px endpoints via WAAPI, the same trick as the file-list unfolds).
+  // Growth and shrink alike, a full second on the shared ease-out
+  // reduced motion (matchMedia, AlbumGrid's pattern — WAAPI ignores the
+  // CSS kill switch) and past the max-height cap, where the body scrolls
+  // internally and the panel correctly never moves.
+  let growAnim: Animation | null = null;
+  $effect(() => {
+    const el = panelEl;
+    if (!el || !ui.tagEditor.open) return;
+    let armed = false;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const ro = new ResizeObserver(() => {
+      const h = el.offsetHeight;
+      // First callback is the observe baseline, not a change.
+      if (!armed) {
+        armed = true;
+        return;
+      }
+      if (reduce || out) return;
+      // An interrupted ease leaves fill:none, so the box is already at its
+      // newest auto height — but the EYE is mid-flight. Ease from the
+      // visual height, not the laid-out one, or the box visibly jumps back.
+      growAnim?.cancel();
+      const from = el.getBoundingClientRect().height;
+      if (Math.abs(from - h) < 1) return;
+      // Clip for the flight: mid-ease the box is shorter than its content
+      // and the spill would paint past the rounded panel edge.
+      el.style.overflow = "hidden";
+      growAnim = el.animate(
+        [{ height: `${from}px` }, { height: `${h}px` }],
+        { duration: 1000, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+      );
+      growAnim.onfinish = growAnim.oncancel = () => {
+        el.style.overflow = "";
+      };
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      growAnim?.cancel();
+      el.style.overflow = "";
+    };
+  });
 </script>
 
 <svelte:window
@@ -128,7 +177,7 @@
   use:scrimDismiss={close}
 >
   <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-  <section class="te glass" bind:this={panelEl} role="dialog" aria-modal="true" aria-label={label}>
+  <section class="te glass" bind:this={panelEl} role="dialog" aria-modal="true" aria-label={label} aria-busy={loading}>
     <header class="te-head">
       <h2>{label}</h2>
       {@render headerExtra?.()}
@@ -136,9 +185,32 @@
     </header>
 
     {#if loading}
-      <p class="te-note">Reading file tags…</p>
+      <!-- Content-shaped wait: the same .te-cols grid the body wears, so the
+           swap changes texture, not layout (DESIGN.md skeleton rules — the
+           placeholder IS the status: no headline, no numbers; announced once
+           via the status below, never per shape). Sized under every loaded
+           state on purpose: content may only ever EXPAND this box, never
+           shrink it back. -->
+      <div class="te-body" aria-hidden="true">
+        <div class="te-cols">
+          <div class="te-skel-art">
+            <span class="sk te-sk-title" style:--i={0}></span>
+            <span class="sk te-sk-square" style:--i={1}></span>
+            <span class="sk te-sk-bar" style:--i={2}></span>
+          </div>
+          <div class="te-skel-fields">
+            <span class="sk te-sk-topline" style:--i={3}></span>
+            <span class="sk te-sk-coltitle" style:--i={4}></span>
+            {#each [5, 6, 7, 8, 9] as i (i)}
+              <span class="sk te-sk-row" style:--i={i}></span>
+            {/each}
+            <span class="sk te-sk-more" style:--i={10}></span>
+          </div>
+        </div>
+      </div>
+      <span class="sr-only" role="status">Reading file tags…</span>
     {:else}
-      <div class="te-body">{@render children()}</div>
+      <div class="te-body te-enter">{@render children()}</div>
     {/if}
 
     {@render footer(close)}
@@ -203,11 +275,94 @@
     padding: 18px 2px 12px 13px;
   }
 
-  .te-note {
-    margin: 0;
-    padding: 20px 2px;
-    font-size: 15px;
-    color: var(--text-dim);
+  /* Loading skeleton: the body's own shape. Art cell echoes the stacked
+     picker (title + square ≈ the 172px tile + a short bar for the add
+     tile); fields cell echoes the grid (topline + title + five input-tall
+     rows + the disclosure). Deliberately SHORT of every loaded state —
+     chips, tiles and the receipt only ever grow this box. Bars reuse the
+     global .sk material (own delays so the light never starts in lockstep).
+     The arrival below is CSS, not a svelte/transition, so the global
+     reduced-motion switch reaches it. */
+  .te-skel-art {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .te-sk-title {
+    width: 45%;
+    height: 14px;
+  }
+  .te-sk-square {
+    width: 100%;
+    aspect-ratio: 1;
+  }
+  .te-sk-bar {
+    width: 70%;
+    height: 34px;
+  }
+  .te-skel-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    padding-top: 11px;
+  }
+  .te-sk-topline {
+    height: 13px;
+  }
+  .te-sk-coltitle {
+    width: 40%;
+    height: 14px;
+  }
+  .te-sk-row {
+    height: 34px;
+  }
+  .te-sk-more {
+    width: 50%;
+    height: 20px;
+  }
+  /* Arrival: the shapes fade up into position — 180ms, 8px of rise, the
+     ease-out the motion tokens name. Frequency tier (opens constantly),
+     so no stagger ladder: one breath for the whole surface. */
+  .te-enter {
+    animation: te-arrive 180ms var(--ease-out);
+  }
+  @keyframes te-arrive {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* Footer loading pills (the footer family lives here — snippets cross
+     file borders, so editor-scoped rules would not reach them). The album
+     caption and the track file/dir slots render shimmer instead of empty
+     or zero, so the buttons never slide when the words land. */
+  :global(.te-load-pill) {
+    width: 200px;
+    height: 14px;
+    margin-right: auto;
+    align-self: center;
+  }
+  :global(.te-file-sk) {
+    width: 120px;
+    height: 14px;
+    align-self: center;
+  }
+  :global(.te-dir-sk) {
+    width: 100%;
+    height: 14px;
+    align-self: center;
   }
   /* The footer family is SHARED: an editor renders its footer content in its
      own scope, so a component-scoped rule here would not reach it (AGENTS.md:
