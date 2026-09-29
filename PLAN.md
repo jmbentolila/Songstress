@@ -90,6 +90,8 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Artwork deletion: ✕ on every tile on hover, in-modal confirmation dropping from the owning surface, immediate delete, most-files cover fallback, spinner while it runs, unreadable files skipped and named | ✅ 2026-09-26 · **0.14.0** (the artwork flow also banks "The In-Modal Confirmation Rule" in DESIGN.md) |
 | Playbar progress style: straight line (default) or waveform; Appearance + Global Menu toggle, persisted; peaks decoded with symphonia and cached in SQLite (migration v7) | ✅ 2026-09-28 · **0.15.0** |
 | Own screen dropper overlay, tracklist EQ marker, light-mode accent/grid tuning, tile-stop slider, clippy-clean Rust 2024 | ✅ 2026-09-28 · **0.16.0** · RPM built, `rpm -qpR` = mpv + webkit2gtk + gtk3 only |
+| Scan progress: fused ring (two-phase monotonic arc, no mid-scan restart) + live stage line under Re-read all files | ✅ 2026-09-29 · **0.16.1** |
+| Waveform backfill decoupled from the rescan (background `peaks-progress` channel, rescan reports done in seconds) + retag refresh of rewritten files | ✅ 2026-09-29 · **0.16.1** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5714,3 +5716,59 @@ Screen-reader label follows state (Now playing / Paused).
   src-tauri/.
 
 Gates: cargo 142, vitest 140, svelte-check 0, build ok.
+
+### Fused scan ring + live stage line (2026-09-29, owner-driven)
+
+A full re-read runs files → artwork → peaks, each phase with its OWN
+done/total — so the ring's raw fraction restarted at every boundary and the
+arc snapped back to empty mid-run, reading as a second scan popping in.
+Two changes, both frontend-only (the backend already emits the phases):
+- **One monotonic arc.** `scanProgress` (Sidebar) fuses the phases when peaks
+  will actually run (waveform style on + full re-read or import): files
+  0→0.35, artwork 0.35→0.5, peaks 0.5→1 (peaks owns the back half — it is
+  the long decode). Every other operation keeps plain done/total. A phase
+  reporting total 0 counts as its band complete, except "no events yet"
+  (phase ""), which stays an honest empty ring. `ProgressRing` dropped its
+  `{#key phase}` re-mount (the snap's mechanism) and fades in/out (160ms,
+  off under reduced motion, same gate as the grid skeleton).
+- **Live stage line.** The Scan group now renders `scanLine` under Re-read
+  all files while a scan/full run is in flight — same quiet voice as the
+  `.scan-note` under search, `aria-live` polite. The two live regions never
+  show together (home layer vs. Library pane), so no double-announce.
+
+Gates: svelte-check 0, vitest 140, build ok (no Rust touched).
+
+SUPERSEDED same day (see next entry): the peaks tail left the scan for its
+own background channel, so the ring fused two phases instead of three
+(files 0→0.5, artwork 0.5→1) and the stage line reads the background peaks
+progress once the scan reports done — one node, the text swaps, no pop.
+
+### Waveform backfill decoupled from the rescan (2026-09-29, owner-driven)
+
+The backfill ran INSIDE `scan_inner` before `scan-finished`: measured on the
+fresh-wipe library, files 5.2s + artwork 5.1s, then peaks held the ring for
+**4,588 tracks in 821s (~14 min)** — a 10-second tool taking 14 minutes and
+pinning the progress UI to a phase nobody asked for. Now `scan_inner` ends
+at the sidecar sync and `scan-finished` fires in seconds; `scan_library`
+(full re-reads) and `import_music` (the batch just indexed) hand a
+`PeaksScope` to `spawn_peaks_backfill`, which converges in the background:
+first plays stay covered by the lazy decode + album prefetch, plain
+incremental/watcher scans still trigger nothing. Progress rides a separate
+`peaks-progress` channel with a terminal `peaks-finished` on EVERY path
+(same discipline as `scan-finished`; the guard releases in the task on
+success, in the wrapper on failure, so a panicking decode can never wedge
+`PEAKS_RUNNING` true). The old mid-scan `SCAN_RUNNING` release hack is
+gone — the lock is simply never held for the decode. Frontend: the scanner
+store carries `peaksRunning/peaksDone/peaksTotal`, and the Scan-group stage
+line shows them with no ring (no verb is running to hang one on).
+Addendum same day (owner suggestion): `rescan_written` — the tag-save /
+artwork-delete follow-up — takes `db_path` and fires the same background
+backfill scoped to exactly the files it rewrote, so a retag's stale peaks
+(a rewrite bumps mtime, which voids the cached row) refresh within seconds
+instead of waiting for first play. One or two files of decode, silent when
+the style is off or everything is cached.
+
+Gates: svelte-check 0, cargo 142, clippy 0, vitest 140, build ok.
+Follow-up, not this change: resume-at-startup when pending peaks exist
+(retags leave stale rows until the next full re-read; lazy play covers
+them meanwhile).

@@ -301,8 +301,40 @@
   // empty ring, not a fake halfway — "started, no news" is the honest state.
   // Finished runs report 1: the hold frame exists precisely to show a complete
   // arc, so an operation that ended at its last coarse event still lands full.
-  let scanProgress = $derived(
-    scanner.running ? (scanner.total > 0 ? scanner.done / scanner.total : 0) : 1,
+  // Fused two-phase progress: files and artwork carry SEPARATE done/totals,
+  // so the raw fraction restarts at the boundary and the arc snaps back
+  // mid-run. Fuse into one monotonic 0..1 (files 0→0.5, artwork 0.5→1);
+  // the 2026-09-29 decoupling moved the long peaks tail to its own
+  // background channel, so the ring's work is always the quick part. A phase
+  // reporting total 0 has nothing to do and counts as its band complete —
+  // except "no events yet" (phase ""), which stays an honest empty ring.
+  let scanProgress = $derived.by(() => {
+    if (!scanner.running) return 1;
+    if (scanner.phase === "artwork") {
+      if (scanner.total <= 0) return 1;
+      return 0.5 + 0.5 * Math.min(1, scanner.done / scanner.total);
+    }
+    // Files / import pass, or no events yet (phase "").
+    if (scanner.total <= 0) return 0;
+    return 0.5 * Math.min(1, scanner.done / scanner.total);
+  });
+  // Live stage under Re-read all files: the scan's own line while a
+  // scan/full run is in flight, the background peaks line once it reports
+  // done — one node, the text swaps, no pop. scanLine already names the
+  // phase + counts; the peaks line is built the same way. Home layer and
+  // this pane never show together, so the two live regions cannot
+  // double-announce.
+  let peaksLine = $derived(
+    !scanner.peaksRunning
+      ? ""
+      : scanner.peaksTotal > 0
+        ? `Precomputing waveforms ${scanner.peaksDone.toLocaleString()} of ${scanner.peaksTotal.toLocaleString()}`
+        : `Precomputing waveforms\u2026`,
+  );
+  let scanStageText = $derived(
+    scanner.running && (scanner.kind === "scan" || scanner.kind === "full") && scanLine
+      ? scanLine
+      : peaksLine,
   );
   let ringKind = $derived(scanner.running ? scanner.kind : scanner.heldKind);
   // The ring goes on the row whose own verb is running, so a disabled pane is
@@ -1180,6 +1212,16 @@
                 {/if}
               </button>
             </div>
+            <!-- Live stage, in the same quiet voice as the scan note under
+                 search: a re-read's tail (and now its background waveform
+                 backfill) runs long, so the rows it disables owe more than a
+                 filling arc. One node: the scan's line while it runs, the
+                 peaks line after it reports done. Home layer and this pane
+                 never show together, so the two live regions cannot
+                 double-announce. -->
+            {#if scanStageText}
+              <p class="scan-stage" aria-live="polite">{scanStageText}</p>
+            {/if}
           </section>
 
           <section class="group">
@@ -1959,6 +2001,16 @@
   .scan-note {
     flex: none;
     margin: -8px 12px 4px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  /* Live scan stage under Re-read all files: the same quiet voice as
+     .scan-note, aligned to the row labels (10px) instead of the search
+     field. The group's own 12px gap airs it from the rows above. */
+  .scan-stage {
+    margin: 0;
+    padding: 0 10px;
     font-size: 13px;
     color: var(--text-dim);
   }

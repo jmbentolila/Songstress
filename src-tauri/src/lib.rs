@@ -470,6 +470,96 @@ static SCAN_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 /// still preventing two backfills from overlapping.
 static PEAKS_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Waveform-peaks scope for the background backfill: the whole library
+/// (after a full re-read) or just the files a scan indexed (after an import).
+/// Decoupled from the scan (2026-09-29): the backfill used to run INSIDE
+/// `scan_inner` before `scan-finished`, so a 10-second re-read held the
+/// progress ring for a 14-minute decode (measured: 4,588 tracks in 821s).
+/// Now the scan reports done while the peaks converge in the background —
+/// first plays are covered by the lazy decode + album prefetch, and this
+/// fills in the rest. Progress rides its own `peaks-progress` channel with a
+/// terminal `peaks-finished` on EVERY path (same discipline as
+/// `scan-finished`: the frontend's peaks indicator clears only on that
+/// event. Concurrent scan writers queue on the connections' busy_timeout.
+enum PeaksScope {
+    All,
+    Paths(Vec<PathBuf>),
+}
+
+/// Fire-and-forget waveform backfill. The PEAKS_RUNNING guard is taken here
+/// and released when the run ends — inside the task on the normal paths,
+/// in the wrapper on failure — so a panicking decode task can never wedge
+/// the guard true (every later backfill would then skip silently).
+fn spawn_peaks_backfill(app: tauri::AppHandle, db_path: PathBuf, scope: PeaksScope) {
+    use std::sync::atomic::Ordering;
+    if PEAKS_RUNNING.swap(true, Ordering::SeqCst) {
+        eprintln!("[scan] peaks skipped (a backfill is already running)");
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        // Cloned up front: the blocking task is `move`, and the wrapper
+        // below still needs `app` for the failure-path terminal emits.
+        let task_app = app.clone();
+        let task = tauri::async_runtime::spawn_blocking(move || {
+            let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
+            let emitter = task_app.clone();
+            // Gated on the style: a line-mode user never pays a decode.
+            let waveform_on = library::settings::all(&conn)
+                .ok()
+                .and_then(|m| m.get("playbarWaveform").cloned())
+                .and_then(|v| serde_json::from_str::<bool>(&v).ok())
+                .unwrap_or(false);
+            if !waveform_on {
+                eprintln!("[scan] peaks skipped (waveform style off)");
+                PEAKS_RUNNING.store(false, Ordering::SeqCst);
+                return Ok::<usize, String>(0);
+            }
+            // Keyed on (track_id, mtime_ns), so a re-run skips what it
+            // already has and an interrupted run resumes. No start event on
+            // the empty path: there is nothing to surface.
+            let rows = match &scope {
+                PeaksScope::All => library::peaks::pending_all(&conn).map_err(|e| e.to_string())?,
+                PeaksScope::Paths(paths) => {
+                    library::peaks::pending_paths(&conn, paths).unwrap_or_default()
+                }
+            };
+            let n = rows.len();
+            if n == 0 {
+                eprintln!("[scan] peaks 0 tracks (all cached)");
+                PEAKS_RUNNING.store(false, Ordering::SeqCst);
+                return Ok(0);
+            }
+            let t_peaks = std::time::Instant::now();
+            let stored = library::peaks::backfill(&conn, rows, &mut |done, total| {
+                let _ = emitter.emit(
+                    "peaks-progress",
+                    serde_json::json!({ "done": done, "total": total }),
+                );
+            });
+            eprintln!("[scan] peaks {stored}/{n} tracks in {:?}", t_peaks.elapsed());
+            let _ = emitter.emit("peaks-finished", serde_json::json!({ "stored": stored }));
+            PEAKS_RUNNING.store(false, Ordering::SeqCst);
+            Ok(stored)
+        });
+        match task.await {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                eprintln!("[scan] peaks FAILED: {e}");
+                let _ = app.emit("peaks-finished", serde_json::json!({ "error": e }));
+                PEAKS_RUNNING.store(false, Ordering::SeqCst);
+            }
+            Err(e) => {
+                eprintln!("[scan] peaks task failed: {e}");
+                let _ = app.emit(
+                    "peaks-finished",
+                    serde_json::json!({ "error": format!("peaks task failed: {e}") }),
+                );
+                PEAKS_RUNNING.store(false, Ordering::SeqCst);
+            }
+        }
+    });
+}
+
 /// Step 7d: set by the file watcher's debounce callback, consumed (and
 /// cleared) by the watch-scan loop. Events arriving DURING a scan keep it
 /// set, so one more scan runs after the in-flight one settles.
@@ -619,53 +709,11 @@ async fn scan_inner(
                 sidecar_counts.adopted_colors
             );
         }
-        // Waveform peaks: a FULL rescan precomputes the WHOLE library; an
-        // IMPORT precomputes only the files it just indexed. A plain
-        // incremental / watcher scan does NEITHER — a trivial file change must
-        // not launch a whole-library decode; those tracks fill in lazily on
-        // first play. Parallel across cores (one left free for playback/UI),
-        // and keyed on (track_id, mtime_ns), so a re-run skips what it already
-        // has and an interrupted run resumes.
-        // Skipped ENTIRELY when the waveform style is off: a line-mode user must
-        // not pay a whole-library re-read + decode for a feature they never use.
-        let waveform_on = library::settings::all(&conn)
-            .ok()
-            .and_then(|m| m.get("playbarWaveform").cloned())
-            .and_then(|v| serde_json::from_str::<bool>(&v).ok())
-            .unwrap_or(false);
-        if (full || only.is_some()) && waveform_on {
-            if PEAKS_RUNNING.swap(true, Ordering::SeqCst) {
-                eprintln!("[scan] peaks skipped (a backfill is already running)");
-            } else {
-                // Release the SCAN lock for this long phase. A watcher rescan
-                // waits out SCAN_RUNNING (the dirty flag stays set), so holding
-                // it would DEFER every live change for minutes; releasing it lets
-                // the watcher's fast incremental pass run concurrently. The
-                // PEAKS_RUNNING guard keeps two backfills from overlapping, and
-                // the connections carry a busy_timeout so the concurrent writers
-                // queue instead of colliding.
-                SCAN_RUNNING.store(false, Ordering::SeqCst);
-                let t_peaks = std::time::Instant::now();
-                let rows = match &only {
-                    Some(paths) => {
-                        let list: Vec<std::path::PathBuf> = paths.iter().cloned().collect();
-                        library::peaks::pending_paths(&conn, &list).unwrap_or_default()
-                    }
-                    None => library::peaks::pending_all(&conn).unwrap_or_default(),
-                };
-                let n = rows.len();
-                library::peaks::backfill(&conn, rows, &mut |done, total| {
-                    let _ = emitter.emit(
-                        "scan-progress",
-                        serde_json::json!({ "phase": "peaks", "done": done, "total": total }),
-                    );
-                });
-                eprintln!("[scan] peaks {n} tracks in {:?}", t_peaks.elapsed());
-                PEAKS_RUNNING.store(false, Ordering::SeqCst);
-            }
-        } else if full || only.is_some() {
-            eprintln!("[scan] peaks skipped (waveform style off)");
-        }
+        // NOTE (2026-09-29): the waveform-peaks backfill used to run here,
+        // inside the scan before `scan-finished`. It now runs DECOUPLED via
+        // `spawn_peaks_backfill` (called by `scan_library` on full re-reads
+        // and by `import_music` for the batch just indexed), so the scan
+        // reports done in seconds while the peaks converge in the background.
         eprintln!(
             "[scan] files {:?} (added {} updated {} removed {} skipped {}) · artwork {:?}",
             files_elapsed,
@@ -740,7 +788,7 @@ async fn scan_inner(
 /// A retag that changes album identity regroups the rows (merge, move,
 /// split) exactly as a normal scan would. `scan-finished` is emitted so
 /// the frontend reloads its dump the way it does after any scan.
-fn rescan_written(conn: &mut rusqlite::Connection, app: &tauri::AppHandle, paths: &[PathBuf]) {
+fn rescan_written(conn: &mut rusqlite::Connection, app: &tauri::AppHandle, db_path: &Path, paths: &[PathBuf]) {
     if paths.is_empty() {
         return;
     }
@@ -763,6 +811,11 @@ fn rescan_written(conn: &mut rusqlite::Connection, app: &tauri::AppHandle, paths
         Err(e) => eprintln!("[scan] retag-rescan FAILED: {e}"),
     }
     let _ = app.emit("scan-finished", serde_json::json!({ "error": null }));
+    // The rewrite changed mtimes, so these files' cached peaks just went
+    // stale — refresh exactly them in the background (a file or two of
+    // decode, gated on the waveform style inside). First plays were already
+    // covered by the lazy decode; this closes even that gap.
+    spawn_peaks_backfill(app.clone(), db_path.to_path_buf(), PeaksScope::Paths(paths.to_vec()));
 }
 
 /// Step 7c: all library roots. `musicDirs` (JSON array) is AUTHORITATIVE
@@ -829,14 +882,21 @@ async fn scan_library(
 ) -> Result<ScanSummary, String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let roots = scan_roots(&state, &cache_dir, root);
-    run_library_scan(
-        app,
+    let full = full.unwrap_or(false);
+    let summary = run_library_scan(
+        app.clone(),
         state.db_path.clone(),
         cache_dir,
         roots,
-        full.unwrap_or(false),
+        full,
     )
-    .await
+    .await?;
+    // Waveforms converge in the background (see `spawn_peaks_backfill`):
+    // the re-read reports done now, the decode tail does not hold it.
+    if full {
+        spawn_peaks_backfill(app, state.db_path.clone(), PeaksScope::All);
+    }
+    Ok(summary)
 }
 
 fn dirs_home() -> PathBuf {
@@ -2204,6 +2264,11 @@ async fn import_music(
     )
     .await?;
 
+    // The batch's waveforms converge in the background (see
+    // `spawn_peaks_backfill`): the receipt reports now, the decode does not
+    // hold it. First plays are covered by the lazy decode + album prefetch.
+    spawn_peaks_backfill(app, db_path.clone(), PeaksScope::Paths(files));
+
     let db = db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db).map_err(|e| e.to_string())?;
@@ -2537,6 +2602,7 @@ async fn save_track_tags(
         rescan_written(
             &mut conn,
             &app,
+            &db_path,
             std::slice::from_ref(&PathBuf::from(file_path)),
         );
         Ok(())
@@ -2584,7 +2650,7 @@ async fn save_album_tags(
         if changed {
             let _ = library::artwork::refresh_one(&conn, &cache_dir, &album_id);
         }
-        rescan_written(&mut conn, &app, &paths);
+        rescan_written(&mut conn, &app, &db_path, &paths);
         Ok(report)
     })
     .await
@@ -2625,7 +2691,7 @@ async fn delete_artwork(
     tauri::async_runtime::spawn_blocking(move || {
         let mut conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
         let report = library::tags::delete_artwork(&conn, &cache_dir, &album_id, &hash)?;
-        rescan_written(&mut conn, &app, &report.touched);
+        rescan_written(&mut conn, &app, &db_path, &report.touched);
         Ok::<library::tags::ArtDeleteReport, String>(report)
     })
     .await

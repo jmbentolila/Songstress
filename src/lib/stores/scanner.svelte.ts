@@ -22,10 +22,17 @@ export const scanner = $state({
   phase: "" as "" | Phase,
   done: 0,
   total: 0,
+  /** Background waveform backfill (decoupled 2026-09-29 — see
+   * `spawn_peaks_backfill` in lib.rs): runs AFTER the scan reports done, so
+   * it never holds this store's `running`. Surfaced quietly in the Library
+   * pane's Scan group, never as a ring — no verb is running to hang one on. */
+  peaksRunning: false,
+  peaksDone: 0,
+  peaksTotal: 0,
 });
 
 type Kind = "scan" | "full" | "import" | "save" | "discard" | "folder";
-type Phase = "scan" | "artwork" | "import" | "peaks";
+type Phase = "scan" | "artwork" | "import";
 
 /** A determinate indicator that vanishes at 85% reads as an interruption: the
  * backend's last progress event is usually short of the end, so unmounting the
@@ -71,16 +78,24 @@ export function initScanner() {
   started = true;
   void listen("scan-progress", (e) => {
     const p = e.payload as { phase?: string; done: number; total: number };
+    // The scan channel carries files (no phase) → artwork → import only.
+    // Peaks ride their own channel below since the 2026-09-29 decoupling.
     scanner.phase =
-      p.phase === "artwork"
-        ? "artwork"
-        : p.phase === "import"
-          ? "import"
-          : p.phase === "peaks"
-            ? "peaks"
-            : "scan";
+      p.phase === "artwork" ? "artwork" : p.phase === "import" ? "import" : "scan";
     scanner.done = p.done;
     scanner.total = p.total;
+  });
+  // Background waveform backfill: any progress means a run is converging;
+  // `peaks-finished` (emitted on EVERY path, like `scan-finished`) is the
+  // sole thing that clears it.
+  void listen("peaks-progress", (e) => {
+    const p = e.payload as { done: number; total: number };
+    scanner.peaksRunning = true;
+    scanner.peaksDone = p.done;
+    scanner.peaksTotal = p.total;
+  });
+  void listen("peaks-finished", () => {
+    scanner.peaksRunning = false;
   });
 }
 

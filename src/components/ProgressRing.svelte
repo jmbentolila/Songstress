@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade } from "svelte/transition";
+
   /**
    * Determinate progress: an arc that sweeps clockwise as the work gets done,
    * and stops. Deliberately NOT a spinner — a scan that has been running for
@@ -8,21 +10,28 @@
    *
    * The viewBox is fixed at 16 units and `size` scales the box, so the stroke
    * stays proportional to the dot it shares a row tail with.
+   *
+   * Mount/unmount fades (160ms, off under reduced motion): the ring used to
+   * pop in and out around multi-phase runs. The value itself is fused into one
+   * monotonic 0..1 by the caller, so no phase re-key is needed — the arc never
+   * runs backwards, it just keeps filling.
    */
+  const FADE = {
+    duration: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 160,
+  };
   let {
     value,
     label,
-    phase = "",
     size = 16,
   }: {
     /** 0..1. Out-of-range and absent totals clamp to empty, never to a guess. */
     value: number;
     /** Full sentence for assistive tech, e.g. "Scanning 137 of 4,434". */
     label: string;
-    /** The run's current phase. A new phase has its own totals, so the arc is
-     * allowed to restart — but it must RESTART, not animate backwards, so the
-     * arc is keyed on it and a phase change replaces the node instead of
-     * transitioning it. */
+    /** The run's current phase. Accepted and ignored: the value arrives
+     * pre-fused and monotonic, so nothing re-keys the node (the old {#key}
+     * snapped the arc back to empty at every phase boundary, which read as
+     * a second scan). Kept so callers keep passing scanner.phase. */
     phase?: string;
     size?: number;
   } = $props();
@@ -42,19 +51,18 @@
   aria-valuetext={label}
   style:width={`${size}px`}
   style:height={`${size}px`}
+  transition:fade={FADE}
 >
   <svg viewBox="0 0 16 16" aria-hidden="true">
     <circle class="track" cx="8" cy="8" r={R} />
-    {#key phase}
-      <circle
-        class="fill"
-        cx="8"
-        cy="8"
-        r={R}
-        style:stroke-dasharray={C}
-        style:stroke-dashoffset={C * (1 - clamped)}
-      />
-    {/key}
+    <circle
+      class="fill"
+      cx="8"
+      cy="8"
+      r={R}
+      style:stroke-dasharray={C}
+      style:stroke-dashoffset={C * (1 - clamped)}
+    />
   </svg>
 </span>
 
