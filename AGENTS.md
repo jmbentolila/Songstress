@@ -547,3 +547,16 @@ quantifies what the version contains. A commit batch that is dev-only
 message. Never leave the version files disagreeing with each other, and
 never leave a bump uncommitted across work commits: the version must always
 describe what HEAD contains.
+
+## Shared memory (this repo has no memory of its own)
+Vault: `/home/yossi/Projects/Arkadia` (private git, Obsidian-readable).
+- Session start: read the vault `AGENTS.md` boot section,
+  `agents/open-loops.md`, `wiki/index.md`, tail `wiki/log.md`. Never
+  re-derive what the vault knows.
+- Session end: a fix isn't done until its note exists in the vault
+  (`agents/incidents/`, same-session agent, with commit/file links).
+  Update `open-loops.md`, `wiki/index.md`, `wiki/log.md`. Pushes to the
+  vault are gated on its janitor pre-push hook.
+- Declare the boot: open your first reply with what you read (open-loop
+  count, index date, log tail). Skipped it? Say so — honestly late beats
+  silently never.
