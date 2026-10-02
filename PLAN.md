@@ -94,6 +94,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Waveform backfill decoupled from the rescan (background `peaks-progress` channel, rescan reports done in seconds) + retag refresh of rewritten files | ✅ 2026-09-29 · **0.16.1** |
 | Light contrast flipped: grid back to 246 + chrome down to 236 (yesterday's deeper grid reverted; the weight moves to the chrome tier) + dark grid up to the 32-step, same interval | ✅ 2026-09-29 · **0.16.2** |
 | Tag-editor open smoothed: content-shaped skeleton in the body's own grid (no more note→everything pop), 180ms fade+rise arrival, shimmer footer slots instead of 0/empty, track header from the library (no label pop) + ResizeObserver height easing (1s measured-px WAAPI, staged landings breathe instead of snapping) | ✅ 2026-09-29 · **0.16.2** |
+| GNOME window frame v1: 1px outer dark ring (border) + inset 1px inner light hairline on `.app`, gated to `html[data-de="gnome"]`, dark + light values from measured libadwaita 1.9.4 | ✅ 2026-10-02 · **0.16.3** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5774,3 +5775,31 @@ Gates: svelte-check 0, cargo 142, clippy 0, vitest 140, build ok.
 Follow-up, not this change: resume-at-startup when pending peaks exist
 (retags leave stale rows until the next full re-read; lazy play covers
 them meanwhile).
+
+### GNOME window frame v1 (2026-10-02, owner-approved visual tweak → 0.16.3)
+
+Our window is decorations(false) + transparent(true) (lib.rs), so Mutter draws
+no frame; `.app` is fixed inset 0 with radius but no border/shadow, so on
+GNOME the edge melted into the wallpaper. Ground truth measured from installed
+libadwaita 1.9.4: radius 15px, 1px outer dark ring, 1px inner light hairline
+(offset -1px) plus drop shadow. Smallest change: GNOME-gated rules on `.app`
+in app.css — `border: 1px solid` paints the outer ring, `box-shadow: inset
+0 0 0 1px` paints the inner hairline (inset so nothing clips at inset 0; an
+outer ring would clip). Dark: border rgba(0,0,0,0.55), hairline
+rgba(255,255,255,0.07). Light: border rgba(0,0,0,0.18), hairline
+rgba(255,255,255,0.6). Radius, alphas, grain, KDE styling untouched.
+Retune same day: dark outer ring softened to rgba(0,0,0,0.3) + hairline to
+rgba(255,255,255,0.09) — owner's Nautilus corner clip reads light gray, and
+libadwaita tokens confirm (borders are currentColor at 15%, window.csd outer
+ring black at only 5%); the 0.55 ring was too heavy. Light rule untouched.
+Second retune same day: outer ring to rgba(0,0,0,0.12), hairline to
+rgba(255,255,255,0.1) — owner's ruling is the LIGHT line leads (it matches the
+internal seams: sidebar border-right and playbar border-top both read
+var(--border) = 0.1 in dark), so the hairline now equals --border exactly and
+the dark ring drops to near-invisible like Adwaita's ~5%.
+Root-cause fix same day: hairline moved from box-shadow inset to outline -
+1px in BOTH themes (same alphas) — the inset shadow painted below the opaque
+sidebar/grid/playbar and only peeked through on straights, dying at the bend;
+the negative-offset outline paints above them, follows the radius, unclipped.
+
+Gates: svelte-check 0, vitest, cargo test --lib, build ok.

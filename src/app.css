@@ -226,6 +226,30 @@ html[data-de="gnome"] .glass::after {
   opacity: 0;
 }
 
+/* ── GNOME window frame ───────────────────────────────────────────────────────
+   Mutter draws no frame here (decorations(false) + transparent(true) in
+   lib.rs), and .app is fixed inset 0 with no border — so the window edge
+   melts into the wallpaper. libadwaita 1.9.4 ground truth (measured): 15px
+   radius, 1px outer dark ring, 1px inner light hairline. The border paints
+   the outer ring (outside the content box, so it renders complete); the
+   inner hairline is an OUTLINE at offset -1px — NOT a box-shadow inset.
+   Measured reason: an inset shadow paints BELOW opaque descendants, so the
+   sidebar, grid and playbar backgrounds bury it (it only peeked through on
+   straights and died at the radius bend — caricature-tested live), while a
+   negative-offset outline paints ABOVE them, follows the radius, and is not
+   clipped by the element's own overflow. Radius untouched — --radius-window
+   still owns it. */
+html[data-de="gnome"][data-theme="dark"] .app {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  outline: 1px solid rgba(255, 255, 255, 0.1);
+  outline-offset: -1px;
+}
+html[data-de="gnome"][data-theme="light"] .app {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  outline: 1px solid rgba(255, 255, 255, 0.6);
+  outline-offset: -1px;
+}
+
 /* ── Reduced transparency + higher contrast ───────────────────────────────
    apple-design §14: reduced motion is not the only signal. The GNOME block
    above owns the same solid tokens per-DE; these own them per-USER — a KDE
