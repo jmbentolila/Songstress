@@ -64,8 +64,11 @@ pub fn compute(path: &Path, duration_sec: f64) -> Result<Vec<u8>, String> {
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
     let mut hint = Hint::new();
+    // Lowercased: symphonia matches the hint against lowercase format
+    // extensions, so `song.WAV` must not probe as unknown (2026-10-03 —
+    // content sniffing usually saves it, but the hint is free).
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        hint.with_extension(ext);
+        hint.with_extension(&ext.to_ascii_lowercase());
     }
 
     let probed = symphonia::default::get_probe()
@@ -461,6 +464,23 @@ mod tests {
     #[test]
     fn a_missing_file_is_an_error_not_a_panic() {
         assert!(compute(std::path::Path::new("fixtures/nope.mp3"), 1.0).is_err());
+    }
+
+    /// Uppercase `.WAV` (ripper default) decodes exactly like lowercase —
+    /// the probe hint is lowercased, not passed through raw (2026-10-03).
+    #[test]
+    fn decodes_uppercase_wav_extension() {
+        let src = fixture("sample/untitled-song.wav");
+        if !src.exists() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("songstress-peaks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let upper = dir.join("SHOUT.WAV");
+        std::fs::copy(&src, &upper).unwrap();
+        let peaks = compute(&upper, 1.0).expect("uppercase wav decodes");
+        assert_eq!(peaks.len(), BUCKETS);
+        let _ = std::fs::remove_file(&upper);
     }
 
     /// A mono 16-bit PCM WAV whose amplitude ramps 0.1 → 1.0 across the file,

@@ -56,11 +56,50 @@ fn desktop_environment() -> String {
     classify_de(&desktop_env()).to_string()
 }
 
-/// Shared audio globs: portal filters AND the kdialog fallback spell the
-/// same set, so switching backends never changes what is pickable.
-const AUDIO_GLOBS: &[&str] = &[
-    "*.mp3", "*.flac", "*.m4a", "*.aif", "*.aiff", "*.ogg", "*.opus", "*.wav",
-];
+/// One extension as a case-insensitive glob: `wav` → `*.[wW][aA][vV]`.
+/// Portal filter globs are case-sensitive on both backends (GTK pattern
+/// match, Qt wildcard), so a plain `*.wav` HIDES `*.WAV` in the picker
+/// (owner report 2026-10-03) while the scanner lowercases and imports it
+/// fine. Bracket classes match every case combo in one pattern; digits
+/// pass through untouched.
+fn ci_glob(ext: &str) -> String {
+    let mut out = String::from("*.");
+    for c in ext.chars() {
+        if c.is_ascii_alphabetic() {
+            out.push('[');
+            out.push(c.to_ascii_lowercase());
+            out.push(c.to_ascii_uppercase());
+            out.push(']');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Portal audio globs, derived from the scanner's EXTENSIONS so the picker
+/// can never drift from what the library actually indexes (`.oga` was
+/// silently missing here until 2026-10-03).
+fn audio_globs() -> Vec<String> {
+    crate::library::scan::EXTENSIONS
+        .iter()
+        .map(|e| ci_glob(e))
+        .collect()
+}
+
+/// kdialog spelling of the same set: space-joined globs + `|Label`.
+fn kdialog_audio_filter() -> String {
+    format!("{}|Audio Files", audio_globs().join(" "))
+}
+
+/// Cover-image globs in the same case-insensitive spelling (phone/camera
+/// files arrive as `.JPG` just as often as rips arrive as `.WAV`).
+fn image_globs() -> Vec<String> {
+    ["png", "jpg", "jpeg", "webp", "gif", "tiff"]
+        .iter()
+        .map(|e| ci_glob(e))
+        .collect()
+}
 
 /// Handle to the MPV playback engine (Phase 3), spawned once at setup.
 pub struct Engine(pub std::sync::Arc<mpv::Mpv>);
@@ -1693,12 +1732,13 @@ async fn kdialog_pick_directory(start: PathBuf, title: &str) -> Result<Option<St
 }
 
 /// File picker: portal first, kdialog fallback (same contract as
-/// pick_directory). `portal_filters` and `kdialog_filter` spell the same
-/// set in each backend's syntax. `multiple` splits lines for --multiple.
+/// pick_directory). Both filters derive from the glob builders above, so
+/// switching backends never changes what is pickable. `multiple` splits
+/// lines for --multiple.
 async fn open_files(
     title: &str,
     start: PathBuf,
-    portal_filters: &[(&str, &[&str])],
+    portal_filters: &[(String, Vec<String>)],
     kdialog_filter: &str,
     multiple: bool,
 ) -> Result<Option<Vec<String>>, String> {
@@ -1770,16 +1810,21 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
     } else {
         music_root(&state)
     };
-    let image_globs: &[&str] = &["*.png", "*.jpg", "*.jpeg", "*.webp", "*.gif", "*.tiff"];
+    let images = image_globs();
+    let audio = audio_globs();
     Ok(open_files(
         "Choose Cover Image or Audio File",
         start,
         &[
-            ("Images", image_globs),
-            ("Audio files", AUDIO_GLOBS),
-            ("All files", &["*"]),
+            ("Images".to_string(), images.clone()),
+            ("Audio files".to_string(), audio.clone()),
+            ("All files".to_string(), vec!["*".to_string()]),
         ],
-        "Images (*.png *.jpg *.jpeg *.webp *.gif *.tiff);;Audio files (*.mp3 *.flac *.m4a *.aiff *.aif *.ogg *.oga *.opus *.wav);;All files (*)",
+        &format!(
+            "Images ({});;Audio files ({});;All files (*)",
+            images.join(" "),
+            audio.join(" ")
+        ),
         false,
     )
     .await?
@@ -1995,11 +2040,15 @@ async fn choose_import_files(
     let start = music_root(&state);
     // KDE filter syntax "globs|Label"; MIME globs (audio/*) miss files
     // whose mime info is missing, extensions never do.
+    let audio = audio_globs().join(" ");
     open_files(
         "Add Music Files",
         start,
-        &[("Audio Files", AUDIO_GLOBS), ("All Files", &["*"])],
-        "*.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav|Audio Files\n*|All Files",
+        &[
+            ("Audio Files".to_string(), audio_globs()),
+            ("All Files".to_string(), vec!["*".to_string()]),
+        ],
+        &format!("{audio}|Audio Files{}*|All Files", '\n'),
         true,
     )
     .await
@@ -2024,8 +2073,8 @@ async fn choose_relink_file(start: String) -> Result<Option<String>, String> {
     Ok(open_files(
         "Locate the missing track",
         start,
-        &[("Audio Files", AUDIO_GLOBS)],
-        "*.mp3 *.flac *.m4a *.aif *.aiff *.ogg *.opus *.wav|Audio Files",
+        &[("Audio Files".to_string(), audio_globs())],
+        &kdialog_audio_filter(),
         false,
     )
     .await?
@@ -3109,6 +3158,28 @@ mod tests {
         // appmenu skip only fires when no kde/plasma token is present.
         assert_eq!(classify_de("gnome:kde"), "kde");
         assert_eq!(classify_de(":"), "other");
+    }
+
+    #[test]
+    fn picker_globs_are_case_insensitive_and_track_the_scanner() {
+        // The reported bug: `*.wav` hid `*.WAV` in the picker while the
+        // scanner imported it (2026-10-03).
+        assert_eq!(super::ci_glob("wav"), "*.[wW][aA][vV]");
+        assert_eq!(super::ci_glob("mp3"), "*.[mM][pP]3");
+        // Every extension the scanner indexes has exactly one picker glob.
+        let globs = super::audio_globs();
+        for ext in crate::library::scan::EXTENSIONS {
+            assert!(
+                globs.contains(&super::ci_glob(ext)),
+                "picker covers .{ext}"
+            );
+        }
+        // The drift this also fixes: `.oga` indexed but unpickable.
+        assert!(globs.iter().any(|g| g.contains("[oO][gG][aA]")));
+        // kdialog spelling carries the same set under its `globs|Label` form.
+        let kd = super::kdialog_audio_filter();
+        assert!(kd.ends_with("|Audio Files"));
+        assert!(kd.contains("[wW][aA][vV]"));
     }
 
     #[test]

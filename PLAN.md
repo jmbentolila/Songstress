@@ -5803,3 +5803,34 @@ sidebar/grid/playbar and only peeked through on straights, dying at the bend;
 the negative-offset outline paints above them, follows the radius, unclipped.
 
 Gates: svelte-check 0, vitest, cargo test --lib, build ok.
+
+### Picker hides uppercase extensions — case-insensitive audio/image filters (2026-10-03, owner report → 0.16.4)
+
+Owner's `.WAV` rips were invisible under the import picker's "Audio Files"
+filter (workaround: "All files" + navigate away and back to refresh). Root
+cause: portal filter globs are case-sensitive on both backends (GTK pattern
+match, Qt wildcard), so `*.wav` never matched `*.WAV` — while the scanner
+lowercases before comparing and imported the same files fine. Same class of
+bug in the symphonia probe hint (passed through raw) and the cover picker
+(`.JPG` from phones/cameras). Second find in the same pass: the picker's
+audio set had drifted from the scanner — `.oga` was indexed but unpickable
+(hand-spelled `AUDIO_GLOBS` vs `scan::EXTENSIONS`, plus two more hand-spelled
+kdialog copies).
+
+Fix: `ci_glob` builds one bracket-class glob per extension (`wav` →
+`*.[wW][aA][vV]`, digits untouched); `audio_globs()` derives from the
+scanner's EXTENSIONS so the two can never drift again; all three pickers
+(import, relink, cover-art) and both backends (portal + kdialog strings)
+build from the same helpers. `image_globs()` gets the same treatment.
+`peaks::compute` lowercases the probe hint. Tests: glob-shape +
+scanner-coverage pin in lib.rs, uppercase-`.WAV` end-to-end decode in
+peaks.rs. kdialog filter runtime strings byte-identical in shape to before
+(newline separator preserved via `'\n'`).
+
+Gates (2026-10-03, all green): svelte-check 0, vitest 140/140, vite build
+ok, `cargo test --lib` 144/144 (incl. the two new tests) — Rust ran in the
+gateway container after installing the toolchain live (rustup minimal +
+Tauri -devel set, baked into both Dockerfiles for the next rebuild).
+Owner live-confirmed the bug fix: `.WAV` rips import first try on the dev
+instance under "Audio Files". Cargo.lock's package version refreshes on
+the next host cargo run. Uncommitted.

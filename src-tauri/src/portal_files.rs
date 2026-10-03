@@ -86,7 +86,7 @@ fn request_token() -> String {
 async fn open_portal(
     title: &str,
     start: &Path,
-    filters: &[(&str, &[&str])],
+    filters: &[(String, Vec<String>)],
     multiple: bool,
     directory: bool,
 ) -> Result<Option<Vec<String>>, String> {
@@ -161,7 +161,7 @@ async fn open_portal(
 pub async fn open_files(
     title: &str,
     start: &Path,
-    filters: &[(&str, &[&str])],
+    filters: &[(String, Vec<String>)],
     multiple: bool,
 ) -> Result<Option<Vec<String>>, String> {
     open_portal(title, start, filters, multiple, false).await
