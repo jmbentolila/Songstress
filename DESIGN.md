@@ -308,7 +308,10 @@ supporting roles: anchoring physical objects, and casting light.
 - **Popover seat** (`0 8px 28px rgba(0,0,0,0.35)`): menu/popover surfaces.
 - **Window seat** (`box-shadow: var(--shadow-window)` on `.app`): the window
   itself, cast into its own 20px transparent margin (`--frame-margin`) —
-  contact layer `0 14px 40px` plus `0 2px 8px`. KDE dark `0.50 / 0.35`, KDE
+  contact layer `0 6px 12px` plus `0 2px 8px`. The blur sits at 12 with a 6px
+  offset so the falloff (6 + 12 = 18px) completes INSIDE the 20px margin on
+  every side: the first cut at `0 14px 40px` read as a hard-edged band sliced
+  at the window bounds (owner eyeball, 2026-10-04). KDE dark `0.50 / 0.35`, KDE
   light `0.22 / 0.12`; GNOME runs hotter with no frost behind the matte slab
   (dark `0.55 / 0.40`, light `0.25 / 0.15`). Outset, never inset: an inset
   seat paints below opaque children and dies at the radius bend (measured on

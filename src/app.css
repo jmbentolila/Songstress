@@ -76,7 +76,7 @@ html[data-theme="dark"] {
      outside the border box, so opaque children can never bury it (the v1
      inset-hairline failure mode). Radius follows --radius-window for free. */
   --shadow-window:
-    0 14px 40px rgba(0, 0, 0, 0.5),
+    0 6px 12px rgba(0, 0, 0, 0.5),
     0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
@@ -114,7 +114,7 @@ html[data-theme="light"] {
   --caution-wash: rgba(178, 106, 18, 0.12);
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
   --shadow-window:
-    0 14px 40px rgba(0, 0, 0, 0.22),
+    0 6px 12px rgba(0, 0, 0, 0.22),
     0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
@@ -135,7 +135,7 @@ html[data-de="gnome"][data-theme="dark"] {
   --panel-bg-strong: rgb(26, 26, 33);
   /* No frost behind the matte slab, so the window seat runs hotter. */
   --shadow-window:
-    0 14px 40px rgba(0, 0, 0, 0.55),
+    0 6px 12px rgba(0, 0, 0, 0.55),
     0 2px 8px rgba(0, 0, 0, 0.4);
   /* The matte field's texture (measured numbers below): ONE fine-grain layer at
      480px, soft-light, so the modulation is symmetric around mid-gray — the field
@@ -154,7 +154,7 @@ html[data-de="gnome"][data-theme="light"] {
   --panel-bg: rgb(255, 255, 255);
   --panel-bg-strong: rgb(252, 252, 254);
   --shadow-window:
-    0 14px 40px rgba(0, 0, 0, 0.25),
+    0 6px 12px rgba(0, 0, 0, 0.25),
     0 2px 8px rgba(0, 0, 0, 0.15);
   /* Light gets MULTIPLY, biased just under 1: a near-white field has almost no
      headroom for soft-light (measured: a ±0.13 blend swing there buys ±0.6 RGB),
