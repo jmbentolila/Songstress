@@ -5847,3 +5847,19 @@ Implements all four task findings from wiki/songstress-security-audit, nothing e
 Tests: +3 lib.rs unit tests (allowlist incl. `albumGradient:<id>` / `peaksAlgo` refusal, dashdash, gate incl. `/music-bc` vs `/music/b` and `~/.ssh/id_rsa` refusal).
 
 Gates (2026-10-03, all green, gateway container): svelte-check 0 errors, vitest 140/140, `cargo test --lib` 147/147, vite build ok, `cargo check` parses the new tauri.conf (generate_context). NOT done: live dev-instance smoke check — no user session/display/systemd in this container (`systemctl --user` unreachable, nothing on :1420), so no CSP-meta probe, no picker/drop/reveal run. Owner to confirm on his box: covers render (thumb:/data:), tag-editor artwork upload from ~/Pictures pick + drag-drop, music-folder add/remove, reveal-in-folder.
+
+### Dark-mode surface swap — grid darkest, both darker (2026-10-04, uncommitted)
+
+Owner ask: the darkest dark-mode bg sat on the playbar/sidebar (`--bg-chrome`) with the lighter one on the grid (`--bg-grid`) — swap so the grid is darkest, and darken both. CSS-token-only change in `src/app.css`, three dark blocks (glass `rgba`, GNOME solid `rgb`, reduced-transparency solid `rgb`); light theme untouched; `--panel-bg`/`--panel-bg-strong` (popover/modal tier) deliberately left so panels stay lifted above the chrome.
+
+- `--bg-grid`: (32,32,40) → (10,10,13), alpha 0.8 kept — now the darkest surface.
+- `--bg-chrome` (sidebar/playbar via `.glass`): (22,22,28) → (17,17,22), alpha 0.7 kept — darker than before, lighter than the grid.
+- Blue-channel ratio (~1.3x) preserved so the hue family doesn't shift.
+
+Gates (2026-10-04): svelte-check 0 errors, 0 warnings. No restart needed (CSS hot-reloads); owner to eyeball on the dev instance. Uncommitted.
+
+### Dark-mode surface swap follow-up — gradient-active playbar base pinned (2026-10-04, uncommitted)
+
+Owner: don't darken the playbar gradient when active. Cause: the `.pb-bg` layers render at 0.7 alpha OVER the chrome fill (stops themselves are mixed against the hardcoded SURFACE constant in `lib/gradient.ts`, so only the 30% show-through changed). Fix in `PlayBar.svelte`: footer takes `has-gradient` while any gradient layer exists (covers the fade-out tail), and scoped rules pin the base to the pre-swap chrome — `rgba(22,22,28,0.7)` glass, `rgb(22,22,28)` on GNOME + reduced-transparency — via `background-color` only so the GNOME grain layer survives. Dark theme only. Gradient-off playbar wears the new darker chrome.
+
+Gates (2026-10-04): svelte-check 0 errors, 0 warnings. Uncommitted.

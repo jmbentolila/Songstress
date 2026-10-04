@@ -47,8 +47,8 @@ html[data-theme="dark"] {
   color-scheme: dark;
   --text: #f4f4f6;
   --text-dim: rgba(244, 244, 246, 0.64);
-  --bg-grid: rgba(32, 32, 40, 0.8);
-  --bg-chrome: rgba(22, 22, 28, 0.7);
+  --bg-grid: rgba(10, 10, 13, 0.8);
+  --bg-chrome: rgba(17, 17, 22, 0.7);
   --panel-bg: rgba(32, 32, 40, 0.5);
   --panel-bg-strong: rgba(26, 26, 33, 0.94);
   --border: rgba(255, 255, 255, 0.1);
@@ -118,8 +118,8 @@ html[data-theme="light"] {
    App shell sets from `desktop_environment` ("gnome" on GNOME-derived
    sessions — every other desktop stays glass). */
 html[data-de="gnome"][data-theme="dark"] {
-  --bg-grid: rgb(32, 32, 40);
-  --bg-chrome: rgb(22, 22, 28);
+  --bg-grid: rgb(10, 10, 13);
+  --bg-chrome: rgb(17, 17, 22);
   --panel-bg: rgb(32, 32, 40);
   --panel-bg-strong: rgb(26, 26, 33);
   /* The matte field's texture (measured numbers below): ONE fine-grain layer at
@@ -258,8 +258,8 @@ html[data-de="gnome"][data-theme="light"] .app {
    Washes/scrims/shadows sit ON surfaces and are untouched. */
 @media (prefers-reduced-transparency: reduce) {
   html[data-theme="dark"] {
-    --bg-grid: rgb(32, 32, 40);
-    --bg-chrome: rgb(22, 22, 28);
+    --bg-grid: rgb(10, 10, 13);
+    --bg-chrome: rgb(17, 17, 22);
     --panel-bg: rgb(32, 32, 40);
     --panel-bg-strong: rgb(26, 26, 33);
   }

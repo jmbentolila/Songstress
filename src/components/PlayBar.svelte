@@ -403,7 +403,7 @@
 
 <svelte:window onpointerdown={onDocPointerDown} onkeydown={onDocKeydown} />
 
-<footer class="playbar glass" class:paused={!playback.isPlaying}>
+<footer class="playbar glass" class:paused={!playback.isPlaying} class:has-gradient={layers.length > 0}>
   <!-- The gradient layer, behind every control, above the chrome fill
        (.playbar's z-index makes it a stacking context, so z-index:-1
        lands exactly between the two). Keyed so a value change runs the
@@ -823,8 +823,28 @@
     border-top: 1px solid var(--border);
     user-select: none;
     /* The gradient swap is animated by the keyed .pb-bg layer (a CSS
-       background transition cannot interpolate gradients — the old rule
-       here could only ever teleport). */
+       /* background transition cannot interpolate gradients — the old rule
+          here could only ever teleport). */
+       }
+
+  /* Gradient-active base pin (2026-10-04 surface swap): the .pb-bg layers
+     render at 0.7 alpha OVER the chrome fill, and their stops are mixed
+     against the SURFACE constant in lib/gradient.ts — so whatever the
+     chrome token becomes shows through 30% and re-tints the gradient.
+     While any gradient layer exists (including the fade-out tail) the
+     base stays at the pre-swap chrome, and the gradient looks exactly as
+     before. background-color only, so the GNOME grain layer survives.
+     Dark theme only — light chrome was never touched. */
+  :global(html[data-theme="dark"]) .playbar.has-gradient {
+    background-color: rgba(22, 22, 28, 0.7);
+  }
+  :global(html[data-de="gnome"][data-theme="dark"]) .playbar.has-gradient {
+    background-color: rgb(22, 22, 28);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    :global(html[data-theme="dark"]) .playbar.has-gradient {
+      background-color: rgb(22, 22, 28);
+    }
   }
 
   /* Negative-z fill: .playbar is a stacking context (positioned, z-index),
