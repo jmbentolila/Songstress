@@ -21,7 +21,7 @@
   import { playback, initEq, reanchorCurrent } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { invoke } from "@tauri-apps/api/core";
-  import { isTauri } from "./lib/window";
+  import { isTauri, appWindow, syncWindowState } from "./lib/window";
 
   // Screen-pick overlay window (from the tag editor's dropper): it loads the
   // same bundle at #screen-pick and renders ONLY the picker — none of the
@@ -45,6 +45,15 @@
         document.documentElement.dataset.de = de;
       })
       .catch(() => {});
+  }
+
+  // Frame v2 gate: publish maximized state for the app.css margin+shadow
+  // override, then re-check on every resize (maximize/unmaximize/tile).
+  if (isTauri) {
+    void syncWindowState();
+    void appWindow?.onResized(() => {
+      void syncWindowState();
+    });
   }
 
   // Keep the Rust-owned menu model's dynamic bits (playing/scanning/staged/
@@ -206,7 +215,10 @@
 <style>
   .app {
     position: fixed;
-    inset: 0;
+    /* --frame-margin (frame v2): the window seat's shadow paints into this
+       transparent margin, outside the border box. Maximized drops it (see
+       the html[data-window] gate in app.css). */
+    inset: var(--frame-margin, 20px);
     display: flex;
     flex-direction: column;
     border-radius: var(--radius-window);

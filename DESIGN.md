@@ -306,6 +306,16 @@ supporting roles: anchoring physical objects, and casting light.
   tiles, expanded art, playbar thumbnail) — gives each cover physical
   weight without lifting it.
 - **Popover seat** (`0 8px 28px rgba(0,0,0,0.35)`): menu/popover surfaces.
+- **Window seat** (`box-shadow: var(--shadow-window)` on `.app`): the window
+  itself, cast into its own 20px transparent margin (`--frame-margin`) —
+  contact layer `0 14px 40px` plus `0 2px 8px`. KDE dark `0.50 / 0.35`, KDE
+  light `0.22 / 0.12`; GNOME runs hotter with no frost behind the matte slab
+  (dark `0.55 / 0.40`, light `0.25 / 0.15`). Outset, never inset: an inset
+  seat paints below opaque children and dies at the radius bend (measured on
+  the v1 hairline — hence the outline). Maximized/tiled windows drop margin
+  and seat (`html[data-window="maximized"]`); the radius still follows
+  `--radius-window` untouched, and the owner-tuned alphas (0.8/0.7/0.36/0.30)
+  are unchanged.
 - **Cast light** (linear gradients, not shadows): 26px @ 0.22 from the
   window top and 34px @ 0.30 from the playbar shelf, onto the grid —
   softened to 0.14 / 0.18 in light mode, where the dark-tuned alphas

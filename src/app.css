@@ -17,6 +17,7 @@
      WindowCornerRadius, published as --tb-radius) because a frameless window
      that rounds itself differently from every other window on the desktop is
      visibly lying; 14px is both this app's own value and the default. */
+  --frame-margin: 20px;
   --radius-window: var(--tb-radius, 14px);
   --radius-panel: 12px;
   --radius-cover: 10px;
@@ -70,6 +71,13 @@ html[data-theme="dark"] {
   --caution-line: rgba(242, 163, 60, 0.55);
   --caution-wash: rgba(242, 163, 60, 0.14);
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  /* Window seat (frame v2, 2026-10-04): the two-layer outset shadow `.app`
+     casts into its own margin — contact layer plus blur layer. Outset lives
+     outside the border box, so opaque children can never bury it (the v1
+     inset-hairline failure mode). Radius follows --radius-window for free. */
+  --shadow-window:
+    0 14px 40px rgba(0, 0, 0, 0.5),
+    0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
 /* The waveform progress bar needs a taller shelf than the straight line: the
@@ -105,6 +113,9 @@ html[data-theme="light"] {
   --caution-line: rgba(178, 106, 18, 0.55);
   --caution-wash: rgba(178, 106, 18, 0.12);
   --shadow: 0 10px 32px rgba(0, 0, 0, 0.16);
+  --shadow-window:
+    0 14px 40px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 /* ── GNOME opaque chrome ────────────────────────────────────────────────────
@@ -122,6 +133,10 @@ html[data-de="gnome"][data-theme="dark"] {
   --bg-chrome: rgb(17, 17, 22);
   --panel-bg: rgb(32, 32, 40);
   --panel-bg-strong: rgb(26, 26, 33);
+  /* No frost behind the matte slab, so the window seat runs hotter. */
+  --shadow-window:
+    0 14px 40px rgba(0, 0, 0, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.4);
   /* The matte field's texture (measured numbers below): ONE fine-grain layer at
      480px, soft-light, so the modulation is symmetric around mid-gray — the field
      is textured, never washed. Level dialled up on request 2026-09-26: first
@@ -138,6 +153,9 @@ html[data-de="gnome"][data-theme="light"] {
   --bg-chrome: rgb(236, 236, 241);
   --panel-bg: rgb(255, 255, 255);
   --panel-bg-strong: rgb(252, 252, 254);
+  --shadow-window:
+    0 14px 40px rgba(0, 0, 0, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.15);
   /* Light gets MULTIPLY, biased just under 1: a near-white field has almost no
      headroom for soft-light (measured: a ±0.13 blend swing there buys ±0.6 RGB),
      so the grain can only read as paper tooth — slight darkening, never a wash.
@@ -248,6 +266,25 @@ html[data-de="gnome"][data-theme="light"] .app {
   border: 1px solid rgba(0, 0, 0, 0.18);
   outline: 1px solid rgba(255, 255, 255, 0.6);
   outline-offset: -1px;
+}
+
+/* ── Window drop shadow v2 ──────────────────────────────────────────────────
+   `.app` is pulled `--frame-margin` inside the transparent window (inset in
+   App.svelte) and casts the two-layer `--shadow-window` seat into the margin.
+   The v1 ring above stays untouched underneath. Maximized/tiled windows drop
+   both the margin and the seat (`html[data-window="maximized"]`, set by
+   `syncWindowState` in lib/window.ts on startup + every `onResized`): a
+   maximized window has no visible edge to lift, and the margin would read as
+   a dead border. This selector outranks App.svelte's scoped `.app` rule, so
+   the gate holds without touching the component. No Rust change: window_state
+   saves the outer size, the margin lives inside it. */
+.app {
+  box-shadow: var(--shadow-window);
+}
+
+html[data-window="maximized"] .app {
+  inset: 0;
+  box-shadow: none;
 }
 
 /* ── Reduced transparency + higher contrast ───────────────────────────────
