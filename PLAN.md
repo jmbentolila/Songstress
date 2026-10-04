@@ -5834,3 +5834,16 @@ Tauri -devel set, baked into both Dockerfiles for the next rebuild).
 Owner live-confirmed the bug fix: `.WAV` rips import first try on the dev
 instance under "Audio Files". Cargo.lock's package version refreshes on
 the next host cargo run. Uncommitted.
+
+### Security audit fixes — read_image confinement, CSP, set_setting allowlist, reveal guard (2026-10-03, audit v0.16.4 baseline → uncommitted)
+
+Implements all four task findings from wiki/songstress-security-audit, nothing else. No version bump, no commit (owner review).
+
+1. MED — `read_image` confined (lib.rs). The command took `state` now and serves only: canonicalized paths staged server-side from proven user intent (`pick_image` result + OS drop payloads staged in the new `on_window_event` DragDrop arm — drop events arrive via the backend, not renderer-suppliable) or files under configured music roots (`image_read_allowed`, component-wise `starts_with`). Symlinks resolve before the check, so a `cover.jpg -> ~/.ssh/id_rsa` stages its target and dies at the new extension gate (image list or `scan::EXTENSIONS`; previously ANY extension was served as raw bytes). 25 MB caps and the audio-embedded-art path preserved. Frontend callers unchanged (same signature — ArtSelector's picker/drop flows cannot be id-keyed: the files live outside the library).
+2. LOW — CSP set in tauri.conf.json (was `null`): `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'` (Svelte scoped styles are inline `<style>`); `img-src 'self' data: thumb: http://localhost:1420` (data: uploads/paste, thumb: prod covers, /thumb-http dev rewrite); `connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420` (invoke transport + Vite HMR); `media-src 'self'; font-src 'self' data:` (bundled Inter woff2); `object-src 'none'; base-uri 'self'; frame-ancestors 'none'`. Repo grep: no external URLs, no webfonts-by-URL, no iframes/objects, no prod eval.
+3. LOW — `set_setting` allowlisted (`SETTABLE_KEYS` + `albumGradient:` namespace; `musicDirs`/`musicDir` rejected with a redirect to the music-folders commands). Folder changes still flow through `add/remove_music_folder` → `validate_new_root` → `persist_roots`, untouched.
+4. LOW — `reveal_container` inserts `--` before the path for dolphin/xdg-open when (and only when) it starts with `-` (`reveal_needs_dashdash`); absolute library paths never do, so normal reveals are byte-identical.
+
+Tests: +3 lib.rs unit tests (allowlist incl. `albumGradient:<id>` / `peaksAlgo` refusal, dashdash, gate incl. `/music-bc` vs `/music/b` and `~/.ssh/id_rsa` refusal).
+
+Gates (2026-10-03, all green, gateway container): svelte-check 0 errors, vitest 140/140, `cargo test --lib` 147/147, vite build ok, `cargo check` parses the new tauri.conf (generate_context). NOT done: live dev-instance smoke check — no user session/display/systemd in this container (`systemctl --user` unreachable, nothing on :1420), so no CSP-meta probe, no picker/drop/reveal run. Owner to confirm on his box: covers render (thumb:/data:), tag-editor artwork upload from ~/Pictures pick + drag-drop, music-folder add/remove, reveal-in-folder.

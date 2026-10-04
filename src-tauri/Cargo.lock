@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "songstress"
-version = "0.16.4"
+version = "0.16.5"
 dependencies = [
  "base64 0.22.1",
  "blake3",

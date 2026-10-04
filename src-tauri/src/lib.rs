@@ -1569,6 +1569,15 @@ fn container_target(
     Err("nothing to reveal".into())
 }
 
+/// True when a reveal target would parse as a CLI flag (leading `-`): the
+/// spawn sites below insert `--` first in exactly that case (audit
+/// 2026-10-03; the path derives from DB rows, so a hostile filename is in
+/// scope). Absolute paths never start with `-`, so normal reveals are
+/// byte-identical — pure guard, zero behavior change. Pure: unit-tested.
+fn reveal_needs_dashdash(arg: &Path) -> bool {
+    arg.to_string_lossy().starts_with('-')
+}
+
 /// Open KDE's file manager at the container. A file gets
 /// `dolphin --select <file>` — folder open, file highlighted; a directory
 /// gets `dolphin <dir>`. A vanished file falls back to its parent (a missing
@@ -1617,6 +1626,9 @@ fn reveal_container(
     if select {
         cmd.arg("--select");
     }
+    if reveal_needs_dashdash(&arg) {
+        cmd.arg("--");
+    }
     cmd.arg(&arg);
     let spawned = cmd.spawn().map_err(|e| format!("dolphin: {e}"));
     match spawned {
@@ -1632,7 +1644,11 @@ fn reveal_container(
             } else {
                 arg
             };
-            std::process::Command::new("xdg-open")
+            let mut fallback = std::process::Command::new("xdg-open");
+            if reveal_needs_dashdash(&dir) {
+                fallback.arg("--");
+            }
+            fallback
                 .arg(&dir)
                 .spawn()
                 .map_err(|e2| format!("{e}; xdg-open: {e2}"))?;
@@ -1646,8 +1662,44 @@ fn get_settings(state: tauri::State<AppState>) -> Result<HashMap<String, String>
     library::settings::all(&state.db.lock().unwrap()).map_err(|e| e.to_string())
 }
 
+/// Keys the renderer may write via `set_setting` (security audit 2026-10-03:
+/// the command used to write ANY key). `musicDirs`/`musicDir` are deliberately
+/// absent — folder membership changes go through `add_music_folder` /
+/// `remove_music_folder`, which enforce `validate_new_root`; a renderer
+/// writing those keys directly would bypass nesting validation. Per-album
+/// gradient overrides (`albumGradient:<id>`) are allowed as a namespace:
+/// `set_album_gradient` owns them, and nothing else writes them.
+const SETTABLE_KEYS: &[&str] = &[
+    "volume",
+    "shuffle",
+    "repeat",
+    "shuffleStage",
+    "repeatStage",
+    "equalizer",
+    "theme",
+    "tileSize",
+    "sidebarRowSize",
+    "playbarGradient",
+    "playbarWaveform",
+    "albumGradient",
+    "accentColor",
+    "lastScan",
+    "panelGradients",
+];
+
+/// Whether `set_setting` may write `key` (pure: unit-tested).
+fn setting_writable(key: &str) -> bool {
+    SETTABLE_KEYS.contains(&key) || key.starts_with(library::settings::ALBUM_GRADIENT_PREFIX)
+}
+
 #[tauri::command]
 fn set_setting(state: tauri::State<AppState>, key: String, value: String) -> Result<(), String> {
+    if key == "musicDirs" || key == "musicDir" {
+        return Err("music folders are managed through the music-folders commands".into());
+    }
+    if !setting_writable(&key) {
+        return Err(format!("unknown setting: {key}"));
+    }
     library::settings::set(&state.db.lock().unwrap(), &key, &value).map_err(|e| e.to_string())
 }
 
@@ -1794,6 +1846,52 @@ fn kdialog_open_files(
     }
 }
 
+/// Server-side intent record for `read_image` (security audit 2026-10-03:
+/// the command used to read any renderer-supplied absolute path, so a
+/// compromised renderer could exfil secrets as base64). Every path the user
+/// genuinely chose — the `pick_image` result, or files the OS dropped on
+/// the window (staged in `on_window_event`) — is canonicalized and
+/// remembered here; `read_image` serves only those plus files under the
+/// configured music roots, and refuses everything else. In-memory only: a
+/// restart clears it, and the next pick/drop re-stages.
+static STAGED_IMAGE_PATHS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Remember a user-chosen image/audio path (canonicalized: symlinks resolve
+/// to their target, so a `cover.jpg -> ~/.ssh/id_rsa` trick stages the
+/// TARGET, which then fails the extension gate in `read_image`). Capped:
+/// an unbounded Vec fed by drop events would be a slow memory leak.
+fn stage_image_path(p: &Path) {
+    let canon = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut staged = STAGED_IMAGE_PATHS.lock().unwrap();
+    if !staged.contains(&canon) {
+        staged.push(canon);
+    }
+    while staged.len() > 64 {
+        staged.remove(0);
+    }
+}
+
+/// Pure authorization gate for `read_image`: the CANONICAL path must be a
+/// user-staged pick/drop or live under a configured music root
+/// (component-wise `starts_with`, so `/music/bc` is NOT under `/music/b`).
+/// Anything else — notably dotfiles like `~/.ssh/id_rsa` — is refused even
+/// when it exists and has an image extension.
+fn image_read_allowed(canonical: &Path, staged: &[PathBuf], roots: &[PathBuf]) -> bool {
+    if staged.contains(&canonical.to_path_buf()) {
+        return true;
+    }
+    roots.iter().any(|r| canonical.starts_with(r))
+}
+
+/// Image extensions `read_image` serves directly (anything else must be a
+/// library audio extension to be probed for embedded art).
+fn is_image_ext(ext: &str) -> bool {
+    matches!(
+        ext,
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "tif" | "tiff" | "bmp"
+    )
+}
+
 /// Cover-art picker (the artwork strip's "from disk" door). Starts in
 /// ~/Pictures, which is where a downloaded cover realistically waits.
 /// AUDIO files are pickable too (owner ask 2026-09-05): the picker's own
@@ -1812,7 +1910,7 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
     };
     let images = image_globs();
     let audio = audio_globs();
-    Ok(open_files(
+    let picked = open_files(
         "Choose Cover Image or Audio File",
         start,
         &[
@@ -1828,7 +1926,13 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
         false,
     )
     .await?
-    .and_then(|mut v| v.pop()))
+    .and_then(|mut v| v.pop());
+    // Stage the pick for `read_image`: the frontend echoes this path back,
+    // and the command only serves staged (or music-root) paths.
+    if let Some(ref p) = picked {
+        stage_image_path(Path::new(p));
+    }
+    Ok(picked)
 }
 
 /// Read a picked image into base64 for `ArtChange.upload`. An AUDIO path
@@ -1840,27 +1944,49 @@ async fn pick_image(state: tauri::State<'_, AppState>) -> Result<Option<String>,
 /// is measured) still passes; format truth is sniffed Rust-side at save
 /// time regardless of what this returned.
 #[tauri::command]
-async fn read_image(path: String) -> Result<String, String> {
+async fn read_image(state: tauri::State<'_, AppState>, path: String) -> Result<String, String> {
+    // Confine BEFORE reading (audit 2026-10-03): the path is
+    // renderer-supplied, so canonicalize (symlinks resolve to their target)
+    // and require proven user intent (a staged pick/drop) or library
+    // membership (under a configured music root). All checks run on the
+    // canonical path; check-to-read TOCTOU is accepted (same-user local app,
+    // not a privilege boundary).
+    let canonical =
+        std::fs::canonicalize(&path).map_err(|e| format!("{path}: {e}"))?;
+    if !canonical.is_file() {
+        return Err(format!("{path} is not a file"));
+    }
+    {
+        let staged = STAGED_IMAGE_PATHS.lock().unwrap();
+        let roots = music_roots(&state);
+        if !image_read_allowed(&canonical, &staged, &roots) {
+            return Err(
+                "that file was not picked here — choose it through the cover picker or drag-drop"
+                    .into(),
+            );
+        }
+    }
     tauri::async_runtime::spawn_blocking(move || {
         use base64::Engine as _;
-        let p = PathBuf::from(&path);
-        let ext = p
+        let ext = canonical
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase())
             .unwrap_or_default();
         let bytes: Vec<u8> = if library::scan::EXTENSIONS.contains(&ext.as_str()) {
-            library::artwork::embedded_art(&[p])
+            library::artwork::embedded_art(std::slice::from_ref(&canonical))
                 .ok_or_else(|| format!("{path} carries no embedded artwork"))?
-        } else {
-            let meta = std::fs::metadata(&path).map_err(|e| format!("{path}: {e}"))?;
+        } else if is_image_ext(&ext) {
+            let meta = std::fs::metadata(&canonical).map_err(|e| format!("{path}: {e}"))?;
             if meta.len() > 25 * 1024 * 1024 {
                 return Err(format!(
                     "image is {} MB — 25 MB is the cap",
                     meta.len() / (1024 * 1024)
                 ));
             }
-            std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?
+            std::fs::read(&canonical).map_err(|e| format!("{path}: {e}"))?
+        } else {
+            return Err(format!("{path} is not an image or audio file"));
         };
         if bytes.len() > 25 * 1024 * 1024 {
             return Err(format!(
@@ -3129,6 +3255,28 @@ pub fn run() {
                         window_state::save(window.app_handle(), size);
                     }
                 }
+                tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
+                    paths,
+                    ..
+                }) => {
+                    // Stage OS-dropped files for `read_image` (audit 2026-10-03):
+                    // the drop payload arrives from the compositor through the
+                    // backend, so it is NOT renderer-suppliable — a later
+                    // `read_image` for one of these paths carries proven user
+                    // intent. Only image/audio files are staged.
+                    for p in paths {
+                        let ext = p
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.to_lowercase())
+                            .unwrap_or_default();
+                        if is_image_ext(&ext)
+                            || library::scan::EXTENSIONS.contains(&ext.as_str())
+                        {
+                            stage_image_path(p);
+                        }
+                    }
+                }
                 _ => {}
             }
         })
@@ -3558,6 +3706,60 @@ mod tests {
         assert!(super::container_target(&conn, None, None, Some("nope")).is_err());
         assert!(super::container_target(&conn, None, None, None).is_err());
         let _ = std::fs::remove_file(&dbp);
+    }
+
+    #[test]
+    fn setting_allowlist_blocks_music_roots_and_unknown_keys() {
+        // Every key the frontend writes through `set_setting` stays writable.
+        for k in [
+            "volume",
+            "shuffle",
+            "repeat",
+            "shuffleStage",
+            "repeatStage",
+            "equalizer",
+            "theme",
+            "tileSize",
+            "sidebarRowSize",
+            "playbarGradient",
+            "playbarWaveform",
+            "albumGradient",
+            "accentColor",
+            "lastScan",
+            "panelGradients",
+            "albumGradient:al-1",
+        ] {
+            assert!(super::setting_writable(k), "{k} must stay writable");
+        }
+        // Music roots bypass `validate_new_root` when written directly;
+        // anything else unknown is renderer graffiti — both refused.
+        for k in ["musicDirs", "musicDir", "peaksAlgo", "x"] {
+            assert!(!super::setting_writable(k), "{k} must be refused");
+        }
+    }
+
+    #[test]
+    fn reveal_flag_guard_fires_only_on_leading_dash() {
+        use std::path::Path;
+        // Interior dashes are untouched — only a leading dash parses as a flag.
+        assert!(!super::reveal_needs_dashdash(Path::new(
+            "/music/-weird/file.flac"
+        )));
+        assert!(!super::reveal_needs_dashdash(Path::new("/music/normal")));
+        assert!(super::reveal_needs_dashdash(Path::new("-evil")));
+    }
+
+    #[test]
+    fn image_read_gate_stages_roots_and_refuses_dotfiles() {
+        use std::path::PathBuf;
+        let staged = vec![PathBuf::from("/home/u/Pictures/cover.jpg")];
+        let roots = vec![PathBuf::from("/music")];
+        let allow = |s: &str| super::image_read_allowed(&PathBuf::from(s), &staged, &roots);
+        assert!(allow("/home/u/Pictures/cover.jpg")); // staged pick
+        assert!(allow("/music/a/track.flac")); // under a root
+        assert!(!allow("/music-bc/other.flac")); // string prefix ≠ component
+        assert!(!allow("/home/u/.ssh/id_rsa")); // the audit's exfil target
+        assert!(!allow("/home/u/Pictures/other.jpg")); // unstaged, outside roots
     }
 
     #[test]
