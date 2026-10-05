@@ -21,7 +21,7 @@
   import { playback, initEq, reanchorCurrent } from "./lib/stores/playback.svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { invoke } from "@tauri-apps/api/core";
-  import { isTauri, appWindow, syncWindowState, startResizeDrag } from "./lib/window";
+  import { isTauri, appWindow, syncWindowState } from "./lib/window";
 
   // Screen-pick overlay window (from the tag editor's dropper): it loads the
   // same bundle at #screen-pick and renders ONLY the picker — none of the
@@ -210,19 +210,6 @@
   <ManageImports />
   <ContextMenu />
 </div>
-<!-- Corner resize handles (2026-10-05): transparent 20px squares sitting in
-     the window's own margin, one per corner. The margin belongs to no
-     element, so without these a corner press reaches no drag region and no
-     resize is ever requested (drag.js only knows move) — the window moved
-     instead of resizing. Siblings of .app, NOT children: contain:paint
-     clips .app descendants to its box and the margin is outside it.
-     mousedown (left button only) fires startResizeDrag; drag.js stays
-     silent because no drag-region ancestor covers them. Hidden maximized
-     via the shared html[data-window] gate. -->
-<div class="resize-corner nw" aria-hidden="true" onmousedown={(e) => { if (e.button !== 0) return; e.preventDefault(); void startResizeDrag("NorthWest"); }}></div>
-<div class="resize-corner ne" aria-hidden="true" onmousedown={(e) => { if (e.button !== 0) return; e.preventDefault(); void startResizeDrag("NorthEast"); }}></div>
-<div class="resize-corner sw" aria-hidden="true" onmousedown={(e) => { if (e.button !== 0) return; e.preventDefault(); void startResizeDrag("SouthWest"); }}></div>
-<div class="resize-corner se" aria-hidden="true" onmousedown={(e) => { if (e.button !== 0) return; e.preventDefault(); void startResizeDrag("SouthEast"); }}></div>
 {/if}
 
 <style>
@@ -243,41 +230,6 @@
        Without this, any future full-window overlay can paint square corners over
        the transparent ones again. */
     contain: paint;
-  }
-
-  /* Corner resize handles: transparent 20px squares in the window margin
-     (see markup comment). position:fixed escapes to the viewport — no
-     transformed ancestor between them and it — so they sit on the window
-     corners whatever the size. Cursor-only affordance; above scrims and
-     tips (500) so a corner is always a corner. Gone maximized. */
-  .resize-corner {
-    position: fixed;
-    width: 20px;
-    height: 20px;
-    z-index: 500;
-  }
-  .resize-corner.nw {
-    top: 0;
-    left: 0;
-    cursor: nwse-resize;
-  }
-  .resize-corner.ne {
-    top: 0;
-    right: 0;
-    cursor: nesw-resize;
-  }
-  .resize-corner.sw {
-    bottom: 0;
-    left: 0;
-    cursor: nesw-resize;
-  }
-  .resize-corner.se {
-    bottom: 0;
-    right: 0;
-    cursor: nwse-resize;
-  }
-  :global(html[data-window="maximized"]) .resize-corner {
-    display: none;
   }
 
   .stage {
