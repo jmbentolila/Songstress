@@ -99,6 +99,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Playbar drag, attempt 1: `data-tauri-drag-region` on the PlayBar footer root — gaps/slack drag, seek ranges + transport keep working (Tauri excludes interactive descendants); owner eyeballed live with resounding success, no fallback needed | ✅ 2026-10-05 · **0.16.7** |
 | Transport row gap 14px → 20px (literal, = DESIGN.md 20px gap token, not `var(--gap)`); probed 20px computed + four 20px inner gaps + equal flanks across wave/line × dark/light | ✅ 2026-10-05 · **0.16.8** |
 | Edge-shadows softened (dark 0.22/0.30 → 0.14/0.20, light 0.14/0.18 → 0.09/0.12; lengths unchanged) + GNOME ring strengthened (dark 0.12/0.10 → 0.38/0.24, light 0.18/0.60 → 0.32/0.70; offset -1px unchanged; playbar seam untouched; GNOME-only, no KDE ring); DESIGN.md Cast-light + window-ring exception note | ✅ 2026-10-05 · **0.16.9** |
+| Corner resize handles: four transparent 20px squares in the window margin (siblings of `.app`) calling `startResizeDragging` — corners moved because nothing ever requested resize (drag.js only moves, Mutter draws no grabs on decorations(false)); hidden maximized via `html[data-window]` | ✅ 2026-10-05 · **0.16.10** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5905,3 +5906,15 @@ Probed live (devctl, capped pass): dark `backgroundImage` 0.14/0.20, ring 0.38/0
 Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo test --lib` 147/147; vite build ok.
 
 Patch bump 0.16.8 → 0.16.9 in package.json + tauri.conf.json + Cargo.toml, same commit (restarts the dev unit; owner moves the window himself). Committed locally, NOT pushed.
+
+### Corner resize handles (2026-10-05, owner finding → 0.16.10)
+
+Owner: the four window corners moved the window instead of resizing it. Mechanism (traced, not guessed): all three `data-tauri-drag-region`s are bare attributes, so drag.js fires `start_dragging` (move) only on direct clicks; the 20px margin belongs to no element (elementFromPoint = BODY at corners); nothing anywhere requests a resize — Mutter draws no grabs on decorations(false) windows and Tauri wires no resize gesture (tao's DragResizeWindow sat unused). So move always won by default. Fix is frontend-only and contained: four transparent 20px `.resize-corner` squares in the margin (siblings of `.app`, outside `contain:paint` clipping), mousedown → `startResizeDrag` → tao → gtk `begin_resize_drag`; hidden maximized via the shared `html[data-window]` gate. Edges untouched. Owner to try each corner live (a real resize gesture is not assertable from devctl).
+
+Gates (2026-10-05): svelte-check 0 errors, 0 warnings (also proves `startResizeDragging` exists on the installed API); vitest 140/140; `cargo test --lib` 147/147; vite build ok.
+
+Patch bump 0.16.9 → 0.16.10 in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
+
+### Corner resize diagnosis probe (2026-10-05, uncommitted diagnostic on 0.16.10 → amended)
+
+Owner on fb4362b: resize acts on the border of the margin, not the corner squares. Verified live: all four 20×20 handles render at the viewport corners, topmost in hit-test, correct cursors; input region is full-surface (nothing in tao/wry restricts it); `plugin:window|start_resize_dragging` is registered and direction mapping is correct — so the chain is airtight on paper and the `try/catch` was hiding the runtime truth. Added TEMPORARY `dataset.resizeProbe` stamps (mousedown/resolved/rejected) so one real owner corner-press discriminates delivery failure vs lost request vs Mutter refusal; remove after diagnosis. No versioned behavior changed, no bump.
