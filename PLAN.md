@@ -5931,3 +5931,7 @@ Owner pressed the live BR handle: `resizeProbe` ABSENT, with the stamps proven l
 ### Bottom-corner resize zones + missing resize capability (2026-10-05, owner-verified → 0.16.11)
 
 Bottom-only overlay zones (Aina spec) beat the ancestor move via capture intercept; presses arrived but `startResizeDragging` threw until `core:window:allow-start-resize-dragging` was allowlisted (move permission existed, resize did not). Owner pressed BR live: SouthEast:rejected named the denial; after the one-line capability fix plus dev-unit restart, both bottom corners resize. Gates green. Patch bump 0.16.10 → 0.16.11, same commit. Committed locally, NOT pushed.
+
+### Track-step triangles optically centered (2026-10-05, owner ask → 0.16.13)
+
+Prev-track path center sat 9.5, next-track 6.5 (16-unit box, center 8) — backwards from optical. Pure ±2 x-translates (shape/size untouched): prev `M12.5 3 L6.5 8 l6 5 Z` → `M10.5 3 L4.5 8 l6 5 Z` (center 7.5), next `M3.5 3 L9.5 8 l-6 5 Z` → `M5.5 3 L11.5 8 l-6 5 Z` (center 8.5). Probed getBBox 7.5/8.5, width 6 both, buttons unmoved. Patch bump 0.16.12 → 0.16.13, same commit. Committed locally, NOT pushed.

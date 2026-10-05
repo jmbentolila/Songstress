@@ -480,7 +480,7 @@
       <button aria-label="Previous track" use:tooltip={"Previous track"} disabled={!track} onclick={() => skip(-1)}>
         <!-- Bare triangle on purpose: track-level step. Bar+triangle is
          *reserved* for album-level jumps (the weight diff encodes it). -->
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 3 L6.5 8 l6 5 Z" fill="currentColor" /></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3 L4.5 8 l6 5 Z" fill="currentColor" /></svg>
       </button>
       <button
         class="playpause"
@@ -495,7 +495,7 @@
         {/if}
       </button>
       <button aria-label="Next track" use:tooltip={"Next track"} disabled={!track} onclick={() => skip(1)}>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3 L9.5 8 l-6 5 Z" fill="currentColor" /></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3 L11.5 8 l-6 5 Z" fill="currentColor" /></svg>
       </button>
       <button
         aria-label="Next album"
