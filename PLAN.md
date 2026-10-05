@@ -5898,6 +5898,10 @@ Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo te
 
 Patch bump 0.16.7 → 0.16.8 in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
 
+#### Outer album-skip clearance (2026-10-05, Aina spec → 0.16.12)
+
+MIS-TARGETED, corrected same commit: the first cut put the 8px on the outer album skips (`skip-outer` + margin rules, since fully reverted) — owner: the crowded ones are the prev/next TRACK steps (second and fourth). Final: `nth-child(2)` margin-right 8px, `nth-child(4)` margin-left 8px, dated comment; no classes, handlers/aria/svg untouched, gap byte-identical. Net: play-adjacent intervals 28px equal, all others 20px, flanks 0 — probed identical across wave/line × dark/light (both restored, menu closed).
+
 ### Edge-shadows softened + GNOME ring strengthened (2026-10-05, Aina spec → 0.16.9)
 
 GNOME-only per owner decision (no KDE ring added). App.svelte `.edge-shadows`: dark top 0.22→0.14, shelf 0.30→0.20; light top 0.14→0.09, shelf 0.18→0.12; 26px/34px lengths unchanged. app.css GNOME ring: dark border 0.12→0.38, outline 0.10→0.24; light border 0.18→0.32, outline 0.60→0.70; offset -1px unchanged. Playbar seam untouched. DESIGN.md: Cast-light line re-tuned with date, app.css frame comment carries the new values, plus a dated window-ring exception note (the 2026-10-02 "hairline equals --border" ruling no longer holds for the window edge — wallpaper, not sibling chrome, is what it reads against).

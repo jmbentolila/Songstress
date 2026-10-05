@@ -1049,6 +1049,18 @@
     gap: 20px;
   }
 
+  /* Inner step clearance (2026-10-05, Aina spec, corrected same day): the
+     crowded pair is the prev/next TRACK steps (second and fourth), not the
+     outer album skips — the first cut targeted the wrong buttons and was
+     reverted. Inner-side 8px margins put 28px adjacent to play, 20px
+     elsewhere. Position-pinned like the reverted pattern. */
+  .transport button:nth-child(2) {
+    margin-right: 8px;
+  }
+  .transport button:nth-child(4) {
+    margin-left: 8px;
+  }
+
   .transport button {
     border: none;
     background: transparent;
