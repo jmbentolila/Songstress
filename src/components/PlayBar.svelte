@@ -994,7 +994,9 @@
   .transport {
     display: flex;
     align-items: center;
-    gap: 14px;
+    /* Literal 20px = the DESIGN.md 20px gap token, spelled out (not
+       var(--gap)) so this row keeps its own spacing if --gap ever moves. */
+    gap: 20px;
   }
 
   .transport button {

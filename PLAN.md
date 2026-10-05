@@ -97,6 +97,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | GNOME window frame v1: 1px outer dark ring (border) + inset 1px inner light hairline on `.app`, gated to `html[data-de="gnome"]`, dark + light values from measured libadwaita 1.9.4 | ✅ 2026-10-02 · **0.16.3** |
 | Window drop shadow v2: `.app` pulled 20px inside the transparent window (`--frame-margin`), two-layer outset `--shadow-window` seat into the margin (main `0 6px 12px`, contact `0 2px 8px`; KDE dark 0.50/0.35, light 0.22/0.12; GNOME dark 0.55/0.40, light 0.25/0.15); maximized drops margin + shadow via `html[data-window]` (`syncWindowState` + `onResized`); v1 ring untouched underneath; DESIGN.md Shadow Vocabulary gains the window seat | ✅ 2026-10-04 · **0.16.6** |
 | Playbar drag, attempt 1: `data-tauri-drag-region` on the PlayBar footer root — gaps/slack drag, seek ranges + transport keep working (Tauri excludes interactive descendants); owner eyeballed live with resounding success, no fallback needed | ✅ 2026-10-05 · **0.16.7** |
+| Transport row gap 14px → 20px (literal, = DESIGN.md 20px gap token, not `var(--gap)`); probed 20px computed + four 20px inner gaps + equal flanks across wave/line × dark/light | ✅ 2026-10-05 · **0.16.8** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5883,3 +5884,13 @@ Owner wanted the bigger surface tried first (Aina had specced region on the trac
 Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo test --lib` 147/147; vite build ok.
 
 Patch bump 0.16.6 → 0.16.7 in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
+
+### Transport row gap 14px → 20px (2026-10-05, owner ask → 0.16.8)
+
+One-value CSS change in PlayBar.svelte `.transport`: `gap: 14px` → literal `20px` with a comment naming the DESIGN.md 20px gap token — deliberately NOT `var(--gap)`, so the row keeps its spacing if the token ever moves. Button sizes, washes, tokens, seek, themes untouched.
+
+Probed live (devctl, computed + rects): `gap` computes `20px`; five 30px buttons at x 525/575/625/675/725 → four inner gaps of exactly 20px, flanks 0/0 — identical across wave/line × dark/light (style flipped via the Appearance toggle, theme via System→Light→System; both restored, menu closed, app left as found).
+
+Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo test --lib` 147/147; vite build ok.
+
+Patch bump 0.16.7 → 0.16.8 in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
