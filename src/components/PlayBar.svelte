@@ -13,6 +13,7 @@
   } from "../lib/stores/playback.svelte";
   import { library } from "../lib/stores/library.svelte";
   import { artSrc } from "../lib/artSrc";
+  import { startResizeDrag } from "../lib/window";
   import { peaksPath, resample, shapeAmplitude, WAVE_BARS, WAVE_FLOOR } from "../lib/waveform";
   import { prefetchPeaks, trackPeaks } from "../lib/peaks";
   import { cubicOut } from "svelte/easing";
@@ -414,6 +415,33 @@
   class:has-gradient={layers.length > 0}
   data-tauri-drag-region
 >
+  <!-- Bottom-corner resize zones (2026-10-05, second attempt): transparent
+       overlays in the footer's own bottom corners — glass receives presses
+       (the dead margin did not). Capture-phase mousedown + stopImmediate-
+       Propagation beats the ancestor's bare drag-region move: document's
+       bubble listener never fires. mousedown-only (no click/keyboard
+       affordance — OS-chrome grips, aria-hidden). BL 28px / BR 24px keep
+       clear of the volume cluster; .side re-stacks above the BR zone. -->
+  <div
+    class="corner-bl"
+    aria-hidden="true"
+    onmousedowncapture={(e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void startResizeDrag("SouthWest");
+    }}
+  ></div>
+  <div
+    class="corner-br"
+    aria-hidden="true"
+    onmousedowncapture={(e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      void startResizeDrag("SouthEast");
+    }}
+  ></div>
   <!-- The gradient layer, behind every control, above the chrome fill
        (.playbar's z-index makes it a stacking context, so z-index:-1
        lands exactly between the two). Keyed so a value change runs the
@@ -868,6 +896,28 @@
     overflow: hidden;
   }
 
+  /* Bottom-corner resize zones (see markup comment): absolute in the
+     footer's bottom corners — above the -1 gradient fill, below the
+     re-stacked right cluster (.side z-1). Transparent, cursor only. */
+  .corner-bl,
+  .corner-br {
+    position: absolute;
+    bottom: 0;
+    z-index: 0;
+  }
+  .corner-bl {
+    left: 0;
+    width: 28px;
+    height: 28px;
+    cursor: nesw-resize;
+  }
+  .corner-br {
+    right: 0;
+    width: 24px;
+    height: 24px;
+    cursor: nwse-resize;
+  }
+
   .pb-bg-l {
     position: absolute;
     inset: 0;
@@ -1237,6 +1287,10 @@
     align-items: center;
     gap: 12px;
     justify-content: flex-end;
+    /* Stacking only (no visual change): the whole right cluster — modes,
+       mute, slider — hit-tests above the bottom-right resize zone. */
+    position: relative;
+    z-index: 1;
   }
 
   .modes {

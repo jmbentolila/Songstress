@@ -293,6 +293,14 @@ html[data-window="maximized"] .app {
   box-shadow: none;
 }
 
+/* Bottom-corner resize zones hide maximized with the margin: the footer
+   spans the window edges there and a resize request would unmaximize
+   into a jump. PlayBar-owned zones, gated here next to the margin rule. */
+html[data-window="maximized"] .playbar .corner-bl,
+html[data-window="maximized"] .playbar .corner-br {
+  display: none;
+}
+
 /* ── Reduced transparency + higher contrast ───────────────────────────────
    apple-design §14: reduced motion is not the only signal. The GNOME block
    above owns the same solid tokens per-DE; these own them per-USER — a KDE
