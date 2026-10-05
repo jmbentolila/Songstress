@@ -98,6 +98,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Window drop shadow v2: `.app` pulled 20px inside the transparent window (`--frame-margin`), two-layer outset `--shadow-window` seat into the margin (main `0 6px 12px`, contact `0 2px 8px`; KDE dark 0.50/0.35, light 0.22/0.12; GNOME dark 0.55/0.40, light 0.25/0.15); maximized drops margin + shadow via `html[data-window]` (`syncWindowState` + `onResized`); v1 ring untouched underneath; DESIGN.md Shadow Vocabulary gains the window seat | ✅ 2026-10-04 · **0.16.6** |
 | Playbar drag, attempt 1: `data-tauri-drag-region` on the PlayBar footer root — gaps/slack drag, seek ranges + transport keep working (Tauri excludes interactive descendants); owner eyeballed live with resounding success, no fallback needed | ✅ 2026-10-05 · **0.16.7** |
 | Transport row gap 14px → 20px (literal, = DESIGN.md 20px gap token, not `var(--gap)`); probed 20px computed + four 20px inner gaps + equal flanks across wave/line × dark/light | ✅ 2026-10-05 · **0.16.8** |
+| Edge-shadows softened (dark 0.22/0.30 → 0.14/0.20, light 0.14/0.18 → 0.09/0.12; lengths unchanged) + GNOME ring strengthened (dark 0.12/0.10 → 0.38/0.24, light 0.18/0.60 → 0.32/0.70; offset -1px unchanged; playbar seam untouched; GNOME-only, no KDE ring); DESIGN.md Cast-light + window-ring exception note | ✅ 2026-10-05 · **0.16.9** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5894,3 +5895,13 @@ Probed live (devctl, computed + rects): `gap` computes `20px`; five 30px buttons
 Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo test --lib` 147/147; vite build ok.
 
 Patch bump 0.16.7 → 0.16.8 in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
+
+### Edge-shadows softened + GNOME ring strengthened (2026-10-05, Aina spec → 0.16.9)
+
+GNOME-only per owner decision (no KDE ring added). App.svelte `.edge-shadows`: dark top 0.22→0.14, shelf 0.30→0.20; light top 0.14→0.09, shelf 0.18→0.12; 26px/34px lengths unchanged. app.css GNOME ring: dark border 0.12→0.38, outline 0.10→0.24; light border 0.18→0.32, outline 0.60→0.70; offset -1px unchanged. Playbar seam untouched. DESIGN.md: Cast-light line re-tuned with date, app.css frame comment carries the new values, plus a dated window-ring exception note (the 2026-10-02 "hairline equals --border" ruling no longer holds for the window edge — wallpaper, not sibling chrome, is what it reads against).
+
+Probed live (devctl, capped pass): dark `backgroundImage` 0.14/0.20, ring 0.38/0.24, seam dark `--border`; light flip (attribute-only, store untouched — these four properties are pure functions of `html[data-theme]`) 0.09/0.12, ring 0.32/0.70, seam light `--border`; restored to dark.
+
+Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo test --lib` 147/147; vite build ok.
+
+Patch bump 0.16.8 → 0.16.9 in package.json + tauri.conf.json + Cargo.toml, same commit (restarts the dev unit; owner moves the window himself). Committed locally, NOT pushed.

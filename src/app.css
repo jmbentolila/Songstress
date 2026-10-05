@@ -256,15 +256,21 @@ html[data-de="gnome"] .glass::after {
    straights and died at the radius bend — caricature-tested live), while a
    negative-offset outline paints ABOVE them, follows the radius, and is not
    clipped by the element's own overflow. Radius untouched — --radius-window
-   still owns it. */
+   still owns it.
+   Values (2026-10-05 retune, owner eyeball): dark border 0.38 / outline
+   0.24, light border 0.32 / outline 0.70 — deliberately STRONGER than the
+   internal seams now. Exception note: the 2026-10-02 ruling said the hairline
+   equals --border exactly; the window ring is excepted because a window edge
+   has to read against the WALLPAPER, not against sibling chrome, so it
+   carries its own weight (GNOME-only; no KDE ring was ever added). */
 html[data-de="gnome"][data-theme="dark"] .app {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  outline: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.38);
+  outline: 1px solid rgba(255, 255, 255, 0.24);
   outline-offset: -1px;
 }
 html[data-de="gnome"][data-theme="light"] .app {
-  border: 1px solid rgba(0, 0, 0, 0.18);
-  outline: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.32);
+  outline: 1px solid rgba(255, 255, 255, 0.7);
   outline-offset: -1px;
 }
 

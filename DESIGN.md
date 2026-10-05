@@ -319,11 +319,18 @@ supporting roles: anchoring physical objects, and casting light.
   and seat (`html[data-window="maximized"]`); the radius still follows
   `--radius-window` untouched, and the owner-tuned alphas (0.8/0.7/0.36/0.30)
   are unchanged.
-- **Cast light** (linear gradients, not shadows): 26px @ 0.22 from the
-  window top and 34px @ 0.30 from the playbar shelf, onto the grid —
-  softened to 0.14 / 0.18 in light mode, where the dark-tuned alphas
-  read too heavy —
+- **Cast light** (linear gradients, not shadows): 26px @ 0.14 from the
+  window top and 34px @ 0.20 from the playbar shelf, onto the grid —
+  softened to 0.09 / 0.12 in light mode, where the dark-tuned alphas
+  read too heavy (eased 2026-10-05: dark 0.22/0.30, light 0.14/0.18 —
+  the old values sat too heavy over the artwork) —
   chrome casting onto content so the glass reads as floating.
+
+**Window-ring exception (2026-10-05).** The 2026-10-02 ruling said the
+window hairline equals `--border` exactly; it no longer does — dark ring
+0.38/0.24, light 0.32/0.70 (GNOME-only, no KDE ring exists). A window edge
+reads against the WALLPAPER, not against sibling chrome, so it carries its
+own weight while the internal seams stay on `--border`.
 
 ### Named Rules
 

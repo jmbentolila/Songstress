@@ -263,9 +263,9 @@
     z-index: 5;
     pointer-events: none;
     background:
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.22), transparent 26px) top /
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.14), transparent 26px) top /
         100% 26px no-repeat,
-      linear-gradient(to top, rgba(0, 0, 0, 0.3), transparent 34px) bottom /
+      linear-gradient(to top, rgba(0, 0, 0, 0.2), transparent 34px) bottom /
         100% 34px no-repeat;
   }
 
@@ -273,9 +273,9 @@
      on the porcelain field. */
   :global(html[data-theme="light"]) .edge-shadows {
     background:
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.14), transparent 26px) top /
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.09), transparent 26px) top /
         100% 26px no-repeat,
-      linear-gradient(to top, rgba(0, 0, 0, 0.18), transparent 34px) bottom /
+      linear-gradient(to top, rgba(0, 0, 0, 0.12), transparent 34px) bottom /
         100% 34px no-repeat;
   }
 
