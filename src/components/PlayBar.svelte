@@ -403,7 +403,17 @@
 
 <svelte:window onpointerdown={onDocPointerDown} onkeydown={onDocKeydown} />
 
-<footer class="playbar glass" class:paused={!playback.isPlaying} class:has-gradient={layers.length > 0}>
+<!-- Attempt 1 (2026-10-04 playbar-drag experiment): the drag region is the
+     whole footer, so inter-column gaps and slack drag too. Tauri excludes
+     interactive descendants (input/button/a) from region dragging, so the
+     seek ranges and transport keep working — verified by probe, else this
+     moves to the track-info .now block only (attempt 2, Aina spec). -->
+<footer
+  class="playbar glass"
+  class:paused={!playback.isPlaying}
+  class:has-gradient={layers.length > 0}
+  data-tauri-drag-region
+>
   <!-- The gradient layer, behind every control, above the chrome fill
        (.playbar's z-index makes it a stacking context, so z-index:-1
        lands exactly between the two). Keyed so a value change runs the

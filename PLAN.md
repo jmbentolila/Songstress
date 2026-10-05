@@ -96,6 +96,7 @@ Status legend: ⬜ todo · 🔶 in progress · ✅ done
 | Tag-editor open smoothed: content-shaped skeleton in the body's own grid (no more note→everything pop), 180ms fade+rise arrival, shimmer footer slots instead of 0/empty, track header from the library (no label pop) + ResizeObserver height easing (1s measured-px WAAPI, staged landings breathe instead of snapping) | ✅ 2026-09-29 · **0.16.2** |
 | GNOME window frame v1: 1px outer dark ring (border) + inset 1px inner light hairline on `.app`, gated to `html[data-de="gnome"]`, dark + light values from measured libadwaita 1.9.4 | ✅ 2026-10-02 · **0.16.3** |
 | Window drop shadow v2: `.app` pulled 20px inside the transparent window (`--frame-margin`), two-layer outset `--shadow-window` seat into the margin (main `0 6px 12px`, contact `0 2px 8px`; KDE dark 0.50/0.35, light 0.22/0.12; GNOME dark 0.55/0.40, light 0.25/0.15); maximized drops margin + shadow via `html[data-window]` (`syncWindowState` + `onResized`); v1 ring untouched underneath; DESIGN.md Shadow Vocabulary gains the window seat | ✅ 2026-10-04 · **0.16.6** |
+| Playbar drag, attempt 1: `data-tauri-drag-region` on the PlayBar footer root — gaps/slack drag, seek ranges + transport keep working (Tauri excludes interactive descendants); owner eyeballed live with resounding success, no fallback needed | ✅ 2026-10-05 · **0.16.7** |
 
 ## Decisions log (user-confirmed, do not re-litigate)
 
@@ -5874,3 +5875,11 @@ Gate: maximized/tiled drops margin + shadow via `html[data-window="maximized"] .
 Risks per spec: Mutter edge-resize over the transparent margin should still grab (hit-test is on window bounds, not pixels) — if an edge goes dead that is a compositor finding, not CSS-fixable, fallback is a smaller margin or revert. KWin force-blur sits behind the margin, shadow paints over it (correct order; if muddy, drop KDE alphas by 0.05). At rest the shadow is a cached raster, zero per-frame cost; resize-lag dial on weak iGPUs is blur 12 → 8 with margin held at 20.
 
 Patch bump 0.16.5 → 0.16.6 (user-visible frame change) in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
+
+### Playbar drag, attempt 1 — footer-root drag region (2026-10-05, owner ask → 0.16.7)
+
+Owner wanted the bigger surface tried first (Aina had specced region on the track-info `.now` block only). Attempt 1 puts `data-tauri-drag-region` on the PlayBar `footer` root, so inter-column gaps and slack drag too. No fallback needed: Tauri excludes interactive descendants (`input`/`button`/`a`) from region dragging, and the owner eyeballed it live with resounding success — gaps drag, seek seeks in both styles, buttons click. Frontend-only (PlayBar.svelte markup + comment), no test changes, no restart needed (hot reload).
+
+Gates (2026-10-05): svelte-check 0 errors, 0 warnings; vitest 140/140; `cargo test --lib` 147/147; vite build ok.
+
+Patch bump 0.16.6 → 0.16.7 in package.json + tauri.conf.json + Cargo.toml, same commit. Committed locally, NOT pushed.
