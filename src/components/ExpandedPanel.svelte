@@ -288,6 +288,9 @@
   // Token (app.css): the user-verified panel-choreography curve. var()
   // resolves fine in inline styles — .inner lives in the document.
   const CURVE = "var(--ease-out)";
+  // Drawer voice for the slot/expander margins (see syncSpacing): the
+  // margins move the box WITH the content, so they share the content's
+  // curve — an existing token, not a fork.
   // Accordion durations scale with measured travel (px): a fixed duration
   // whips tall panels unreadably fast and dawdles on short ones. Retune
   // 0.16.15 (dated override): the floor rose 200ms → 320ms so short
@@ -379,8 +382,18 @@
   // growDur (320–500ms). Set a frame BEFORE the phase flip
   // so the duration never shares a batch with the margin change it times.
   // The static CSS stays as the pre-JS fallback.
+  // Curve amendment, dated 2026-10-09 (close-hitch fix): the margins run
+  // var(--ease-drawer), NOT the height's ease-out. The margins move the
+  // box WITH the content (top edge + content travel sum on the tracked
+  // pixel), and ease-out's front-load (~7px of the 20px gap in the first
+  // frame-pair, measured) landed as a discrete upward shift ahead of the
+  // drawer's slower travel start — the owner's two-phase hitch. On the
+  // drawer both edges of the story share one velocity shape, so top edge
+  // and content read as a single travel. Durations still match the height
+  // move exactly (no jump at either end — that half of the sync law is
+  // untouched); heights stay ease-out both ways (the mirrored pair).
   function syncSpacing(dur: number) {
-    const t = `${dur}ms ${CURVE}`;
+    const t = `${dur}ms var(--ease-drawer)`;
     if (expanderEl) expanderEl.style.transition = `margin-bottom ${t}`;
     const slot = innerEl?.closest(".panel-slot") as HTMLElement | null;
     if (slot) slot.style.transition = `margin-top ${t}`;

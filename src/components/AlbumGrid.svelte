@@ -788,7 +788,8 @@
    * rows on either side sit at the STANDARD 20px gap instead of 20 + 0 +
    * 20. The static durations here are the pre-JS fallback only: the panel
    * overwrites them INLINE with the actual move duration every phase
-   * change (syncSpacing: scaled growDur 320–500ms, same var(--ease-out)),
+   * change (syncSpacing: scaled growDur 320–500ms durations, drawer curve
+   * since 0.16.16 — same voice as the content travel, see the panel),
    * a frame before it flips the slot's class — so the panel's top edge
    * glides with the shrinking/growing box and the row below settles into
    * the standard gap without a jump at either end. */
