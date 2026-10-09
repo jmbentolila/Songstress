@@ -171,8 +171,9 @@
   // the row animates while a one-paint-late scrollTop chases it). What
   // came back is the minimal version:
   //   * the outgoing panel becomes a GHOST row at its own row — a fresh
-  //     ExpandedPanel mount at the measured height (seamless hand-off)
-  //     playing the plain 280ms CSS close, nothing else;
+  //     ExpandedPanel mount at the measured height (seamless hand-off:
+  //     first paint identical, content at final values) playing the plain
+  //     closeDur(H)-scaled close + 160ms content fade, nothing else;
   //   * the host flips to the destination at t=0 (fresh mount + grow);
   //   * only the VIEW'S TRAVEL waits: a per-section glide queue drains
   //     when the ghost list is empty (drainGlide) — the travel is the one
@@ -636,7 +637,8 @@
             {#if ghostAlbum}
               <!-- Ghost: the outgoing panel of an in-flight cross-row
                    switch. Fresh mount at the measured height (seamless
-                   hand-off), plain close, nothing else. -->
+                   hand-off), plain closeDur(H) close + 160ms content
+                   fade, nothing else. -->
               <div
                 class="panel-slot"
                 class:closed={phaseMap[row.id] === "closed"}
@@ -784,11 +786,12 @@
    * grid gap is fixed (it can't be opted out per item), so while the
    * panel is closed the slot's margin cancels the gap above it and the
    * rows on either side sit at the STANDARD 20px gap instead of 20 + 0 +
-   * 20. The transition runs the SAME duration/curve as the height move
-   * (360 open / 280 close — the panel flips the slot's class in the same
-   * frame the height transition starts), so the panel's top edge glides
-   * with the shrinking/growing box and the row below settles into the
-   * standard gap without a jump at either end. */
+   * 20. The static durations here are the pre-JS fallback only: the panel
+   * overwrites them INLINE with the actual move duration every phase
+   * change (syncSpacing: scaled growDur/closeDur, same var(--ease-out)),
+   * a frame before it flips the slot's class — so the panel's top edge
+   * glides with the shrinking/growing box and the row below settles into
+   * the standard gap without a jump at either end. */
   .panel-slot {
     margin-top: 0;
     transition: margin-top 360ms var(--ease-out);

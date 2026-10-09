@@ -311,17 +311,73 @@
   const initInnerH = initialPx > 1 ? `${initialPx}px` : "0px";
   let displayId = $state(mountAlbumId);
 
-  // Same-row switches fade the swapped-in content.
-  let entering = $state(false);
+  // --- hybrid open/close choreography (Aina spec, 2026-10-09) -------------
+  // Design intent: hybrid, not a pure transform slide. The slot keeps the
+  // honest px-height animation (layout really moves); the eye follows
+  // compositor-only motion on ONE content wrapper (.glide) inside the
+  // .inner clip mask — top edge pinned, content starting 12px up inside
+  // the growing box. Exactly one travel layer, never per-row.
+  //
+  // Transition STRINGS live static in CSS per data-cstate (open:
+  // 200ms fade / 300ms travel; closing + swap: 160/160ms); the VALUES
+  // ride inline (bindings mirrored to direct styles). Never the reverse:
+  // an attribute-selector-driven opacity set in the same batch as its
+  // transition string loses the transition on this WebKitGTK. So the
+  // state flips a frame BEFORE the values move (double-rAF), and the
+  // same-row swap commits its hidden state under a suppressed transition
+  // with a forced reflow before the content swaps underneath it.
+  // Two-beat stagger = two static delays (header t=0, tracklist + footer
+  // +50ms), same durations — no per-row ladder, no --i dials.
+  const prefersReducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
+  // svelte-ignore state_referenced_locally
+  const mountRevealed = initialPx > 1 || prefersReducedMotion.current;
+  let expanderEl = $state<HTMLElement>();
+  let glideEl = $state<HTMLElement>();
+  let beatHEl = $state<HTMLElement>();
+  let beatBEl = $state<HTMLElement>();
+  let cstate = $state<"open" | "closing" | "swap">("open");
+  let glideOp = $state(mountRevealed ? 1 : 0);
+  let glideTf = $state(mountRevealed ? "none" : "translateY(-12px)");
+  let beatOp = $state(mountRevealed ? 1 : 0);
   let innerEl = $state<HTMLElement>();
   let panelEl = $state<HTMLElement>();
   let raf1 = 0;
   let raf2 = 0;
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
-  let enterRaf1 = 0;
-  let enterRaf2 = 0;
   let generation = 0;
+  // Set by the swap branch, consumed by the open-branch re-entry: the
+  // reveal keeps the swap strings (-6px / 160ms) instead of the open ones.
+  let swapPending = false;
+
+  function paintContent(op: number, tf: string, beat: number) {
+    glideOp = op;
+    glideTf = tf;
+    beatOp = beat;
+    // Synchronous commit: Svelte flushes bindings on its own schedule,
+    // so mirror the same values directly — the swap branch's hidden state
+    // must be committed (reflow, there) before the content swaps.
+    if (glideEl) {
+      glideEl.style.opacity = String(op);
+      glideEl.style.transform = tf;
+    }
+    if (beatHEl) beatHEl.style.opacity = String(beat);
+    if (beatBEl) beatBEl.style.opacity = String(beat);
+  }
+
+  // The ONE real spacing fix in this pass: slot margin-top (grid-owned,
+  // reached via closest — the panel's own slot, never a guess) and
+  // expander margin-bottom (owned) take the ACTUAL move duration inline.
+  // The static 360/280ms class transitions desynced from the scaled
+  // growDur/closeDur (up to 500/400ms). Set a frame BEFORE the phase flip
+  // so the duration never shares a batch with the margin change it times.
+  // The static CSS stays as the pre-JS fallback.
+  function syncSpacing(dur: number) {
+    const t = `${dur}ms ${CURVE}`;
+    if (expanderEl) expanderEl.style.transition = `margin-bottom ${t}`;
+    const slot = innerEl?.closest(".panel-slot") as HTMLElement | null;
+    if (slot) slot.style.transition = `margin-top ${t}`;
+  }
 
   function move(px: number, dur: number) {
     const el = innerEl;
@@ -348,17 +404,19 @@
     innerEl.style.removeProperty("height");
   }
 
-  function grow(gen: number) {
+  function grow(gen: number, preTo?: number, preDur?: number) {
     if (gen !== generation || !innerEl) return;
-    const to = Math.max(1, panelEl?.offsetHeight ?? 0);
+    const to = preTo ?? Math.max(1, panelEl?.offsetHeight ?? 0);
     if (innerEl.offsetHeight >= to - 2) {
       settleToAuto();
       return;
     }
     // Duration scales with the REMAINING travel (fresh mount = full `to`,
     // mid-close retarget = what's left) so tall panels stay legible and
-    // short ones stay crisp — see growDur.
-    const dur = growDur(to - innerEl.offsetHeight);
+    // short ones stay crisp — see growDur. The open branch pre-measures
+    // `to`/`dur` a frame early (for the spacing sync) and passes them in
+    // so the slot margins match THIS move exactly.
+    const dur = preDur ?? growDur(to - innerEl.offsetHeight);
     move(to, dur);
     settleTimer = setTimeout(() => {
       if (gen !== generation) return;
@@ -370,33 +428,39 @@
     const gen = ++generation;
     cancelAnimationFrame(raf1);
     cancelAnimationFrame(raf2);
-    cancelAnimationFrame(enterRaf1);
-    cancelAnimationFrame(enterRaf2);
     clearTimeout(settleTimer);
     clearTimeout(closeTimer);
+    const rm = prefersReducedMotion.current;
 
     if (displayId === targetId) {
       // The content IS what the section has expanded: the box should be
       // open. Covers fresh mounts, re-opens, cross-row switch
-      // destinations (grow from 0 + fade, in parallel with the glide) and
-      // same-row flips (a settled box settles to the new size — or grows
-      // a short beat if the new album is much taller). A mid-close click
-      // on the host album retargets the close into this grow — the box
-      // simply turns back open.
+      // destinations (grow from 0 + reveal, in parallel with the ghost
+      // close) and same-row flips (a settled box settles to the new size
+      // — or grows a short beat if the new album is much taller). A
+      // mid-close click on the host album retargets the close into this
+      // grow — the box simply turns back open, from its current px.
+      // Content travel starts the SAME frame as the height move and runs
+      // shorter than tall grows on purpose (300ms vs up to 500ms).
       if (targetId === null) return; // displayId is never null; TS guard
       raf1 = requestAnimationFrame(() => {
+        if (gen !== generation) return;
+        // Measure now; the flip below reuses THIS travel so the inline
+        // spacing durations (a frame early — never in the flip's batch)
+        // match the height move exactly.
+        const to = Math.max(1, panelEl?.offsetHeight ?? 0);
+        const dur = growDur(Math.max(0, to - (innerEl?.offsetHeight ?? 0)));
+        if (!swapPending) cstate = "open";
+        if (rm) paintContent(1, "none", 1);
+        syncSpacing(dur);
         raf2 = requestAnimationFrame(() => {
+          if (gen !== generation) return;
           // Flip with the grow, not before: the slot's margin transition
           // must start the same frame the height transition does.
           phase = "open";
-          grow(gen);
-          if (entering) {
-            enterRaf1 = requestAnimationFrame(() => {
-              enterRaf2 = requestAnimationFrame(() => {
-                if (gen === generation) entering = false;
-              });
-            });
-          }
+          grow(gen, to, dur);
+          if (!rm) paintContent(1, "none", 1);
+          swapPending = false;
         });
       });
       return;
@@ -405,21 +469,33 @@
     if (targetId === null) {
       // Plain collapse — including the outgoing panel of a cross-row
       // switch (targetId is null while the section is expanded
-      // elsewhere): close with the content visible; displayId stays
-      // (per-section memory). onClosed fires at 0 — the grid consumes a
-      // pending cross-row open, if any. A generation bump (a mid-close
-      // click retargeting the close into a grow) cancels both timers, so
-      // onClosed can never fire after a retarget.
-      entering = false;
+      // elsewhere): content fades/sinks 160ms while the box closes under
+      // closeDur(H). Deferred a double-rAF so a ghost close starts the
+      // same frame its host's grow does (parallel start, t=0 both).
+      // displayId stays (per-section memory). onClosed fires at 0 — the
+      // grid drains a pending cross-row glide, if any. A generation bump
+      // (a mid-close click retargeting the close into a grow) cancels the
+      // frames AND the timer, so onClosed can never fire after a retarget
+      // — the guard extends to the content frames above by construction.
       if (innerEl && innerEl.offsetHeight > 2) {
-        phase = "closing"; // the slot's margin collapse starts now too
         const dur = closeDur(innerEl.offsetHeight);
-        move(0, dur);
-        closeTimer = setTimeout(() => {
+        raf1 = requestAnimationFrame(() => {
           if (gen !== generation) return;
-          phase = "closed";
-          onClosed?.();
-        }, dur + 10);
+          cstate = "closing";
+          if (rm) paintContent(1, "none", 1);
+          syncSpacing(dur);
+          raf2 = requestAnimationFrame(() => {
+            if (gen !== generation) return;
+            phase = "closing";
+            move(0, dur);
+            if (!rm) paintContent(0, "translateY(8px)", 0);
+            closeTimer = setTimeout(() => {
+              if (gen !== generation) return;
+              phase = "closed";
+              onClosed?.();
+            }, dur + 10);
+          });
+        });
       } else {
         phase = "closed";
         onClosed?.();
@@ -429,12 +505,58 @@
 
     // album.id !== displayId: a persistent instance whose host row was
     // re-pointed (same-row switch: the shared row now hosts the new
-    // album; or defensive relocation when the section's list changed):
-    // swap the content; the state change re-enters the effect on the
-    // open branch, which grows.
+    // album; or defensive relocation when the section's list changed).
+    // The incoming block hides INSTANTLY — transition suppressed, hidden
+    // committed with a forced reflow — then the content swaps underneath
+    // it and the state change re-enters the effect on the open branch,
+    // which reveals with the swap strings (-6px / 160ms). No height
+    // motion unless the new album mismatches in size (the open branch
+    // settles or grows a short beat). Reduced motion swaps with final
+    // values: no travel, no fade.
+    const els = [glideEl, beatHEl, beatBEl];
+    for (const el of els) if (el) el.style.transition = "none";
+    if (!rm) paintContent(0, "translateY(-6px)", 0);
+    else paintContent(1, "none", 1);
+    if (glideEl) void glideEl.offsetHeight;
+    for (const el of els) if (el) el.style.removeProperty("transition");
+    cstate = "swap";
+    swapPending = true;
     displayId = album.id;
     selectedId = null;
-    entering = true;
+  });
+
+  // Search-filter (visibleTrackIds) mid-open: the track COUNT changes
+  // without an album swap — height re-settles from the current px via the
+  // existing move path, the content stays revealed, no fade ever replays.
+  // Armed on count change ONLY; album swaps belong to the machine above.
+  // Lazy seeds (null/-1): the declarations below (`tracks`) are not
+  // initialized yet at this point in the script — the first run only
+  // records them, never acts (ids cannot match the seeds).
+  let prevTrackLen = -1;
+  let prevTrackAlbum: string | null = null;
+  $effect(() => {
+    const len = tracks.length;
+    const d = displayId;
+    const ph = phase;
+    if (
+      d === prevTrackAlbum &&
+      len !== prevTrackLen &&
+      ph === "open" &&
+      innerEl &&
+      innerEl.style.height.endsWith("px")
+    ) {
+      const to = Math.max(1, panelEl?.offsetHeight ?? 0);
+      const dur = growDur(Math.max(0, to - innerEl.offsetHeight));
+      clearTimeout(settleTimer);
+      move(to, dur);
+      const g = generation;
+      settleTimer = setTimeout(() => {
+        if (g !== generation) return;
+        settleToAuto();
+      }, dur + 20);
+    }
+    prevTrackLen = len;
+    prevTrackAlbum = d;
   });
 
   let displayAlbum = $derived(
@@ -578,7 +700,8 @@
   // grid does not reflow mid-fade, and the collapse is the deliberate
   // second beat. `local:` — no intro on first mount (the grid entrance
   // owns boot); only store-driven adds and removes animate.
-  const prefersReducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
+  // prefersReducedMotion lives with the state machine above (mount-time read);
+  // ROW_FADE keeps its reactive read here.
   const ROW_FADE = $derived({ duration: prefersReducedMotion.current ? 0 : 160 });
 
   // Two-column tracklists are an explicit grid (NOT CSS multicol): WebKit's
@@ -620,9 +743,17 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="expander" class:closed={phase === "closed"} class:closing={phase === "closing"}>
+<div class="expander" bind:this={expanderEl} class:closed={phase === "closed"} class:closing={phase === "closing"}>
   <div class="inner" bind:this={innerEl} style:height={initInnerH}>
-    <div class="fade" class:entering>
+    <!-- .glide: the ONE content-motion wrapper (see the state machine).
+         Values ride inline; transition strings come from data-cstate. -->
+    <div
+      class="glide"
+      bind:this={glideEl}
+      data-cstate={cstate}
+      style:opacity={glideOp}
+      style:transform={glideTf}
+    >
       <!-- Per-layer background layers: the neutral --panel-bg base under
            the border, the art gradient clipped to the PADDING box.
            The old inline `background: <gradient>` shorthand silently
@@ -651,7 +782,7 @@
         {/if}
         <div class="right">
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-          <header role="group" oncontextmenu={(e) => albumMenu(e, displayAlbum.id)}>
+          <header class="beat-h" bind:this={beatHEl} style:opacity={beatOp} role="group" oncontextmenu={(e) => albumMenu(e, displayAlbum.id)}>
             <div class="title-row">
               <h2>{displayAlbum.title}</h2>
               {#if displayAlbum.staged}
@@ -707,6 +838,8 @@
             >
           {/snippet}
 
+          <!-- beat-b: tracklist + footer share the second stagger beat (+50ms). -->
+          <div class="beat-b" bind:this={beatBEl} style:opacity={beatOp}>
           {#key displayAlbum.id}
           <!-- Album switch (same-row host flip) swaps the whole tracklist
              block atomically. Without the key, the keyed each treats it as
@@ -811,6 +944,7 @@
           <footer class="album-meta"
             >{filtering ? `${tracks.length} of ${allTracks.length} tracks` : `${tracks.length} tracks`} · {fmt(totalSec)}</footer
           >
+          </div>
         </div>
       </section>
     </div>
@@ -832,7 +966,10 @@
     border-radius: var(--radius-panel);
     box-shadow: var(--shadow);
     /* The 4px shadow room joins the animation (same clock as the height)
-     * so the row below the panel never jumps when the state settles. */
+     * so the row below the panel never jumps when the state settles.
+     * Static duration here is the pre-JS fallback only: syncSpacing()
+     * overwrites it inline with the actual move duration every phase
+     * change (scaled growDur/closeDur, up to 500/400ms). */
     transition: margin-bottom 360ms var(--ease-out);
   }
 
@@ -853,13 +990,53 @@
      * the in-flight transition instead of restarting it. */
   }
 
-  .fade {
-    transition: opacity 160ms ease-out;
+  /* Hybrid reveal (2026-10-09): transition STRINGS static per data-cstate
+   * (open 200ms fade / 300ms travel; closing + swap 160/160ms) — the
+   * VALUES ride inline from the state machine. Curves are the existing
+   * tokens only: ease-out for fades, ease-drawer for content travel.
+   * Two-beat stagger = two static delays (header t=0, tracklist + footer
+   * +50ms), same durations — no per-row ladder, no --i dials. .glide
+   * carries the single travel layer (will-change); the beats fade
+   * opacity-only. Reduced motion: the global kill switch zeroes these
+   * durations, and the machine mounts final values. */
+  .glide {
+    will-change: transform, opacity;
   }
 
-  .fade.entering {
-    opacity: 0;
-    transition: none;
+  .glide[data-cstate="open"] {
+    transition:
+      opacity 200ms var(--ease-out),
+      transform 300ms var(--ease-drawer);
+  }
+
+  .glide[data-cstate="closing"],
+  .glide[data-cstate="swap"] {
+    transition:
+      opacity 160ms var(--ease-out),
+      transform 160ms var(--ease-drawer);
+  }
+
+  .glide[data-cstate="open"] .beat-h {
+    transition: opacity 200ms var(--ease-out);
+  }
+
+  .glide[data-cstate="open"] .beat-b {
+    transition: opacity 200ms var(--ease-out);
+    transition-delay: 50ms;
+  }
+
+  .glide[data-cstate="closing"] .beat-h,
+  .glide[data-cstate="closing"] .beat-b {
+    transition: opacity 160ms var(--ease-out);
+  }
+
+  .glide[data-cstate="swap"] .beat-h {
+    transition: opacity 160ms var(--ease-out);
+  }
+
+  .glide[data-cstate="swap"] .beat-b {
+    transition: opacity 160ms var(--ease-out);
+    transition-delay: 50ms;
   }
 
   .panel {
