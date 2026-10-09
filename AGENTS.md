@@ -343,9 +343,15 @@ public/covers/            album art for the fake library (real folder.jpg files)
   (`--bg-chrome`), expanded panel gradient alpha 0.36 dark / 0.30 light. Don't
   drift from these without being asked.
 - **Switch animation contract**: album switch = instant content swap + 160 ms
-  fade-in of the NEW album; height changes in ONE step (no per-frame relayout).
+  fade-in of the NEW album *(overridden 2026-10-09 for the expanded-panel
+  surface only: the same-row swap reveal runs 320ms fade / 380ms travel with
+  the 0/+80ms two-beat stagger — the 160ms contract still holds everywhere
+  else)*; height changes in ONE step (no per-frame relayout).
   The outgoing album must NEVER render at the new row (user calls it "ghost").
-  Expand/collapse keeps the eased `grid-template-rows` animation.
+  Expand/collapse keeps the eased `grid-template-rows` animation *(stale since
+  0.16.14, corrected 2026-10-09: the panel drives px height inline per phase
+  with settle-to-auto at rest — grid-template-rows left the tree rewrites ago
+  and the sentence survived by inertia)*.
 - **Cover decode is expensive** (some art is 3000px). Panel art uses
   `decoding="async"`; `AlbumGrid.toggleExpand` pre-decodes via `img.decode()`.
 - **`.songstress.json` is per-album display state, not library content.** One

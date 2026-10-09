@@ -266,7 +266,7 @@
   // flips to the destination (token flip → fresh mount → grow) while the
   // outgoing panel is re-mounted as a GHOST row at its own row — a fresh
   // instance at the measured height (initialPx) that plays the plain
-  // closeDur(H) CSS close. No pin, no prediction, no frame counting: a close
+  // mirrored growDur(H) close. No pin, no prediction, no frame counting: a close
   // never moves the row ON the line (it plays below that row, in the
   // row's own panel slot), so the one thing that conflicts with a close
   // above the line is the VIEW'S TRAVEL — and the grid defers it behind
@@ -275,8 +275,8 @@
   // phase, so a click mid-motion retargets the in-flight transition from
   // its current value — nothing restarts (a mid-collapse click on the
   // host album turns the close straight back into a grow).
-  //   open grow        0 -> H   growDur(H): 200–500ms, cubic-bezier(0.22,1,0.36,1)
-  //   plain collapse   H -> 0   closeDur(H): 200–400ms, content visible;
+  //   open grow        0 -> H   growDur(H): 320–500ms, cubic-bezier(0.22,1,0.36,1)
+  //   plain collapse   H -> 0   growDur(H): 320–500ms, content mirrored;
   //                      (per-section memory — the next open re-shows it);
   //                      onClosed fires at 0 (the grid consumes a
   //                      pending cross-row open, if any)
@@ -289,16 +289,15 @@
   // resolves fine in inline styles — .inner lives in the document.
   const CURVE = "var(--ease-out)";
   // Accordion durations scale with measured travel (px): a fixed duration
-  // whips tall panels unreadably fast and dawdles on short ones. Bounds
-  // come from the motion tables — 200ms accordion floor (recipe), 500ms
-  // drawer ceiling; collapse uses a snappier multiplier AND a lower
-  // ceiling (slow deliberate phase, snappy system response). Curve stays
-  // var(--ease-out): the user-verified panel token, not a fork.
+  // whips tall panels unreadably fast and dawdles on short ones. Retune
+  // 0.16.15 (dated override): the floor rose 200ms → 320ms so short
+  // albums read deliberate instead of instant (spread plus floor); tall
+  // opens keep slope 0.6, cap 500ms, and fixed content motion. ONE
+  // function serves both directions now — the old closeDur (0.5 slope,
+  // 400 cap) is retired; exit mirrors entrance on the same clock.
+  // Curve stays var(--ease-out): the user-verified panel token, not a fork.
   function growDur(h: number): number {
-    return Math.min(500, Math.max(200, Math.round(h * 0.6)));
-  }
-  function closeDur(h: number): number {
-    return Math.min(400, Math.max(200, Math.round(h * 0.5)));
+    return Math.min(500, Math.max(320, Math.round(h * 0.6)));
   }
   // The content the box currently shows — deliberately NOT tracking
   // album (the host): only the state machine below changes it. Captured
@@ -311,23 +310,25 @@
   const initInnerH = initialPx > 1 ? `${initialPx}px` : "0px";
   let displayId = $state(mountAlbumId);
 
-  // --- hybrid open/close choreography (Aina spec, 2026-10-09) -------------
+  // --- hybrid open/close choreography (Aina spec, 2026-10-09; retune 0.16.15)
   // Design intent: hybrid, not a pure transform slide. The slot keeps the
   // honest px-height animation (layout really moves); the eye follows
   // compositor-only motion on ONE content wrapper (.glide) inside the
-  // .inner clip mask — top edge pinned, content starting 12px up inside
+  // .inner clip mask — top edge pinned, content starting 16px up inside
   // the growing box. Exactly one travel layer, never per-row.
   //
   // Transition STRINGS live static in CSS per data-cstate (open:
-  // 200ms fade / 300ms travel; closing + swap: 160/160ms); the VALUES
-  // ride inline (bindings mirrored to direct styles). Never the reverse:
-  // an attribute-selector-driven opacity set in the same batch as its
-  // transition string loses the transition on this WebKitGTK. So the
-  // state flips a frame BEFORE the values move (double-rAF), and the
-  // same-row swap commits its hidden state under a suppressed transition
-  // with a forced reflow before the content swaps underneath it.
-  // Two-beat stagger = two static delays (header t=0, tracklist + footer
-  // +50ms), same durations — no per-row ladder, no --i dials.
+  // 320ms fade / 380ms travel; closing mirrors it; swap reveals with the
+  // open strings); the VALUES ride inline (bindings mirrored to direct
+  // styles). Never the reverse: an attribute-selector-driven opacity set
+  // in the same batch as its transition string loses the transition on
+  // this WebKitGTK. So the state flips a frame BEFORE the values move
+  // (double-rAF), and the same-row swap commits its hidden state under a
+  // suppressed transition with a forced reflow before the content swaps
+  // underneath it. Two-beat stagger = two static delays (header t=0,
+  // tracklist + footer +80ms opening; reversed on close), same 320ms
+  // durations — no per-row ladder, no --i dials. The shell shadow rides
+  // a ::before whose opacity follows the beat-b value (same delays).
   const prefersReducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
   // svelte-ignore state_referenced_locally
   const mountRevealed = initialPx > 1 || prefersReducedMotion.current;
@@ -337,8 +338,9 @@
   let beatBEl = $state<HTMLElement>();
   let cstate = $state<"open" | "closing" | "swap">("open");
   let glideOp = $state(mountRevealed ? 1 : 0);
-  let glideTf = $state(mountRevealed ? "none" : "translateY(-12px)");
+  let glideTf = $state(mountRevealed ? "none" : "translateY(-16px)");
   let beatOp = $state(mountRevealed ? 1 : 0);
+  let shadowOp = $state(mountRevealed ? 1 : 0);
   let innerEl = $state<HTMLElement>();
   let panelEl = $state<HTMLElement>();
   let raf1 = 0;
@@ -347,29 +349,34 @@
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
   // Set by the swap branch, consumed by the open-branch re-entry: the
-  // reveal keeps the swap strings (-6px / 160ms) instead of the open ones.
+  // reveal keeps the swap cstate (whose strings equal the open ones since
+  // the retune — 320/380, beats 0/+80) instead of flipping to "open".
   let swapPending = false;
 
   function paintContent(op: number, tf: string, beat: number) {
     glideOp = op;
     glideTf = tf;
     beatOp = beat;
+    shadowOp = beat;
     // Synchronous commit: Svelte flushes bindings on its own schedule,
     // so mirror the same values directly — the swap branch's hidden state
-    // must be committed (reflow, there) before the content swaps.
+    // must be committed (reflow, there) before the content swaps. The
+    // shell shadow rides the beat-b value through --shadow-op (opacity-
+    // only, geometry still follows the box every layout pass via inset 0).
     if (glideEl) {
       glideEl.style.opacity = String(op);
       glideEl.style.transform = tf;
     }
     if (beatHEl) beatHEl.style.opacity = String(beat);
     if (beatBEl) beatBEl.style.opacity = String(beat);
+    if (expanderEl) expanderEl.style.setProperty("--shadow-op", String(beat));
   }
 
   // The ONE real spacing fix in this pass: slot margin-top (grid-owned,
   // reached via closest — the panel's own slot, never a guess) and
   // expander margin-bottom (owned) take the ACTUAL move duration inline.
   // The static 360/280ms class transitions desynced from the scaled
-  // growDur/closeDur (up to 500/400ms). Set a frame BEFORE the phase flip
+  // growDur (320–500ms). Set a frame BEFORE the phase flip
   // so the duration never shares a batch with the margin change it times.
   // The static CSS stays as the pre-JS fallback.
   function syncSpacing(dur: number) {
@@ -441,7 +448,7 @@
       // mid-close click on the host album retargets the close into this
       // grow — the box simply turns back open, from its current px.
       // Content travel starts the SAME frame as the height move and runs
-      // shorter than tall grows on purpose (300ms vs up to 500ms).
+      // shorter than tall grows on purpose (380ms vs up to 500ms).
       if (targetId === null) return; // displayId is never null; TS guard
       raf1 = requestAnimationFrame(() => {
         if (gen !== generation) return;
@@ -469,8 +476,10 @@
     if (targetId === null) {
       // Plain collapse — including the outgoing panel of a cross-row
       // switch (targetId is null while the section is expanded
-      // elsewhere): content fades/sinks 160ms while the box closes under
-      // closeDur(H). Deferred a double-rAF so a ghost close starts the
+      // elsewhere): content fades/rises 320/380ms (exact mirror — the
+      // upward exit was never eyeballed before this retune, see the probe
+      // numbers) while the box closes under growDur(H). Deferred a
+      // double-rAF so a ghost close starts the
       // same frame its host's grow does (parallel start, t=0 both).
       // displayId stays (per-section memory). onClosed fires at 0 — the
       // grid drains a pending cross-row glide, if any. A generation bump
@@ -478,7 +487,7 @@
       // frames AND the timer, so onClosed can never fire after a retarget
       // — the guard extends to the content frames above by construction.
       if (innerEl && innerEl.offsetHeight > 2) {
-        const dur = closeDur(innerEl.offsetHeight);
+        const dur = growDur(innerEl.offsetHeight);
         raf1 = requestAnimationFrame(() => {
           if (gen !== generation) return;
           cstate = "closing";
@@ -488,7 +497,7 @@
             if (gen !== generation) return;
             phase = "closing";
             move(0, dur);
-            if (!rm) paintContent(0, "translateY(8px)", 0);
+            if (!rm) paintContent(0, "translateY(-16px)", 0);
             closeTimer = setTimeout(() => {
               if (gen !== generation) return;
               phase = "closed";
@@ -509,7 +518,7 @@
     // The incoming block hides INSTANTLY — transition suppressed, hidden
     // committed with a forced reflow — then the content swaps underneath
     // it and the state change re-enters the effect on the open branch,
-    // which reveals with the swap strings (-6px / 160ms). No height
+    // which reveals with the open strings (320/380, beats 0/+80). No height
     // motion unless the new album mismatches in size (the open branch
     // settles or grows a short beat). Reduced motion swaps with final
     // values: no travel, no fade.
@@ -743,7 +752,9 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="expander" bind:this={expanderEl} class:closed={phase === "closed"} class:closing={phase === "closing"}>
+<!-- data-cstate + --shadow-op: the ::before shell shadow takes its
+     transition delay from the state and its opacity value inline. -->
+<div class="expander" bind:this={expanderEl} data-cstate={cstate} style:--shadow-op={shadowOp} class:closed={phase === "closed"} class:closing={phase === "closing"}>
   <div class="inner" bind:this={innerEl} style:height={initInnerH}>
     <!-- .glide: the ONE content-motion wrapper (see the state machine).
          Values ride inline; transition strings come from data-cstate. -->
@@ -958,19 +969,45 @@
      box tracks the animated height, so the shadow follows every frame.
      Spacing goes on the expander too — margin inside the box would leave a
      gap between the panel edge and its shadow. The expander itself has NO
-     transition: its geometry follows .inner every layout pass, so shell and
-     content can never drift apart (the grid-template-rows approach let
-     WebKitGTK animate them on different clocks). */
+     geometry transition: its box follows .inner every layout pass, so shell
+     and content can never drift apart (the grid-template-rows approach let
+     WebKitGTK animate them on different clocks).
+     Retune 0.16.15 (dated DESIGN.md Cards amendment): the shadow moved to
+     a ::before whose opacity rides the beat-b value (--shadow-op, inline;
+     delay +80ms opening / 0ms closing / +80ms swap, per data-cstate like
+     the beats). Appearance is opacity-only — no floating unattached
+     shadow, no shadow animation beyond opacity, --shadow alphas untouched. */
   .expander {
+    position: relative;
     margin-bottom: 4px;
     border-radius: var(--radius-panel);
-    box-shadow: var(--shadow);
     /* The 4px shadow room joins the animation (same clock as the height)
      * so the row below the panel never jumps when the state settles.
      * Static duration here is the pre-JS fallback only: syncSpacing()
      * overwrites it inline with the actual move duration every phase
-     * change (scaled growDur/closeDur, up to 500/400ms). */
+     * change (scaled growDur, 320–500ms). */
     transition: margin-bottom 360ms var(--ease-out);
+  }
+
+  .expander::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: var(--shadow);
+    pointer-events: none;
+    opacity: var(--shadow-op, 1);
+    transition: opacity 320ms var(--ease-out);
+  }
+
+  .expander[data-cstate="open"]::before,
+  .expander[data-cstate="swap"]::before {
+    transition: opacity 320ms var(--ease-out);
+    transition-delay: 80ms;
+  }
+
+  .expander[data-cstate="closing"]::before {
+    transition: opacity 320ms var(--ease-out);
   }
 
   .expander.closing {
@@ -990,53 +1027,52 @@
      * the in-flight transition instead of restarting it. */
   }
 
-  /* Hybrid reveal (2026-10-09): transition STRINGS static per data-cstate
-   * (open 200ms fade / 300ms travel; closing + swap 160/160ms) — the
-   * VALUES ride inline from the state machine. Curves are the existing
-   * tokens only: ease-out for fades, ease-drawer for content travel.
-   * Two-beat stagger = two static delays (header t=0, tracklist + footer
-   * +50ms), same durations — no per-row ladder, no --i dials. .glide
-   * carries the single travel layer (will-change); the beats fade
+  /* Hybrid reveal (2026-10-09; retune 0.16.15): transition STRINGS static
+   * per data-cstate (open 320ms fade / 380ms travel; closing mirrors it;
+   * swap reveals with the open strings) — the VALUES ride inline from the
+   * state machine. Curves are the existing tokens only: ease-out for
+   * fades, ease-drawer for content travel. Two-beat stagger = two static
+   * delays (header t=0, tracklist + footer +80ms opening; reversed on
+   * close), same 320ms durations — no per-row ladder, no --i dials.
+   * .glide carries the single travel layer (will-change); the beats fade
    * opacity-only. Reduced motion: the global kill switch zeroes these
-   * durations, and the machine mounts final values. */
+   * durations (320/380 content + ::before opacity alike), and the machine
+   * mounts final values. */
   .glide {
     will-change: transform, opacity;
   }
 
-  .glide[data-cstate="open"] {
-    transition:
-      opacity 200ms var(--ease-out),
-      transform 300ms var(--ease-drawer);
-  }
-
-  .glide[data-cstate="closing"],
+  .glide[data-cstate="open"],
   .glide[data-cstate="swap"] {
     transition:
-      opacity 160ms var(--ease-out),
-      transform 160ms var(--ease-drawer);
+      opacity 320ms var(--ease-out),
+      transform 380ms var(--ease-drawer);
   }
 
-  .glide[data-cstate="open"] .beat-h {
-    transition: opacity 200ms var(--ease-out);
+  .glide[data-cstate="closing"] {
+    transition:
+      opacity 320ms var(--ease-out),
+      transform 380ms var(--ease-drawer);
   }
 
-  .glide[data-cstate="open"] .beat-b {
-    transition: opacity 200ms var(--ease-out);
-    transition-delay: 50ms;
-  }
-
-  .glide[data-cstate="closing"] .beat-h,
-  .glide[data-cstate="closing"] .beat-b {
-    transition: opacity 160ms var(--ease-out);
-  }
-
+  .glide[data-cstate="open"] .beat-h,
   .glide[data-cstate="swap"] .beat-h {
-    transition: opacity 160ms var(--ease-out);
+    transition: opacity 320ms var(--ease-out);
   }
 
+  .glide[data-cstate="open"] .beat-b,
   .glide[data-cstate="swap"] .beat-b {
-    transition: opacity 160ms var(--ease-out);
-    transition-delay: 50ms;
+    transition: opacity 320ms var(--ease-out);
+    transition-delay: 80ms;
+  }
+
+  .glide[data-cstate="closing"] .beat-b {
+    transition: opacity 320ms var(--ease-out);
+  }
+
+  .glide[data-cstate="closing"] .beat-h {
+    transition: opacity 320ms var(--ease-out);
+    transition-delay: 80ms;
   }
 
   .panel {

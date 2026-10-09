@@ -557,7 +557,11 @@ answer to "where am I".
 - **Expanded panel:** 12px radius, 1px Glass Line, panel-bg tier with an
   art-derived gradient at 0.36 (dark) / 0.30 (light) alpha; 20px padding;
   structural-anchor shadow on its expander shell (never on the panel —
-  the shell must stay unclipped for the height animation).
+  the shell must stay unclipped for the height animation). *(Amended 2026-10-09:
+  the shadow moved to an `.expander::before` whose opacity rides the beat-b
+  value (+80ms opening / 0ms closing / +80ms swap, per data-cstate like the
+  beats), so it lands with the content instead of flashing at full weight;
+  geometry still follows the box via `inset: 0`, alphas untouched.)*
 - **Popovers/modals:** `panel-strong` near-opaque tier, 10–12px radius,
   popover-seat shadow; destructive confirmations render *inside* the glass
   (no native confirm — GTK dialogs are banned). **No native form widgets** in
@@ -863,7 +867,10 @@ not a global gap.
   declaration gave the 340×128 About card about 5px of edge travel and the 620×520
   import window a zoom. **The exit is the mirror on a shorter clock**: panel 150ms, dim
   190ms, and the lead reversed, because going out the object leaves first and then the
-  world brightens.
+  world brightens. *(Standing exemption, 2026-10-09: the expanded-panel surface
+  is explicitly exempt — its exit equals its entrance (320ms fade / 380ms
+  travel, mirrored), because the panel is anchored disclosure, not a floating
+  dismissal.)*
 - **The exit is CSS, and that is the whole reason it exists.** An animated outro needs
   the surface to stay mounted for its length, and the obvious tools — `svelte/transition`
   (WAAPI) or a `setTimeout` hold — are outside the reach of the global

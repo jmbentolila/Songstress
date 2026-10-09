@@ -173,7 +173,7 @@
   //   * the outgoing panel becomes a GHOST row at its own row — a fresh
   //     ExpandedPanel mount at the measured height (seamless hand-off:
   //     first paint identical, content at final values) playing the plain
-  //     closeDur(H)-scaled close + 160ms content fade, nothing else;
+  //     growDur(H)-scaled close + mirrored 320/380ms content fade, nothing else;
   //   * the host flips to the destination at t=0 (fresh mount + grow);
   //   * only the VIEW'S TRAVEL waits: a per-section glide queue drains
   //     when the ghost list is empty (drainGlide) — the travel is the one
@@ -637,8 +637,8 @@
             {#if ghostAlbum}
               <!-- Ghost: the outgoing panel of an in-flight cross-row
                    switch. Fresh mount at the measured height (seamless
-                   hand-off), plain closeDur(H) close + 160ms content
-                   fade, nothing else. -->
+                   hand-off), plain growDur(H) close + mirrored 320/380ms
+                   content fade, nothing else. -->
               <div
                 class="panel-slot"
                 class:closed={phaseMap[row.id] === "closed"}
@@ -788,7 +788,7 @@
    * rows on either side sit at the STANDARD 20px gap instead of 20 + 0 +
    * 20. The static durations here are the pre-JS fallback only: the panel
    * overwrites them INLINE with the actual move duration every phase
-   * change (syncSpacing: scaled growDur/closeDur, same var(--ease-out)),
+   * change (syncSpacing: scaled growDur 320–500ms, same var(--ease-out)),
    * a frame before it flips the slot's class — so the panel's top edge
    * glides with the shrinking/growing box and the row below settles into
    * the standard gap without a jump at either end. */
