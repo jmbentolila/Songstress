@@ -150,13 +150,10 @@ html[data-de="gnome"][data-theme="dark"] {
      intercept .408 → .404 (0.5 − .193/2 = .4035, same symmetry rule). */
   --tex: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='480' height='480'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' seed='3'/%3E%3CfeColorMatrix type='matrix' values='.193 0 0 0 .404 .193 0 0 0 .404 .193 0 0 0 .404 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --tex-blend: soft-light;
-  /* Dated override 2026-10-10 (Aina dark-shadow retune, GNOME-dark only):
-     the near-black ground rgb(10,10,13) eats the 0.45 falloff, leaving only
-     the core visible as a hard band — so the shadow goes wider + lighter
-     here (peak 0.45→0.30, blur 32→56, offset 10→16) while the border
-     carries the edge. KDE dark keeps 0 10px 32px rgba(0,0,0,0.45); light
-     keeps 0 10px 32px rgba(0,0,0,0.16) — both untouched below. */
-  --shadow: 0 16px 56px rgba(0, 0, 0, 0.30);
+  /* Dated 2026-10-10 (panel shadow off, GNOME-dark): the 0.30 override is
+     reverted — it existed only for the panel, and the panel no longer
+     casts here (see ExpandedPanel.svelte). Falls back to base dark
+     0 10px 32px rgba(0,0,0,0.45), which the remaining dark surfaces use. */
 }
 html[data-de="gnome"][data-theme="light"] {
   --bg-grid: rgb(246, 246, 249);

@@ -1014,6 +1014,13 @@
     transition: opacity 320ms var(--ease-out);
   }
 
+  /* Owner-approved 2026-10-10, GNOME-dark only: the expanded panel casts
+     NO shadow here (path intact — inset, radius, --shadow-op plumbing and
+     per-cstate delays untouched, so a future return is one line). */
+  :global(html[data-de="gnome"][data-theme="dark"]) .expander::before {
+    box-shadow: none;
+  }
+
   /* Owner call 2026-10-10: the shadow fades in AS the content moves, no
      delay (was +80ms with beat-b; the beat stagger stays content-only). */
   .expander[data-cstate="open"]::before,

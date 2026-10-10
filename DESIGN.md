@@ -301,7 +301,10 @@ supporting roles: anchoring physical objects, and casting light.
 ### Shadow Vocabulary
 - **Structural anchor** (`box-shadow: 0 10px 32px rgba(0,0,0,0.45)` dark /
   `0.16` light): expanded panels and their expander shell — the one
-  surface that must read as an object placed on the glass.
+  surface that must read as an object placed on the glass. *(GNOME-dark
+  exception 2026-10-10: the panel casts nothing there — the lifted ground
+  left the shadow reading sharp, so the surface sits on its 1px hairline
+  alone; the 0.30 token is reverted with it. KDE/light unchanged.)*
 - **Cover mass** (`0 4px 18px rgba(0,0,0,0.35)`): album artwork (grid
   tiles, expanded art, playbar thumbnail) — gives each cover physical
   weight without lifting it.
@@ -572,6 +575,9 @@ answer to "where am I".
   above chrome 17,17,22 by design, hairline reads as edge.
   KDE dark stays `0 10px 32px rgba(0,0,0,0.45)`, light stays
   `0 10px 32px rgba(0,0,0,0.16)`.)*
+  *(Amended 2026-10-10, GNOME-dark scope only: panel shadow OFF — ground
+  rgb(22,22,28) kept, hairline as-is on all four sides, edge-shadows
+  softened to top 0.10 / shelf 0.14 (lengths unchanged).)*
 - **Popovers/modals:** `panel-strong` near-opaque tier, 10–12px radius,
   popover-seat shadow; destructive confirmations render *inside* the glass
   (no native confirm — GTK dialogs are banned). **No native form widgets** in

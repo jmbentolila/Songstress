@@ -279,6 +279,17 @@
         100% 34px no-repeat;
   }
 
+  /* GNOME-dark softens, never removes: on the lifted ground the dark-tuned
+     alphas read sharp. Dated 2026-10-10; lengths 26px/34px unchanged, light
+     and KDE values untouched. */
+  :global(html[data-de="gnome"][data-theme="dark"]) .edge-shadows {
+    background:
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.10), transparent 26px) top /
+        100% 26px no-repeat,
+      linear-gradient(to top, rgba(0, 0, 0, 0.14), transparent 34px) bottom /
+        100% 34px no-repeat;
+  }
+
   /* album-area backdrop at its own alpha; chrome layers sit at theirs. */
   .stage::before {
     content: "";
