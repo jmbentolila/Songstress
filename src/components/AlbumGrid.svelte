@@ -108,9 +108,42 @@
         resetScroll();
         switchEnter = true;
         switchTimers.push(setTimeout(() => (switchEnter = false), SWITCH_ENTER_MS));
+        // Stale-quad flush (2026-10-10): unmounting an open panel mid-close
+        // can leave its last-painted quad behind on small-damage commits
+        // (tiny tab swaps don't invalidate the region). Nudge .grid's
+        // outline on for one frame and off the next — transparent, so zero
+        // pixels ever change, but both toggles invalidate paint and the
+        // re-raster comes from the live tree (no panel). RM-safe (instant
+        // sets, sub-perceptual non-motion) and idempotent under re-clicks.
+        flushGrid();
       }, SWITCH_EXIT_MS),
     );
   });
+
+  // One-shot paint invalidator, see above. Double rAF: arm the damage on
+  // the frame after the flip flush paints, release it the frame after that.
+  // A transparent outline paints nothing but invalidates paint twice, so
+  // any retained quad of the unmounted rows re-rasters from the live tree.
+  // Inline (a scoped class trips unused-selector — nothing references it in
+  // markup); inset keeps it inside layout. rAF ids ride a plain field (not
+  // switchTimers — a re-click's clearSwitchTimers must never strand the
+  // outline ON).
+  let flushRaf1 = 0;
+  let flushRaf2 = 0;
+  function flushGrid() {
+    cancelAnimationFrame(flushRaf1);
+    cancelAnimationFrame(flushRaf2);
+    const grid = document.querySelector<HTMLElement>(".grid");
+    if (!grid) return;
+    flushRaf1 = requestAnimationFrame(() => {
+      grid.style.outline = "1px solid transparent";
+      grid.style.outlineOffset = "-1px";
+      flushRaf2 = requestAnimationFrame(() => {
+        grid.style.removeProperty("outline");
+        grid.style.removeProperty("outline-offset");
+      });
+    });
+  }
 
   // All Artists: alphabetical by artist (sort_name), then year ascending
   // within each artist. Artist view: year ascending (store order). Reads
@@ -764,6 +797,10 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
+  /* (Stale-quad flush lives in flushGrid via inline outline — a scoped CSS
+     class would trip the unused-selector check since nothing references it
+     in markup. Outlines never affect hit-testing, so it stays paint-only.) */
 
   /* The switch entrance: the same rise-and-fade path as boot, but the
      tens-of-times-a-day dials — 260 ms, a 40 ms diagonal step capped at
