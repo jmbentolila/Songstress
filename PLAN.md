@@ -6014,3 +6014,7 @@ Expanded panel casts nothing on GNOME-dark: `:global(html[data-de="gnome"][data-
 ### GNOME-dark ground REVERTED (2026-10-10, owner call, interruption-resumed → panel-motion, no bump)
 
 Ground lift rgb(10,10,13) → rgb(22,22,28) reverted same session per owner call: with the panel shadow gone the lift's shadow job is moot and the owner wants the dark room back. One token back to rgb(10,10,13) in the gnome-dark block; app.css comment + DESIGN Cards bullet amended to reverted status with date. Mare's edits were complete in-tree at interruption; Ciel ran the gates green and committed. No version change per standing owner order.
+
+### GNOME-dark shelf clip-ease (2026-10-10 round-2, Aina spec → panel-motion, no bump)
+
+Owner strip ruling (1 playbar flat stays, 2 hairline stays, 3 shelf GOES, 4 grid stays): the shelf read as a band beside the bright 2px hairline (Ciel: 1 level of shelf vs 31-39 hairline), so the bottom layer is now a 12px clip-ease at 0.05 — half the alpha, one-third the length, sub-band-threshold, anti-alias of the hairline rather than a shelf. Named edge stays the playbar's border-top hairline (untouched); top layer kept (no hairline at the drag strip, hard cut would return). GNOME-dark block + comment only; base/light/KDE, geometry, motion, RM untouched, no new tokens. Live-probed: top 0.07/26px, bottom 0.05/12px. Gates green. No version change per standing owner order.

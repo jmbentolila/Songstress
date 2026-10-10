@@ -279,15 +279,24 @@
         100% 34px no-repeat;
   }
 
-  /* GNOME-dark softens, never removes: on the lifted ground the dark-tuned
-     alphas read sharp. Dated 2026-10-10; lengths 26px/34px unchanged, light
-     and KDE values untouched. */
+  /* Dated 2026-10-10 round-2 (Aina spec, owner strip ruling: 1 playbar flat
+     bg stays, 2 playbar hairline stays, 3 shelf shadow GOES, 4 grid stays).
+     The shelf read as a band because it sat beside the bright 2px hairline
+     (Ciel: 1 level of shelf vs 31-39 hairline); bottom is now a 12px
+     clip-ease at 0.05 — half the alpha, one-third the length, sub-band-
+     threshold, reading as anti-alias of the hairline rather than a shelf.
+     The NAMED edge under sliding rows is the playbar's own border-top
+     hairline (var(--border), PlayBar.svelte, strip 2, untouched); the 12px
+     fade only rounds the scroll cut so the hard clip line does not come
+     back (standing constraint). Top layer kept: the window-top clip has no
+     hairline beside it, so removing the top fade would expose a hard cut
+     at the drag strip. Lengths otherwise unchanged; light/KDE untouched. */
   :global(html[data-de="gnome"][data-theme="dark"]) .edge-shadows {
     background:
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.10), transparent 26px) top /
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.07), transparent 26px) top /
         100% 26px no-repeat,
-      linear-gradient(to top, rgba(0, 0, 0, 0.14), transparent 34px) bottom /
-        100% 34px no-repeat;
+      linear-gradient(to top, rgba(0, 0, 0, 0.05), transparent 12px) bottom /
+        100% 12px no-repeat;
   }
 
   /* album-area backdrop at its own alpha; chrome layers sit at theirs. */
