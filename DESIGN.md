@@ -950,13 +950,19 @@ not a global gap.
   default belongs, and following the OS is the default for a desktop player
   (user decision, 2026-08-31). Segment order is also the group's arrow /
   Home / End order, so Home lands on the default.
-- **Checkbox** (`components/Toggle.svelte`, the only checkbox in the app — four
-  sidebar call sites and the equalizer popover; the popover's bare native
-  checkbox was the last widget outside the system): 16px rounded-square
-  box (5px radius — deliberate, below the control tier for a 16px object):
-  hover-wash fill + Glass Line at rest, accent fill + check in
-  `--accent-text` (luminance-aware: white on dark accents, dark on light
-  ones) when checked; 160ms fill/check-in; focus = inset accent ring.
+- **Switch** (`components/Toggle.svelte`, the only switch in the app — four
+  sidebar call sites and the equalizer popover; it replaces the 16px
+  rounded-square checkbox, 2026-10-10): track + sliding thumb, control-left
+  / label-right, whole row the label target. Row tier 38x22px track
+  (`--radius-pill`), 16px thumb, 3px inset, 16px travel; compact tier
+  (EQ popover) 32x18px, 12px thumb, 14px travel; track flex-none in both.
+  OFF = hover-wash fill + Glass Line with dim thumb (hover to text); ON =
+  accent track + thumb in `--accent-text` (luminance-aware: white on dark
+  accents, dark on light ones). Motion is transform + background-color
+  160ms `var(--ease-out)`; focus = inset accent ring
+  (`input:focus-visible + .track`, 2px, offset −2px); reduced motion flips
+  instant (`transition: none`, same contract as ROW_FADE). Native input
+  stays hidden in DOM with `role="switch"` — no AT re-implementation.
 - **Color picker:** preset swatches are 20px circles in a 6-track grid,
   `gap: 14px 0` — 14px rows because the selection outline reaches 4px past a
   dot, and **zero column gap** because the tracks are fixed 20px and

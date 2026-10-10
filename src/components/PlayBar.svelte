@@ -1601,6 +1601,12 @@
      when the curve diverged) without pretending to be a picker. */
   .eq-pop .preset {
     margin-left: auto;
+    /* A narrow header squeezes the preset name, never the switch track:
+       the name ellipsizes, the track is flex-none. */
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: 13px;
     color: var(--text-dim);
   }
