@@ -301,6 +301,22 @@ html[data-window="maximized"] .app {
   box-shadow: none;
 }
 
+/* ── GNOME opaque frame (2026-10-10, Aina spec, owner-approved) ────────────
+   GNOME law is opaque + grain, translucency KDE-only — and the 20px
+   transparent margin plus the downward-pooling --shadow-window seat leak on
+   all four sides (live audit: 20px margin every side, BODY at every corner
+   probe; Ciel pixels guilty the bottom at 17–27px blend vs ~10px elsewhere).
+   So on GNOME the windowed frame converges to maximized geometry: margin
+   AND seat both gone, the v1 ring (border + -1px outline, above) plus the
+   extension's 1px border carry every edge. Same values as the gate, so
+   maximized behavior is unchanged by construction; KDE (any data-de other
+   than gnome) keeps margin + two-layer seat exactly as-is. Both themes,
+   both windowed states; reduced-motion, light/KDE tokens, curves untouched. */
+html[data-de="gnome"] .app {
+  inset: 0;
+  box-shadow: none;
+}
+
 /* Bottom-corner resize zones hide maximized with the margin: the footer
    spans the window edges there and a resize request would unmaximize
    into a jump. PlayBar-owned zones, gated here next to the margin rule. */

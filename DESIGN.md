@@ -321,7 +321,10 @@ supporting roles: anchoring physical objects, and casting light.
   the v1 hairline — hence the outline). Maximized/tiled windows drop margin
   and seat (`html[data-window="maximized"]`); the radius still follows
   `--radius-window` untouched, and the owner-tuned alphas (0.8/0.7/0.36/0.30)
-  are unchanged.
+  are unchanged. *(Amended 2026-10-10: the GNOME seat is dropped — on
+  `html[data-de="gnome"]` `.app` runs `inset: 0; box-shadow: none`, so the
+  windowed frame converges to maximized geometry and the v1 ring carries the
+  edge; KDE seat kept exactly as-is.)*
 - **Cast light** (linear gradients, not shadows): 26px @ 0.14 from the
   window top and 34px @ 0.20 from the playbar shelf, onto the grid —
   softened to 0.09 / 0.12 in light mode, where the dark-tuned alphas
