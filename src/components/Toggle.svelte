@@ -96,9 +96,14 @@
     height: 18px;
   }
 
+  /* top: 2px, not 3px: app.css sets global border-box, so the 22px track's
+     padding box is 20px after the 1px border — 2px + 16px thumb + 2px
+     centers exactly (top: 3px rode 1px high with the gap underneath).
+     Same arithmetic covers the compact tier (18px → 16px padding box,
+     2+12+2), so both tiers share this rule — do not "fix" it back. */
   .toggle .thumb {
     position: absolute;
-    top: 3px;
+    top: 2px;
     left: 3px;
     width: 16px;
     height: 16px;
