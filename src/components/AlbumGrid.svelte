@@ -100,6 +100,9 @@
     leaving = true;
     switchTimers.push(
       setTimeout(() => {
+        // Stale-cover (2026-10-10): measure the open panel's rect BEFORE
+        // the flush destroys it (see coverStale below).
+        const coverRect = measureCover();
         displayedArtistId = next;
         leaving = false;
         // Scroll + entrance start with the new rows (Sidebar's select()
@@ -108,9 +111,64 @@
         resetScroll();
         switchEnter = true;
         switchTimers.push(setTimeout(() => (switchEnter = false), SWITCH_ENTER_MS));
+        coverStale(coverRect);
       }, SWITCH_EXIT_MS),
     );
   });
+
+  // Retained raster cover (see above): a panel unmounted mid-close can keep
+  // its last-painted quad behind on small-damage commits, and it clears if
+  // and only if real pixels repaint over it (a transparent no-op is elided
+  // — the 0.16.17 flush proved that). So cover the old panel's region with
+  // one frame of the grid's own background, then release: both paints are
+  // real (opaque-ish, guaranteed re-raster from the live panel-less tree),
+  // the color matches the surroundings (sub-perceptual for a frame), and a
+  // retained PROMOTED layer would still show through above it — which is
+  // exactly how this discriminates damage (gone) from layer holds (persists).
+  // rAF ids ride plain fields so re-clicks cancel cleanly; a re-click also
+  // hides any live cover first (never strand it ON). RM-safe: instant sets.
+  let coverRaf1 = 0;
+  let coverRaf2 = 0;
+  let coverEl = $state<HTMLElement | null>(null);
+  // Grid-relative rect of the HOST panel slot + shadow skirt, or null.
+  // Host-only (data-album-id match): ghosts have their own lifecycle and
+  // collapsed memory slots (h≈0) are skipped by the height gate.
+  function measureCover(): { top: number; left: number; width: number; height: number } | null {
+    if (!albumHostId) return null;
+    const slot = document.querySelector<HTMLElement>(
+      `.panel-slot[data-album-id="${CSS.escape(albumHostId)}"]`,
+    );
+    const grid = document.querySelector<HTMLElement>(".grid");
+    if (!slot || !grid) return null;
+    const r = slot.getBoundingClientRect();
+    const g = grid.getBoundingClientRect();
+    if (r.height < 2) return null;
+    const left = Math.max(0, r.left - g.left - 64);
+    return {
+      top: Math.max(0, r.top - g.top - 8),
+      left,
+      width: Math.min(grid.clientWidth - left, r.width + 128),
+      height: r.height + 72,
+    };
+  }
+  function coverStale(rect: { top: number; left: number; width: number; height: number } | null) {
+    cancelAnimationFrame(coverRaf1);
+    cancelAnimationFrame(coverRaf2);
+    const el = coverEl;
+    if (!el) return;
+    el.style.display = "none";
+    if (!rect) return;
+    coverRaf1 = requestAnimationFrame(() => {
+      el.style.top = `${Math.max(0, rect.top)}px`;
+      el.style.left = `${Math.max(0, rect.left)}px`;
+      el.style.width = `${rect.width}px`;
+      el.style.height = `${rect.height}px`;
+      el.style.display = "block";
+      coverRaf2 = requestAnimationFrame(() => {
+        el.style.display = "none";
+      });
+    });
+  }
 
   // All Artists: alphabetical by artist (sort_name), then year ascending
   // within each artist. Artist view: year ascending (store order). Reads
@@ -677,6 +735,9 @@
         {/each}
       {/each}
     {/if}
+    <!-- Stale-cover overlay (see coverStale): last child so it paints above
+         rows when shown; display:none at rest. -->
+    <div class="stale-cover" bind:this={coverEl} aria-hidden="true"></div>
   </div>
 </main>
 
@@ -750,6 +811,9 @@
     display: flex;
     flex-direction: column;
     gap: var(--gap);
+    /* Relative (z-auto): containing block for the .stale-cover overlay.
+     * No layout change, no stacking context, no paint of its own. */
+    position: relative;
     /* The artist-switch exit (see the switch bridge in <script>): the whole
        grid sinks + fades as one surface — transform/opacity only, compositor.
        A transition so rapid re-clicks retarget from the presentation value.
@@ -763,6 +827,22 @@
   .grid.leaving {
     opacity: 0;
     transform: translateY(10px);
+  }
+
+  /* Retained-raster cover (see coverStale): grid-background paint over the
+     old panel's region for exactly one frame post-flip, then released.
+     Hidden (display:none) at rest so it costs nothing and paints nothing;
+     geometry rides inline per flip. pointer-events:none: never hit-tests. */
+  .stale-cover {
+    position: absolute;
+    display: none;
+    background: var(--bg-grid);
+    pointer-events: none;
+  }
+
+  /* Never part of the arrival cascade (display:none at rest anyway). */
+  .grid.enter > .stale-cover {
+    animation: none;
   }
 
   /* The switch entrance: the same rise-and-fade path as boot, but the
