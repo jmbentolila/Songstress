@@ -6010,3 +6010,7 @@ GNOME-dark --bg-grid rgb(10,10,13) → rgb(22,22,28) (one token, gnome-dark bloc
 ### GNOME-dark shadow off (2026-10-10, Aina verdict, owner-approved → panel-motion, no bump)
 
 Expanded panel casts nothing on GNOME-dark: `:global(html[data-de="gnome"][data-theme="dark"]) .expander::before { box-shadow: none }` (path intact — inset, radius, --shadow-op plumbing, per-cstate delays — one-line return). The 0.30 token reverted with it (falls back to base dark 0 10px 32px 0.45, still used by remaining surfaces); ground 22 stays; hairline as-is on all four sides; edge-shadows softened GNOME-dark only (top 0.14→0.10, shelf 0.20→0.14, lengths 26/34px unchanged; light/KDE untouched). Cover-mass/popover literals, --shadow-window, motion strings, ghost/close/RM all untouched, no JS behavior change. Live-probed on GNOME-dark: ::before none, root --shadow base fallback, edge 0.1/0.14, hairline 1px. Gates green. No version change per standing owner order.
+
+### GNOME-dark ground REVERTED (2026-10-10, owner call, interruption-resumed → panel-motion, no bump)
+
+Ground lift rgb(10,10,13) → rgb(22,22,28) reverted same session per owner call: with the panel shadow gone the lift's shadow job is moot and the owner wants the dark room back. One token back to rgb(10,10,13) in the gnome-dark block; app.css comment + DESIGN Cards bullet amended to reverted status with date. Mare's edits were complete in-tree at interruption; Ciel ran the gates green and committed. No version change per standing owner order.
