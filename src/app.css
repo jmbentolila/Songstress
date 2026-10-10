@@ -129,7 +129,10 @@ html[data-theme="light"] {
    App shell sets from `desktop_environment` ("gnome" on GNOME-derived
    sessions — every other desktop stays glass). */
 html[data-de="gnome"][data-theme="dark"] {
-  --bg-grid: rgb(10, 10, 13);
+  /* Dated 2026-10-10 (aina-ground, owner-approved first step): ground lifts
+     so the 0.30 shadow shows real falloff, hairline reads as edge, grid one
+     breath above chrome 17,17,22 by design. rgb(10,10,13) → rgb(22,22,28). */
+  --bg-grid: rgb(22, 22, 28);
   --bg-chrome: rgb(17, 17, 22);
   --panel-bg: rgb(32, 32, 40);
   --panel-bg-strong: rgb(26, 26, 33);

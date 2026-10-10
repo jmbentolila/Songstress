@@ -566,6 +566,10 @@ answer to "where am I".
   core visible on the rgb(10,10,13) ground, reading as a hard band — so the
   token reads `0 16px 56px rgba(0,0,0,0.30)` there (peak 0.45→0.30, blur
   32→56, offset 10→16) while the 1px Glass Line border carries the edge.
+  Ground lifts so the shadow shows real falloff: GNOME-dark `--bg-grid`
+  rgb(10,10,13) → rgb(22,22,28) (dated 2026-10-10, aina-ground first step,
+  owner-approved as the start of an iterative climb) — grid one breath
+  above chrome 17,17,22 by design, hairline reads as edge.
   KDE dark stays `0 10px 32px rgba(0,0,0,0.45)`, light stays
   `0 10px 32px rgba(0,0,0,0.16)`.)*
 - **Popovers/modals:** `panel-strong` near-opaque tier, 10–12px radius,
