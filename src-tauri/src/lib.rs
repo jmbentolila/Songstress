@@ -2074,19 +2074,16 @@ fn get_music_folders(state: tauri::State<'_, AppState>) -> Result<Vec<String>, S
         .collect())
 }
 
-/// Add a music folder and rescan. `path: None` opens the system picker
-/// (starting at the most recent root). Returns the updated folder list, or
-/// None when the user cancelled the picker.
+/// Add a music folder and rescan. Always opens the system picker
+/// (starting at the most recent root) — no caller-supplied path, so a
+/// compromised renderer cannot add an arbitrary root. Returns the updated
+/// folder list, or None when the user cancelled the picker.
 #[tauri::command]
 async fn add_music_folder(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
-    path: Option<String>,
 ) -> Result<Option<Vec<String>>, String> {
-    let picked = match path {
-        Some(p) => Some(p),
-        None => pick_directory(music_root(&state), "Add Music Folder").await?,
-    };
+    let picked = pick_directory(music_root(&state), "Add Music Folder").await?;
     let Some(picked) = picked else {
         return Ok(None); // picker cancelled — no changes, no rescan
     };

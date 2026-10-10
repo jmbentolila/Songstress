@@ -142,14 +142,14 @@ export function openMusicFolders(): void {
   void loadMusicFolders();
 }
 
-/** Add a library root (kdialog picker when path is null) → persist + rescan.
+/** Add a library root (always via the backend picker) → persist + rescan.
  *  Returns the updated folder list, or null if the user cancelled the picker. */
 export async function addMusicFolderRoot(): Promise<void> {
   if (scanner.running) return;
   begin("folder");
   try {
-    // path = null ⇒ backend opens kdialog starting at the primary root.
-    const updated = await invoke<string[] | null>("add_music_folder", { path: null });
+    // No path arg: the backend always opens the picker at the primary root.
+    const updated = await invoke<string[] | null>("add_music_folder");
     if (updated) ui.musicFolders = updated;
   } catch (err) {
     // validate_new_root rejections (duplicate / nested root) are user-facing,
