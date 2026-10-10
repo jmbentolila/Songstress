@@ -562,6 +562,12 @@ answer to "where am I".
   value (+80ms opening / 0ms closing / +80ms swap, per data-cstate like the
   beats), so it lands with the content instead of flashing at full weight;
   geometry still follows the box via `inset: 0`, alphas untouched.)*
+  *(Amended 2026-10-10, GNOME-dark scope only: the 0.45 peak kept just its
+  core visible on the rgb(10,10,13) ground, reading as a hard band — so the
+  token reads `0 16px 56px rgba(0,0,0,0.30)` there (peak 0.45→0.30, blur
+  32→56, offset 10→16) while the 1px Glass Line border carries the edge.
+  KDE dark stays `0 10px 32px rgba(0,0,0,0.45)`, light stays
+  `0 10px 32px rgba(0,0,0,0.16)`.)*
 - **Popovers/modals:** `panel-strong` near-opaque tier, 10–12px radius,
   popover-seat shadow; destructive confirmations render *inside* the glass
   (no native confirm — GTK dialogs are banned). **No native form widgets** in
