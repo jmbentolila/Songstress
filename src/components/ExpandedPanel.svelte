@@ -987,8 +987,9 @@
      WebKitGTK animate them on different clocks).
      Retune 0.16.15 (dated DESIGN.md Cards amendment): the shadow moved to
      a ::before whose opacity rides the beat-b value (--shadow-op, inline;
-     delay +80ms opening / 0ms closing / +80ms swap, per data-cstate like
-     the beats). Appearance is opacity-only — no floating unattached
+     delay 0ms on open+swap+closing (owner call 2026-10-10: the shadow
+     rides with no delay — the content beats keep their own 0/+80ms
+     stagger). Appearance is opacity-only — no floating unattached
      shadow, no shadow animation beyond opacity, --shadow alphas untouched. */
   .expander {
     position: relative;
@@ -1013,10 +1014,12 @@
     transition: opacity 320ms var(--ease-out);
   }
 
+  /* Owner call 2026-10-10: the shadow fades in AS the content moves, no
+     delay (was +80ms with beat-b; the beat stagger stays content-only). */
   .expander[data-cstate="open"]::before,
   .expander[data-cstate="swap"]::before {
     transition: opacity 320ms var(--ease-out);
-    transition-delay: 80ms;
+    transition-delay: 0ms;
   }
 
   .expander[data-cstate="closing"]::before {
