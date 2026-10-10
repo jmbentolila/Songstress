@@ -389,7 +389,16 @@ drift rising `−1.27 → −1.43` RGB — still 0.5%-level and invisible.
 The texture is a BACKGROUND layer on the field itself — never an overlay on the
 surface — so tiles, captions and glyphs sit on it untouched. KDE keeps glass,
 and its old 2% `.glass::after` banding garnish is switched off on GNOME (no blur,
-no banding, and it sat over text). The grain dial is the two `values` slopes in
+no banding, and it sat over text). Dated extension 2026-10-09 (shadow-band
+tooth): the expanded panel's `box-shadow` blur ramp banded near black where
+the field tooth dies, so the panel shell carries the same `--tex` tooth on a
+`.veil` layer mixed with the page beneath (`mix-blend-mode: var(--tex-blend)`)
+over the band's extent (sides 56px, bottom 104px, top 0) — below panel content
+by tree order, opacity riding the shadow, masked to the falloff. Same tooth,
+same tokens, no new dials; if it proves too fine the amplitude call is the
+owner's. Known price, accepted: paint outside every in-flow box extends the
+scrollable region, so an open last-row panel adds ~79px of scroll room (which
+is also what lets its shadow fully show at list end instead of clipping). The grain dial is the two `values` slopes in
 the tile's SVG; the intercepts are `0.5 − slope/2` and the filter needs
 `color-interpolation-filters='sRGB'` — see the block in `app.css`.
 

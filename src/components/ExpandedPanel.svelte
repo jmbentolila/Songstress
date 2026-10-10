@@ -768,6 +768,12 @@
 <!-- data-cstate + --shadow-op: the ::before shell shadow takes its
      transition delay from the state and its opacity value inline. -->
 <div class="expander" bind:this={expanderEl} data-cstate={cstate} style:--shadow-op={shadowOp} class:closed={phase === "closed"} class:closing={phase === "closing"}>
+  <!-- .veil: shadow-band dither tooth (see CSS) — direct child of the
+       expander, tree-before .inner so it sits below panel content. It
+       MUST live here, not inside .inner: .inner clips overflow, which
+       would cut the negative-inset band. Opacity inherits --shadow-op
+       from .expander, no JS of its own. -->
+  <div class="veil" aria-hidden="true"></div>
   <div class="inner" bind:this={innerEl} style:height={initInnerH}>
     <!-- .glide: the ONE content-motion wrapper (see the state machine).
          Values ride inline; transition strings come from data-cstate. -->
@@ -989,17 +995,32 @@
      a ::before whose opacity rides the beat-b value (--shadow-op, inline;
      delay +80ms opening / 0ms closing / +80ms swap, per data-cstate like
      the beats). Appearance is opacity-only — no floating unattached
-     shadow, no shadow animation beyond opacity, --shadow alphas untouched. */
+     shadow, no shadow animation beyond opacity, --shadow alphas untouched.
+     Dither 0.16.17: the .veil tooth below reaches the measured band via
+     negative inset (sides -56px, bottom -104px; top 0). That paint lives
+     outside every in-flow box, so when an open panel sits on the LAST row
+     it extends the scrollable region by up to ~104px — transient (only
+     while that panel is open) and accepted: the alternatives are worse
+     (overflow:clip + clip-margin tried and reverted — clip-margin is
+     unsupported on this WebKitGTK, and bare clip cuts the shadow itself;
+     padding + negative margins do NOT unscoll in-flow overflow, so they
+     buy nothing). Collapsed hosts carry no halo (veil opacity rides the
+     shadow to 0). Static duration here is the pre-JS fallback only:
+     syncSpacing() owns margin-bottom inline. */
   .expander {
     position: relative;
     margin-bottom: 4px;
     border-radius: var(--radius-panel);
-    /* The 4px shadow room joins the animation (same clock as the height)
-     * so the row below the panel never jumps when the state settles.
-     * Static duration here is the pre-JS fallback only: syncSpacing()
-     * overwrites it inline with the actual move duration every phase
-     * change (scaled growDur, 320–500ms). */
     transition: margin-bottom 360ms var(--ease-out);
+  }
+
+  .expander.closing {
+    margin-bottom: 0;
+    transition: margin-bottom 280ms var(--ease-out);
+  }
+
+  .expander.closed {
+    margin-bottom: 0;
   }
 
   .expander::before {
@@ -1023,18 +1044,74 @@
     transition: opacity 320ms var(--ease-out);
   }
 
-  .expander.closing {
-    margin-bottom: 0;
-    transition: margin-bottom 280ms var(--ease-out);
+  /* Shadow-band dither (2026-10-09, Finding 2): the box-shadow blur ramp
+   * quantizes into tens-of-px-wide steps near black (measured 4-level ramp
+   * over ~100px below the panel; the soft-light grid tooth dies on black,
+   * so the grid's own grain can't break it). .veil lays the SAME --tex
+   * tooth over the band via mix-blend-mode (mean-safe soft-light/multiply
+   * against the page beneath, so steps break up instead of banding).
+   * Content discipline holds: the veil is tree-ordered before .inner and
+   * .inner is lifted with position:relative (NO z-index anywhere, so no
+   * chrome stacking audit is owed) — tooth never sits over tracks/text,
+   * only over the shadow band and whatever the shadow itself darkens.
+   * Coverage comes from negative inset (sides -56px, bottom -104px for the
+   * measured tail; top 0 spares the row above) — the only way to reach
+   * paint outside every in-flow box. Price: a ~104px transient scroll
+   * extension when an open panel sits on the last row (see .expander
+   * note). A soft radial mask confines the tooth to the falloff (values
+   * estimated blind — owner eyeball judges seams). KDE resolves --tex to
+   * none: empty veil, zero change. Opacity rides --shadow-op with the
+   * shadow (no orphan tooth; RM final via kill-switch-covered strings).
+   * Tried and reverted: overflow:clip + clip-margin (clip-margin is
+   * unsupported on this WebKitGTK; bare clip cuts the shadow itself), and
+   * padding + negative margins (do NOT unscoll in-flow overflow).
+   * Amplitudes are the standing tokens — if the tooth proves too fine,
+   * that dial is the owner's (see DESIGN.md Matte Rule note). */
+  .veil {
+    position: absolute;
+    top: 0;
+    right: -56px;
+    bottom: -104px;
+    left: -56px;
+    background-image: var(--tex);
+    mix-blend-mode: var(--tex-blend);
+    -webkit-mask-image: radial-gradient(
+      120% 105% at 50% 36%,
+      #000 60%,
+      transparent 82%
+    );
+    mask-image: radial-gradient(
+      120% 105% at 50% 36%,
+      #000 60%,
+      transparent 82%
+    );
+    pointer-events: none;
+    opacity: var(--shadow-op, 1);
+    transition: opacity 320ms var(--ease-out);
   }
 
-  .expander.closed {
-    margin-bottom: 0;
+  .expander[data-cstate="open"] .veil,
+  .expander[data-cstate="swap"] .veil {
+    transition: opacity 320ms var(--ease-out);
+    transition-delay: 80ms;
   }
+
+  .expander[data-cstate="closing"] .veil {
+    transition: opacity 320ms var(--ease-out);
+  }
+
+  /* Retired 0.16.17: closing/closed geometry now lives in the single
+   * `.expander.closing, .expander.closed` rule above (margin:0; padding:0
+   * with base transitions) so padding and side margins animate on the same
+   * clock — a second transition shorthand here would reset them. */
 
   .inner {
     overflow: hidden;
     min-height: 0;
+    /* relative (z-auto): lifts panel content above the .veil tooth by tree
+     * order — no z-index, no stacking context, no chrome audit owed. Clip
+     * and height animation unaffected. */
+    position: relative;
     /* No static transition: every move is set inline per phase (320/280/
      * 140ms, cubic-bezier(0.22,1,0.36,1)) so a mid-motion click retargets
      * the in-flight transition instead of restarting it. */
