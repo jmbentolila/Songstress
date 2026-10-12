@@ -20,9 +20,12 @@ function prefersDark(): Theme {
 
 // The tile/row defaults sit in ONE place: load() seeds the store with them,
 // and resetAppearance restores exactly them — the two used to agree only by
-// the courtesy of the literal 180/36 appearing twice (owner note, 2026-09-03).
+// the courtesy of the literals appearing twice (owner note, 2026-09-03).
+// 2026-10-12: 46px sidebar rows per owner + Aina verdict; tile default back
+// to 180 same day per owner eyeball (147 round-trip: no single px reads
+// 5 across on every window).
 const DEFAULT_TILE_SIZE = 180;
-const DEFAULT_SIDEBAR_ROWS = 36;
+const DEFAULT_SIDEBAR_ROWS = 46;
 
 export const ui = $state({
   theme: load<"light" | "dark" | "system">("songstress.theme", "system"),

@@ -42,8 +42,10 @@
   /* A switch IS a row: it takes the app's row height, so a toggle sits on
      the same rhythm as the menu rows, the artist list and every .mrow/.irow
      around it — and the whole row, not just the track + caption, is the
-     click target. Control-left, label-right; the compact variant (equalizer
-     popover header) opts out of the row height. */
+     click target. Caption-left, track-right (2026-10-12 override); the
+     compact variant (equalizer popover header) opts out of the row height
+     AND keeps control-left (it is not a settings row). DOM order stays
+     input, track, caption for AT/focus order — only `order` moves paint. */
     display: flex;
     align-items: center;
     gap: 8px;
@@ -61,7 +63,17 @@
   }
 
   /* Long labels wrap under the row's min-height instead of pushing the
-     track out: the track is flex-none, the caption takes the shrink. */
+     track out: the track is flex-none, the caption takes the shrink — and
+     flex: 1 shoves the track to the trailing edge. The order flip is scoped
+     to :not(.small): the popover header keeps control-left. */
+  .toggle:not(.small) .caption {
+    order: 0;
+  }
+
+  .toggle:not(.small) .track {
+    order: 1;
+  }
+
   .toggle .caption {
     flex: 1;
     min-width: 0;

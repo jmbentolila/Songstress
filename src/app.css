@@ -1,6 +1,6 @@
 :root {
   --tile-size: 180px;
-  --sidebar-row-size: 36px;
+  --sidebar-row-size: 46px;
   --sidebar-width: 260px;
   --playbar-h: 84px; /* the straight-line default; the waveform overrides it */
   /* Playbar shelf + its followers ease on the progress-style toggle. The

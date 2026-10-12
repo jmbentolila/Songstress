@@ -87,26 +87,28 @@ spacing:
   gap: "20px"
   lg: "24px"
 components:
+  # 2026-10-12: menu-row heights 40px → 46px — menu rows follow
+  # --sidebar-row-size (one-row language, 2026-08-30), whose default is now 46px.
   menu-row:
     textColor: "{colors.chalk}"
     typography: "{typography.menu}"
     rounded: "{rounded.control}"
     padding: "0 10px"
-    height: "40px"
+    height: "46px"
   menu-row-hover:
     textColor: "{colors.chalk}"
     backgroundColor: "{colors.hover-wash}"
     typography: "{typography.menu}"
     rounded: "{rounded.control}"
     padding: "0 10px"
-    height: "40px"
+    height: "46px"
   menu-row-pressed:
     textColor: "{colors.chalk}"
     backgroundColor: "{colors.stock-orchid-wash}"
     typography: "{typography.menu}"
     rounded: "{rounded.control}"
     padding: "0 10px"
-    height: "40px"
+    height: "46px"
   search-field:
     textColor: "{colors.chalk}"
     backgroundColor: "{colors.hover-wash}"
@@ -280,9 +282,12 @@ album becomes a full-width panel row that pushes subsequent rows down.
 The Tile size slider offers only the nominal stops that actually change the
 column count for the measured grid width — one detent per layout — and its
 readout names the layout (`5 across`), never a pixel value
-that moves no tile.
-Sidebar artist rows are user-tunable height (28–52px, default 36px);
-menu rows are fixed 40px.
+that moves no tile. (2026-10-12: 147 tried as the 5-column stop at the 980
+reference width, reverted same day per owner eyeball — no single px reads
+5 across on every window.)
+Sidebar artist rows are user-tunable height (28–52px, default 46px, 2026-10-12);
+menu rows share `--sidebar-row-size` (46px at default — the old "fixed 40px"
+line predates the 2026-08-30 one-row language).
 
 The grid scroller clips at the playbar's top line: rows slide out *under*
 the shelf rather than passing behind its glass, softened by cast-light
@@ -490,7 +495,7 @@ answer to "where am I".
   column: a 14px accent ✓ for checked items, a dim › chevron on root rows
   that open a pane (full on hover). No left check column. Full-width, 8px
   radius, Glass hover wash, accent wash on press; disabled = dim, no wash.
-- **Artist row (user height, default 36px):** name left (13px), count
+- **Artist row (user height, default 46px, 2026-10-12):** name left (13px), count
   right (11px dim, tabular); active = `--active` wash + 600 weight.
 - **Track row (expanded panel):** number (tabular, 12px dim) · title
   (13px, ellipsis) · duration (12px dim, tabular); current track = accent
@@ -955,8 +960,8 @@ not a global gap.
   Home / End order, so Home lands on the default.
 - **Switch** (`components/Toggle.svelte`, the only switch in the app — four
   sidebar call sites and the equalizer popover; it replaces the 16px
-  rounded-square checkbox, 2026-10-10): track + sliding thumb, control-left
-  / label-right, whole row the label target. Row tier 38x22px track
+  rounded-square checkbox, 2026-10-10): track + sliding thumb, ~~control-left
+  / label-right~~ caption-left / track-right (2026-10-12 override: Settings toggle switches sit RIGHT of their labels (caption-left / track-right), per owner + Aina verdict. Reason: one text scan edge, trailing thumb matches platform convention, Accent drill row (label-left / value-right) stops looking like a stranger. Whole-row label target, row min-height var(--sidebar-row-size), track/thumb tiers, and all state language stand unchanged. The equalizer popover header keeps control-left — it is not a settings row), whole row the label target. Row tier 38x22px track
   (`--radius-pill`), 16px thumb, 3px inset, 16px travel; compact tier
   (EQ popover) 32x18px, 12px thumb, 14px travel; track flex-none in both.
   OFF = hover-wash fill + Glass Line with dim thumb (hover to text); ON =
@@ -1010,10 +1015,11 @@ did not write and a DPI we did not choose. The dot's hit area is the full
 pitch (`gap / -2` each side), so adjacent targets never overlap and every
 target clears 24 px while staying under the 41 px of a window button.
 
-A row of options is a **row of options**, not a list of cards: 40 px min
-height (the user's own `--sidebar-row-size`), no borders, no background, the
-whole row being the click target — 24 px of label plus 16 px of padding is a
-40 px target wearing padding. Inset translucent cards on the 0.7-alpha glass
+A row of options is a **row of options**, not a list of cards: 46 px min
+height (the user's own `--sidebar-row-size`; 40 px before the 2026-10-12
+default 36→46), no borders, no background, the
+whole row being the click target — label plus padding fill the 46 px target
+(the old "24 + 16 = 40" arithmetic described the pre-2026-10-12 40 px row). Inset translucent cards on the 0.7-alpha glass
 read as a surface with a hole cut in it, and every pane that does it makes
 the stack look like a settings screen from a different app.
 
