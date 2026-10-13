@@ -328,6 +328,12 @@
     if (!dirty || saving || bad.size) return false;
     saving = true;
     error = "";
+    // Tag-save follow (see AlbumTagsEditor): the stepper saves track by
+    // track, so each save follows its own track.
+    {
+      const fromAlbumId = library.trackById(trackId)?.albumId;
+      library.pendingFollow = fromAlbumId ? { fromAlbumId, trackIds: [trackId] } : null;
+    }
     try {
       await invoke("save_track_tags", {
         trackId,
@@ -359,6 +365,7 @@
     } catch (e) {
       error = String(e);
       announcer.say(`Writing failed: ${error}`);
+      library.pendingFollow = null;
       return false;
     } finally {
       saving = false;

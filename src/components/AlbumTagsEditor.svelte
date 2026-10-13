@@ -235,6 +235,12 @@
     if (!dirty || saving || bad.size) return;
     saving = true;
     error = "";
+    // Tag-save follow: if this regroups rows into another album, the view
+    // follows them there once the scan lands (library.pendingFollow).
+    library.pendingFollow = {
+      fromAlbumId: albumId,
+      trackIds: library.tracksOf(albumId).map((t) => t.id),
+    };
     try {
       // Shared struct carries album-level fields only; per-track fields
       // (title/artist/numbers) are never touched by album saves. Only what
@@ -274,6 +280,7 @@
     } catch (e) {
       error = String(e);
       announcer.say(`Saving failed: ${error}`);
+      library.pendingFollow = null;
     } finally {
       saving = false;
     }

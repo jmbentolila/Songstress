@@ -88,7 +88,7 @@ export function currentTrack(): Track | null {
   // 2026-09-26). The album's own list is only the fallback for a context that
   // never knew a track id.
   if (ctx.trackId) {
-    const byId = library.trackById(ctx.trackId);
+    const byId = library.trackById(ctx.trackId) ?? library.trackByRename(ctx.trackId);
     if (byId) return byId;
   }
   return trackAt(ctx.albumId, ctx.trackIndex);
@@ -103,7 +103,8 @@ export function currentTrack(): Track | null {
 export function reanchorCurrent() {
   const ctx = playback.current;
   if (!ctx?.trackId) return;
-  const track = library.trackById(ctx.trackId);
+  const track =
+    library.trackById(ctx.trackId) ?? library.trackByRename(ctx.trackId);
   if (!track) return;
   const index = Math.max(0, library.tracksOf(track.albumId).findIndex((t) => t.id === track.id));
   if (ctx.albumId === track.albumId && ctx.trackIndex === index) return;

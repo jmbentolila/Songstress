@@ -6048,3 +6048,19 @@ DEFAULTS: ui.svelte.ts DEFAULT_TILE_SIZE 180→147 (= the 5-column stop of tileS
 VERIFICATION: songstress-dev was inactive and the owner's prod songstress+mpv (13:45 UTC) was left alone — NO live-DOM probe, no restart. Proof instead: svelte-check 0 errors; vitest 140/140; cargo test --lib 147/147; npm run build succeeds; built CSS carries `.toggle…:not(.small) .caption{order:0}` / `.track{order:1}`, `--sidebar-row-size:46px`, `--tile-size:147px`; DOM order verified in source (Svelte emits template order as-written). Owner eyeball is the pixel verdict. No version change per 2026-10-09 order; uncommitted, unpushed.
 
 ### Correction 2026-10-12 (same day, owner eyeball): DEFAULT_TILE_SIZE 147→180 (ui.svelte.ts + app.css first-paint reverted; DESIGN.md overview back to 180 with round-trip note — no single px reads 5 across on every window). 46px rows and toggle override stand. No version change per 2026-10-09 order; uncommitted, unpushed.
+
+### Save-to-library lag, killed in three cuts (2026-10-13, owner symptom → Mare systematic-debugging, no bump)
+
+SYMPTOM: single-song save stalled the library update. MEASURED: save ran a full-roots rescan + 937KB full dump inside one awaited window, then the watcher echoed our own move into a second full cycle (~1.1s total). Falsified: hashing (zero bytes without collision), artwork (~0 rows), peaks (never on save path), staging prune (tiny).
+
+CUT 1 echo suppression (watcher.rs): RECENT_SAVES map, 10s window, folder-granular, registered in a read-only pre-pass BEFORE the first write (post-hoc loses the race: the 2s debounce delays the rescan, never the evaluation). Echo absent over 20s, ~600ms second cycle deleted, external-change control proven twice. Planning errors now abort before any move (safer). Cross-instance echo remains (separate processes, out of scope).
+
+CUT 2 targeted refresh (import.rs/lib.rs/savePatch.ts/library.svelte.ts): save reports moves, scan-finished carries optional savePatch, frontend applies in place (rename staged-to-false, removals, prune, reindex, dumpVersion++); non-save payloads byte-identical, unknowns fall back to full load. UI refresh +450ms → +0ms, DOM churn 7 mutations, merge control validated. Chose patch over coalescing (echo dead, bursts gone, the dump itself had to go). saveRenames map added on the patch (re-anchor follows).
+
+CUT 3 scoped rescan (lib.rs save tail): follow-up scan calls scan_inner directly with destination parents as roots + landed set as only — 58.9ms → 13.5ms, artwork/sidecar unchanged. Missing-sweep skipped out-of-scope by construction (same as every only-scan).
+
+VERIFICATION: cargo 148/148, svelte-check 0, vitest 145/145 (5 savePatch tests), build green, both DBs 4610/252/0 zero fixture traces, /tmp clean, prod untouched (dev restarted repeatedly — rebuild churn, window needs owner re-place). No version change per standing owner order. Committed as the save-lag batch.
+
+### Tab-follow after tag-driven move + rename-aware re-anchor (2026-10-13, owner behavior → Mare, no bump)
+
+BEHAVIOR: files moved by tags into a different existing album left the view on the emptied source artist tab; the view now follows the files to the destination album tab. Frontend-only: editors arm library.pendingFollow pre-invoke, scan-finished consumes it after load via pure resolveRetagFollow (retagFollow.ts, first track wins, same-album/unknown/missing stays put, shared ui.revealAlbum). Probed: cross-album lands on new tab + panel, genre-only no yank, failed save untouched. Re-anchor taken: saveRenames consulted on miss (kills the Nothing-playing ghost on saves); discard removed-only patch skipped for later. Tests: vitest 150/150 (5 retagFollow tests), full gates green. Committed as the navigation batch with the re-anchor. No version change per standing owner order.
