@@ -5,7 +5,9 @@ import { albums as fakeAlbums, artistOf as fakeArtistOf, artists as fakeArtists,
 import { sortKey } from "../sort";
 import { MIN_SKELETON_MS, ENTER_MS } from "../loadingState";
 import { isTauri } from "../window";
-import { pushSetting, refreshPanelGradients, ui } from "./ui.svelte";
+import { pushSetting, refreshPanelGradients, revealAlbum, ui } from "./ui.svelte";
+import { applySavePatchToDump, type SavePatch } from "../savePatch";
+import { resolveRetagFollow, type RetagFollow } from "../retagFollow";
 import { announcer } from "./announcer.svelte";
 
 /**
@@ -57,6 +59,14 @@ class LibraryStore {
   /** Bumped on every applied dump — a change signal for mirrors that keep
    *  their own copy of library identity (the playback context does). */
   dumpVersion = $state(0);
+  /** A tag save arming the tab-follow (see followRetag): the album being
+   *  edited and its track ids. Set by the editors before their invoke,
+   *  consumed by the scan that save triggered. Plain field — no UI reads it. */
+  pendingFollow: RetagFollow | null = null;
+  /** Old→new track ids from the last save patch (cleared on full loads):
+   *  lets mirrors follow rows across a relink instead of losing them.
+   *  Plain field — read only through trackByRename. */
+  saveRenames = new Map<string, string>();
   /** Track id → the row as the CURRENT dump has it. */
   #byId = new Map<string, Track>();
   #byAlbum = new Map<string, Track[]>();
@@ -69,14 +79,15 @@ class LibraryStore {
       // made content appear by pop), and `load()` holds the first dump out for
       // `MIN_SKELETON_MS` so the placeholder reads as intentional instead of
       // a 50 ms flicker.
-      void listen("scan-finished", (e) => {
+      void listen("scan-finished", async (e) => {
         // This event is the ONLY thing that clears `scanning`, so the backend
         // emits it on every path now (lib.rs::scan_inner) — including the failure
         // and panic paths that used to return before the emit. When that was true
         // a failed FIRST scan left `scanning` set forever: an eternal shimmer over
         // an empty grid, with the reason in a console nobody can open.
         this.scanning = false;
-        const err = (e.payload as { error?: string | null }).error ?? "";
+        const payload = e.payload as { error?: string | null; savePatch?: SavePatch };
+        const err = payload.error ?? "";
         this.scanError = err;
         // The same sentence the chrome shows, heard (WCAG 4.1.3): a scan
         // that failed while you watched something else must reach you.
@@ -86,6 +97,7 @@ class LibraryStore {
           // so there is no new dump to read, and the footer must not stamp
           // "scanned 14:02" for a scan that did not happen.
           console.error("[scan] " + err);
+          this.pendingFollow = null;
           return;
         }
         // "scanned 14:02" in the Library footer — persisted, so the answer
@@ -96,7 +108,22 @@ class LibraryStore {
         // this map was hydrated before it ran, so re-read it rather than show
         // artwork colours over an override that exists.
         void refreshPanelGradients();
-        void this.load(true);
+        // A save knows exactly what it changed, so its own scan carries the
+        // patch and the ~450ms full dump is skipped; every other scan —
+        // watcher echoes, imports, rescans, retags — still reloads in full.
+        // The patch is idempotent, so a full load landing on either side of
+        // it converges instead of duplicating.
+        if (payload.savePatch) this.applySavePatch(payload.savePatch);
+        else {
+          // A tag save arms pendingFollow before its invoke; the scan that
+          // save triggered consumes it here, AFTER the fresh dump lands —
+          // never navigate to a row that does not exist yet. Cleared up
+          // front so the editors' own follow-up rescan() just reloads.
+          const follow = this.pendingFollow;
+          this.pendingFollow = null;
+          await this.load(true);
+          if (follow) this.followRetag(follow);
+        }
       });
       void listen("scan-progress", () => {
         // The only signal that a scan the FRONTEND never asked for is running —
@@ -136,30 +163,10 @@ class LibraryStore {
         (firstDump || (this.albums.length === 0 && (fromScan || this.scanning)));
       this.artists = dump.artists;
       this.albums = byYear(dump.albums);
-      // Orphaned panel-gradient overrides (Step 9b prune): an album id
-      // derives from its path, so a moved/renamed/regrouped album strands
-      // its entry. Drop them on every successful dump — boot AND rescans —
-      // but only against a LIVE dump (the fake library's ids would wipe
-      // real overrides in dev). Assigns only when something actually died,
-      // so quiet loads never churn the persisted settings.
-      if (this.live) {
-        const known = new Set(dump.albums.map((a) => a.id));
-        const stale = Object.keys(ui.panelGradients).filter((id) => !known.has(id));
-        if (stale.length > 0) {
-          const kept = { ...ui.panelGradients };
-          for (const id of stale) delete kept[id];
-          ui.panelGradients = kept;
-        }
-      }
+      this.#pruneGradients(dump.albums.map((a) => a.id));
       this.trackCount = dump.tracks.length;
-      this.#byAlbum = new Map<string, Track[]>();
-      this.#byId = new Map<string, Track>();
-      for (const t of dump.tracks) {
-        const list = this.#byAlbum.get(t.albumId);
-        if (list) list.push(t);
-        else this.#byAlbum.set(t.albumId, [t]);
-        this.#byId.set(t.id, t);
-      }
+      this.#reindex(dump.tracks);
+      this.saveRenames.clear();
       // A new dump can move rows between albums; whoever mirrors engine state
       // (the playback store) re-anchors off this counter.
       this.dumpVersion += 1;
@@ -167,6 +174,75 @@ class LibraryStore {
       if (filledFromPlaceholder) this.#enterNow();
     } catch {
       // Backend hiccup — keep whatever we have; next scan-finished retries.
+    }
+  }
+
+  /** Save-adjacent refresh: apply the patch the save's own `scan-finished`
+   *  carries instead of re-reading the whole dump. Same post-conditions as
+   *  a full load (indexes, counts, gradient prune, re-anchor signal) at a
+   *  fraction of the IPC. Falls back to a full load when a non-empty patch
+   *  applies nothing — that means the dump moved under us, and a silent
+   *  patch would be a lie. */
+  applySavePatch(patch: SavePatch) {
+    const before = [...this.#byId.values()];
+    const next = applySavePatchToDump(this.artists, this.albums, before, patch);
+    if (patch.moved.length + patch.removed.length > 0 && next.applied === 0) {
+      void this.load(true);
+      return;
+    }
+    this.artists = next.artists;
+    this.albums = next.albums;
+    this.#pruneGradients(next.albums.map((a) => a.id));
+    this.trackCount = next.tracks.length;
+    this.#reindex(next.tracks);
+    this.saveRenames = new Map(patch.moved.map((m) => [m.oldId, m.newId]));
+    // Same signal a full load sends: rows may have new ids, whoever mirrors
+    // engine state (the playback store) re-anchors off this counter.
+    this.dumpVersion += 1;
+    this.ready = true;
+  }
+
+  /** Tag-save follow: after a regrouping move lands, take the view to the
+   *  destination album's tab (rules in resolveRetagFollow — same-album,
+   *  unknown and missing destinations all stay put). */
+  followRetag(follow: RetagFollow) {
+    const dest = resolveRetagFollow(
+      this.albums,
+      this.artists,
+      (id) => this.trackById(id),
+      follow,
+    );
+    if (dest) revealAlbum(dest.albumId, dest.artistId);
+  }
+
+  /** Rebuild the id/album indexes from a track list (shared by full loads
+   *  and save patches). */
+  #reindex(tracks: Track[]) {
+    this.#byAlbum = new Map<string, Track[]>();
+    this.#byId = new Map<string, Track>();
+    for (const t of tracks) {
+      const list = this.#byAlbum.get(t.albumId);
+      if (list) list.push(t);
+      else this.#byAlbum.set(t.albumId, [t]);
+      this.#byId.set(t.id, t);
+    }
+  }
+
+  /** Drop panel-gradient overrides for albums no longer in the dump
+   *  (Step 9b prune): an album id derives from its path, so a
+   *  moved/renamed/regrouped album strands its entry. Drop them on every
+   *  successful refresh — boot, rescans AND save patches — but only against
+   *  a LIVE dump (the fake library's ids would wipe real overrides in dev).
+   *  Assigns only when something actually died, so quiet loads never churn
+   *  the persisted settings. */
+  #pruneGradients(albumIds: Iterable<string>) {
+    if (!this.live) return;
+    const known = new Set(albumIds);
+    const stale = Object.keys(ui.panelGradients).filter((id) => !known.has(id));
+    if (stale.length > 0) {
+      const kept = { ...ui.panelGradients };
+      for (const id of stale) delete kept[id];
+      ui.panelGradients = kept;
     }
   }
 
@@ -195,6 +271,15 @@ class LibraryStore {
       if (hit) return hit;
     }
     return undefined;
+  }
+
+  /** Follow one save-patch rename: the row a mirror holds under an old id
+   *  continues under the mapped new one (a save relinks paths, so ids move
+   *  while the music doesn't). Undefined when nothing renamed it — callers
+   *  fall through to their old miss behavior. */
+  trackByRename(trackId: string): Track | undefined {
+    const next = this.saveRenames.get(trackId);
+    return next ? this.trackById(next) : undefined;
   }
 
   /** Which album a track lives in NOW (undefined when it is gone). */

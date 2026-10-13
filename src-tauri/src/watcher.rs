@@ -17,8 +17,10 @@
 //! time (logged, watching disabled) or never deliver events — the manual
 //! Rescan remains the path there.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender, TryRecvError};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use notify::event::{EventKind, ModifyKind};
@@ -29,6 +31,60 @@ pub const DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Poll tick for the stop channel + event drain.
 const TICK: Duration = Duration::from_millis(50);
+
+/// Paths our own save just moved, with the moment they landed. `save_imports`
+/// registers its moved sources + destinations (+ the folders created for
+/// them) here so the watcher does not echo them back ~2s later into a second
+/// full scan + dump. Path-scoped AND time-scoped: an event counts unless ALL
+/// of its paths are recently-saved ones, so an external change landing beside
+/// (or in the same burst as) our move still rescans on schedule.
+static RECENT_SAVES: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
+
+/// How long a moved path stays silent: must cover the debounce (2s) + poll
+/// tick (0.5s) + watcher min-interval (5s) with margin for scheduling jitter.
+/// inotify delivers the move events in milliseconds, so this is generous —
+/// and the cost of over-length is narrow: only a change to one of THESE paths
+/// inside the window waits for its next change instead of rescanning now.
+pub const SUPPRESS_WINDOW: Duration = Duration::from_secs(10);
+
+/// Remember paths moved by our own save, starting (or refreshing) their
+/// silence window. Must be called BEFORE the first write lands: the watcher
+/// evaluates events at delivery, so registering after the moves (or between
+/// them) loses the race against the very first write — the 2s debounce only
+/// delays the rescan, never the evaluation. Expired entries are pruned on
+/// the way in so the map can never grow past one save's worth of paths plus
+/// one stale generation.
+pub fn suppress_paths(paths: &[PathBuf]) {
+    let now = Instant::now();
+    let mut map = RECENT_SAVES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    map.retain(|_, t| now.duration_since(*t) < SUPPRESS_WINDOW);
+    for p in paths {
+        map.insert(p.clone(), now);
+    }
+}
+
+/// Whether every path in this event is one our own save just moved (and still
+/// inside its window). Folder-granular on the inside: a suppressed folder
+/// covers the names within it, because the ` (N)` suffix a collision earns
+/// is unknowable before the move — every name it can pick lives in the
+/// destination folder. Empty path lists are unattributable and count — same
+/// fail-open rule as the sidecar filter below.
+fn is_own_save(paths: &[PathBuf]) -> bool {
+    let Some(lock) = RECENT_SAVES.get() else {
+        return false;
+    };
+    let mut map = lock.lock().unwrap();
+    let now = Instant::now();
+    map.retain(|_, t| now.duration_since(*t) < SUPPRESS_WINDOW);
+    let fresh = |p: &Path| map.get(p).is_some_and(|t| now.duration_since(*t) < SUPPRESS_WINDOW);
+    !paths.is_empty()
+        && paths
+            .iter()
+            .all(|p| fresh(p) || p.parent().is_some_and(fresh))
+}
 
 /// Does this event mean the library CONTENT may have changed?
 ///
@@ -74,7 +130,13 @@ pub fn marks_library_dirty(ev: &Event) -> bool {
             .paths
             .iter()
             .all(|p| crate::library::sidecar::is_sidecar_path(p));
-    !only_sidecars
+    if only_sidecars {
+        return false;
+    }
+    // Our own save just moved these paths (registered via `suppress_paths`):
+    // the post-save rescan already indexed them, so counting them buys a
+    // second full scan + dump for nothing.
+    !is_own_save(&ev.paths)
 }
 
 /// Stopping the thread releases its watches (the notify watcher drops).
@@ -293,6 +355,51 @@ mod tests {
         let mut mixed = Event::new(EventKind::Create(CreateKind::Any));
         mixed.paths = vec![sidecar::path_in(folder), folder.join("01 - Spirit.flac")];
         assert!(marks_library_dirty(&mixed));
+    }
+
+    /// Our own save must not echo — and the silence must start BEFORE the
+    /// first write, because the watcher evaluates at delivery: registering
+    /// after the moves loses the race no debounce can cover (measured live:
+    /// an end-of-save registration still echoed). Folder-granular inside:
+    /// a suppressed folder covers the collision-suffix names within it,
+    /// while anything whose parent is not suppressed still counts. No sleeps
+    /// here: expiry is covered by the retain logic, and the window itself is
+    /// long (SUPPRESS_WINDOW) precisely so a test never has to race it.
+    #[test]
+    fn own_save_is_silent_per_path_with_folder_cover() {
+        use notify::event::CreateKind;
+        let dir = std::path::PathBuf::from("/music/Ghost/Impera");
+        let moved = dir.join("99 - Probe.flac");
+        let sibling = dir.join("02 - Real.flac");
+        let other = std::path::PathBuf::from("/music/Other/track.mp3");
+        let ev = |p: std::path::PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        assert!(
+            marks_library_dirty(&ev(moved.clone())),
+            "unsuppressed create must count"
+        );
+        suppress_paths(&[moved.clone(), dir.clone()]);
+        assert!(
+            !marks_library_dirty(&ev(moved)),
+            "our own move must not echo"
+        );
+        assert!(
+            !marks_library_dirty(&ev(sibling)),
+            "a name the collision walk could have picked is covered by its folder"
+        );
+        assert!(
+            marks_library_dirty(&ev(other.clone())),
+            "other folders still count"
+        );
+        let mut mixed = Event::new(EventKind::Create(CreateKind::File));
+        mixed.paths = vec![dir.join("x.flac"), other];
+        assert!(
+            marks_library_dirty(&mixed),
+            "an external path in the burst still counts"
+        );
     }
 
     /// Dropping the handle stops the thread and releases its watches.

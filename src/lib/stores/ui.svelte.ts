@@ -110,6 +110,30 @@ export function openAbout(from: HTMLElement | null = null) {
   ui.aboutOpen = true;
 }
 
+/** Switch context to one album: drop any menu layer (it would hide the
+ *  landing), clear search (it would hide the album in match sections),
+ *  switch the tab exactly the way the sidebar does — then ask the grid to
+ *  expand + travel AFTER the tab's switch bridge (160ms exit), when the
+ *  album is actually listed. Skipped if the user moved on meanwhile: the
+ *  landing must never yank them back. One tick — Svelte batches. Shared by
+ *  import landings and tag-save follows so the two can never disagree
+ *  about what "going to an album" means. */
+export function revealAlbum(albumId: string, artistId: string): void {
+  ui.menuOpen = false;
+  ui.menuDetail = null;
+  ui.menuSub = null;
+  ui.search = "";
+  ui.pendingOnly = false;
+  ui.activeArtistId = artistId;
+  ui.expandedAlbum.songs = null;
+  ui.expandedAlbum.albums = null;
+  const seq = (ui.gridReveal?.seq ?? 0) + 1;
+  setTimeout(() => {
+    if (ui.activeArtistId !== artistId) return;
+    ui.gridReveal = { albumId, seq };
+  }, 260);
+}
+
 export function resolvedTheme(): Theme {
   return ui.theme === "system" ? prefersDark() : ui.theme;
 }

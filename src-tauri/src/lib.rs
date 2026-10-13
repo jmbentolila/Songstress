@@ -608,7 +608,33 @@ static WATCH_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// stream of debounced bursts — don't thrash the scanner).
 const WATCH_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// One relinked track: the row the frontend holds under `old_id` continues
+/// under `new_id` — same tags, same album, only the path-derived id moved.
+/// A pair whose old id is absent applies as a no-op, never a lie (see the
+/// fallback in the frontend's patch path).
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SavedTrack {
+    old_id: String,
+    new_id: String,
+}
+
+/// Save-adjacent targeted refresh (step 3): everything the frontend's dump
+/// must change for one save, carried on that save's own `scan-finished` so
+/// the ~450ms full `get_library` round trip is skipped. `moved` renames rows
+/// in place; `removed` drops staged rows the library already held
+/// (duplicates) or that vanished. Album/artist rows never change on a save
+/// (their ids are tag-derived); albums emptied along the way are pruned
+/// client-side, exactly as a fresh dump would show them.
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct SavePatch {
+    moved: Vec<SavedTrack>,
+    removed: Vec<String>,
+}
+
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ScanSummary {
     added: usize,
     updated: usize,
@@ -623,6 +649,11 @@ struct ScanSummary {
     /// so a run that returned before emitting it left an empty library shimmering
     /// its skeleton forever, with the cause in a console that has no window.
     error: Option<String>,
+    /// Present ONLY on the scan a save triggered: the targeted refresh above.
+    /// Skipped from the payload otherwise, so every non-save scan emits
+    /// byte-identical JSON to before.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    save_patch: Option<SavePatch>,
 }
 
 // --- Scanner (Phase 2 M2) + import staging (Step 2a) ------------------------
@@ -658,8 +689,9 @@ async fn run_library_scan(
     cache_dir: PathBuf,
     roots: Vec<PathBuf>,
     full: bool,
+    save_patch: Option<SavePatch>,
 ) -> Result<ScanSummary, String> {
-    scan_inner(app, db_path, cache_dir, roots, None, None, full).await
+    scan_inner(app, db_path, cache_dir, roots, None, None, full, save_patch).await
 }
 
 /// `only` restricts INDEXING to a set of files while the roots are still walked
@@ -679,6 +711,7 @@ async fn scan_inner(
     only: Option<std::collections::HashSet<std::path::PathBuf>>,
     flag_pending: Option<Vec<std::path::PathBuf>>,
     full: bool,
+    save_patch: Option<SavePatch>,
 ) -> Result<ScanSummary, String> {
     use std::sync::atomic::Ordering;
     if SCAN_RUNNING.swap(true, Ordering::SeqCst) {
@@ -793,6 +826,7 @@ async fn scan_inner(
             skipped: counts.skipped,
             errors: counts.errors.clone(),
             error: None,
+            save_patch: save_patch.clone(),
         },
         Err(e) => {
             eprintln!("[scan] FAILED: {e}");
@@ -804,6 +838,8 @@ async fn scan_inner(
                 skipped: 0,
                 errors: Vec::new(),
                 error: Some(e.clone()),
+                // A failed run indexed an unknown subset: never patch.
+                save_patch: None,
             }
         }
     };
@@ -928,6 +964,7 @@ async fn scan_library(
         cache_dir,
         roots,
         full,
+        None,
     )
     .await?;
     // Waveforms converge in the background (see `spawn_peaks_backfill`):
@@ -2101,7 +2138,7 @@ async fn add_music_folder(
     rewatch(&state);
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let roots = scan_roots(&state, &cache_dir, None);
-    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
+    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false, None).await?;
     Ok(Some(
         music_roots(&state)
             .into_iter()
@@ -2141,7 +2178,7 @@ async fn remove_music_folder(
     rewatch(&state);
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let roots = scan_roots(&state, &cache_dir, None);
-    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
+    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false, None).await?;
     Ok(music_roots(&state)
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -2433,6 +2470,8 @@ async fn import_music(
         // album the user owns into the pile for re-deciding.
         Some(fresh.clone()),
         false,
+        // Imports keep the full-dump refresh: the pile lands somewhere new.
+        None,
     )
     .await?;
 
@@ -2484,27 +2523,87 @@ async fn save_imports(
     let cache = cache_dir.clone();
     let db_path = state.db_path.clone();
     let staged_clone = staged.clone();
-    let saved = tauri::async_runtime::spawn_blocking(move || {
+    let (saved, patch, moves) = tauri::async_runtime::spawn_blocking(move || {
         let conn = library::db::open(&db_path).map_err(|e| e.to_string())?;
-        library::import::save_to_library(
+        // Echo suppression lives inside `save_to_library` (it must register
+        // BEFORE the first write — the watcher evaluates at delivery, so a
+        // call here would lose the race); the decided files are reported so
+        // this save's `scan-finished` can carry its own refresh below.
+        let mut moves: Vec<library::import::SaveMove> = Vec::new();
+        let report = library::import::save_to_library(
             &conn,
             &cache,
             &adopt_roots,
             &music_dir,
             &staged_clone,
+            &mut moves,
             |done, total| {
                 let _ = emitter.emit(
                     "scan-progress",
                     serde_json::json!({ "phase": "import", "done": done, "total": total }),
                 );
             },
-        )
+        )?;
+        // What this save's `scan-finished` carries so the frontend patches
+        // its dump instead of re-reading all of it. Ids derive from paths
+        // exactly the way relink and the scan derive them, so a pair whose
+        // old id is absent applies as a no-op, never a lie (and the frontend
+        // falls back to a full load when a patch applies nothing at all).
+        let mut patch = SavePatch::default();
+        for m in &moves {
+            let src = m.src.to_string_lossy().into_owned();
+            let old_id = library::stable_id("tr", &[src.as_str()]);
+            match &m.dest {
+                Some(dest) => {
+                    let dest = dest.to_string_lossy().into_owned();
+                    patch.moved.push(SavedTrack {
+                        old_id,
+                        new_id: library::stable_id("tr", &[dest.as_str()]),
+                    });
+                }
+                None => patch.removed.push(old_id),
+            }
+        }
+        Ok::<
+            (
+                library::import::SaveReport,
+                SavePatch,
+                Vec<library::import::SaveMove>,
+            ),
+            String,
+        >((report, patch, moves))
     })
     .await
     .map_err(|e| e.to_string())??;
 
-    let roots = scan_roots(&state, &cache_dir, None);
-    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
+    // Scoped follow-up scan (step 2): every row this save touched is already
+    // reconciled (relink/forget), so the scan only needs to (re)parse the
+    // landed files plus the usual artwork/sidecar passes — not re-walk the
+    // whole library. Roots are the destination folders, `only` the landed
+    // set (the import_music pattern). Staged sources live outside the roots
+    // and contribute nothing; unrelated deletions keep their own watcher
+    // echo. A save that landed nothing still runs the pipeline on an empty
+    // set: same events, ~zero walk (the empty path is panic-safe — every
+    // grouping index sits inside a loop over a non-empty built collection).
+    let mut roots: Vec<PathBuf> = moves
+        .iter()
+        .filter_map(|m| m.dest.as_ref().and_then(|d| d.parent().map(PathBuf::from)))
+        .collect();
+    roots.sort();
+    roots.dedup();
+    let only: std::collections::HashSet<PathBuf> =
+        moves.iter().filter_map(|m| m.dest.clone()).collect();
+    scan_inner(
+        app,
+        state.db_path.clone(),
+        cache_dir,
+        roots,
+        Some(only),
+        None,
+        false,
+        Some(patch),
+    )
+    .await?;
     Ok(saved)
 }
 
@@ -2538,7 +2637,7 @@ async fn discard_imports(
     .map_err(|e| e.to_string())??;
 
     let roots = scan_roots(&state, &cache_dir, None);
-    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false).await?;
+    run_library_scan(app, state.db_path.clone(), cache_dir, roots, false, None).await?;
     Ok(n)
 }
 
@@ -3154,7 +3253,7 @@ pub fn run() {
                         };
                         eprintln!("[watch] library changed on disk — rescanning");
                         let _ =
-                            run_library_scan(app_h.clone(), db_path, cache_dir, roots, false).await;
+                            run_library_scan(app_h.clone(), db_path, cache_dir, roots, false, None).await;
                     }
                 });
             }

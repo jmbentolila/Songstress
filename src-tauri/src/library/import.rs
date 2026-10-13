@@ -501,6 +501,17 @@ fn prune_staged_dirs(root: &Path) {
     }
 }
 
+/// One file the save decided about: where it was and where it landed.
+/// `dest` is `None` for rows that left the dump without landing anywhere —
+/// a duplicate the library already held, or a staged file that vanished.
+/// The save's `scan-finished` carries the id pairs derived from these, so the
+/// frontend patches its dump instead of re-reading all of it (step 3).
+#[derive(Debug, Clone)]
+pub struct SaveMove {
+    pub src: PathBuf,
+    pub dest: Option<PathBuf>,
+}
+
 /// What one Save did, in the words the UI will use ("3 saved · 1 already there").
 #[derive(Debug, Default, Clone, Copy, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -522,19 +533,64 @@ pub struct SaveReport {
 /// half-flat, half-nested library is worse than either. Filenames are kept
 /// exactly as the user has them (something outside this app may refer to them);
 /// same-name-same-size is skipped, same-name-different-content gets a suffix.
-/// Then the staging folders they left behind are pruned.
+/// Then the staging folders they left behind are pruned. `moves` reports
+/// every decided file (landed or removed), so the save's `scan-finished` can
+/// carry the exact refresh the frontend needs instead of a full re-read.
 pub fn save_to_library(
     conn: &Connection,
     cache_dir: &Path,
     roots: &[PathBuf],
     music_dir: &Path,
     staged: &[PathBuf],
+    moves: &mut Vec<SaveMove>,
     mut progress: impl FnMut(usize, usize),
 ) -> Result<SaveReport, String> {
     let root = import_dir(cache_dir);
     let total = staged.len();
     let mut report = SaveReport::default();
     let mut by_album: HashMap<String, Destination> = HashMap::new();
+    // Silence our own echo BEFORE the first write lands. The watcher
+    // evaluates events at delivery — registering after the moves (or between
+    // them) loses the race against the very first write, and the 2s debounce
+    // cannot cover it: it delays the rescan, never the evaluation (measured
+    // live: an end-of-save registration still echoed). Resolving destinations
+    // is read-only, so planning the silence set up front moves nothing and
+    // changes no error the loop below would have raised first. Folder-level
+    // on purpose: `plan_move`'s ` (N)` suffix is unknowable before the move,
+    // but every name it can pick lives in the destination folder — as does
+    // every folder created on the way there. Roots themselves are never
+    // added: that would silence any top-level creation beside our move.
+    {
+        let mut seen: HashMap<String, PathBuf> = HashMap::new();
+        let mut silent = Vec::new();
+        for src in staged {
+            silent.push(src.clone());
+            let album_id = album_id_of_path(conn, src)?;
+            let folder = match seen.get(&album_id) {
+                Some(f) => f.clone(),
+                None => {
+                    let d = album_destination(conn, roots, music_dir, &album_id)?;
+                    seen.insert(album_id, d.folder.clone());
+                    d.folder
+                }
+            };
+            let under_root = roots.iter().any(|r| folder.starts_with(r));
+            let is_root = roots.iter().any(|r| r == &folder);
+            if under_root && !is_root {
+                silent.push(folder.clone());
+                let mut anc = folder.parent();
+                while let Some(a) = anc {
+                    if !roots.iter().any(|r| a.starts_with(r)) || roots.iter().any(|r| r == a)
+                    {
+                        break;
+                    }
+                    silent.push(a.to_path_buf());
+                    anc = a.parent();
+                }
+            }
+        }
+        crate::watcher::suppress_paths(&silent);
+    }
     for (i, src) in staged.iter().enumerate() {
         progress(i, total);
         let album_id = album_id_of_path(conn, src)?;
@@ -551,6 +607,10 @@ pub fn save_to_library(
             .ok_or_else(|| format!("{src:?}: no file name"))?;
         if !src.exists() {
             forget_row(conn, src)?;
+            moves.push(SaveMove {
+                src: src.clone(),
+                dest: None,
+            });
             report.vanished += 1;
             continue;
         }
@@ -565,6 +625,10 @@ pub fn save_to_library(
                 // there first sees "deleted + added" and hands back exactly the
                 // duplicate-with-missing-icon the user reported.
                 relink(conn, src, &at)?;
+                moves.push(SaveMove {
+                    src: src.clone(),
+                    dest: Some(at.clone()),
+                });
                 report.moved += 1;
             }
             // Same bytes already in the library. The user's ruling on this case:
@@ -574,6 +638,10 @@ pub fn save_to_library(
             MovePlan::AlreadyHave => match std::fs::remove_file(src) {
                 Ok(()) => {
                     forget_row(conn, src)?;
+                    moves.push(SaveMove {
+                        src: src.clone(),
+                        dest: None,
+                    });
                     report.duplicates += 1;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -1241,16 +1309,29 @@ mod tests {
 
         // Save: copies to <music>/<Artist>/<Album>/song.mp3, removes staged.
         // (Untagged tiny_mp3 → scanner placeholders.)
+        let mut moves = Vec::new();
         let report = save_to_library(
             &conn,
             &cache,
             std::slice::from_ref(&music),
             &music,
             &staged,
+            &mut moves,
             |_, _| {},
         )
         .unwrap();
         assert_eq!(report.moved, 1);
+        assert_eq!(
+            moves.len(),
+            1,
+            "the one decided file is reported with its landing place"
+        );
+        assert_eq!(moves[0].src, staged[0], "source reported");
+        assert_eq!(
+            moves[0].dest.as_ref(),
+            Some(&music.join("Unknown Artist/Unknown Album/song.mp3")),
+            "destination reported"
+        );
         assert_eq!(report.duplicates, 0);
         assert!(music
             .join("Unknown Artist/Unknown Album/song.mp3")
@@ -1279,6 +1360,7 @@ mod tests {
             std::slice::from_ref(&music),
             &music,
             &staged,
+            &mut Vec::new(),
             |_, _| {},
         )
         .unwrap();
@@ -1323,6 +1405,7 @@ mod tests {
             std::slice::from_ref(&music),
             &music,
             &staged,
+            &mut Vec::new(),
             |_, _| {},
         )
         .unwrap();
@@ -1403,6 +1486,7 @@ mod tests {
             std::slice::from_ref(&music),
             &music,
             &staged,
+            &mut Vec::new(),
             |_, _| {},
         )
         .unwrap();
@@ -1625,6 +1709,7 @@ mod tests {
             std::slice::from_ref(&music),
             &music,
             &staged,
+            &mut Vec::new(),
             |_, _| {},
         )
         .unwrap();
@@ -1678,6 +1763,7 @@ mod tests {
             &[root.join("music")],
             &root.join("music"),
             &staged,
+            &mut Vec::new(),
             |_, _| {},
         )
         .unwrap();
