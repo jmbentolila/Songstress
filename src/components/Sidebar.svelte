@@ -969,17 +969,17 @@
             <div class="rows">
               <Toggle
                 checked={ui.albumGradient}
-                label="Album artwork gradient"
+                label="Album gradient"
                 onchange={(on) => (ui.albumGradient = on)}
               />
               <Toggle
                 checked={ui.playbarGradient}
-                label="Playbar artwork gradient"
+                label="Playbar gradient"
                 onchange={(on) => (ui.playbarGradient = on)}
               />
               <Toggle
                 checked={ui.playbarWaveform}
-                label="Waveform progress bar"
+                label="Waveform progress"
                 onchange={(on) => (ui.playbarWaveform = on)}
               />
               <!-- Accent folded one level deep: the 12-dot grid was the highest

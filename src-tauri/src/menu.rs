@@ -329,19 +329,19 @@ pub fn build() -> Vec<Menu> {
                 sep(),
                 item(
                     "appearance.playbar-gradient",
-                    "Playbar artwork gradient",
+                    "Playbar gradient",
                     true,
                     Some(s.playbar_gradient),
                 ),
                 item(
                     "appearance.playbar-waveform",
-                    "Waveform progress bar",
+                    "Waveform progress",
                     true,
                     Some(s.playbar_waveform),
                 ),
                 item(
                     "appearance.album-gradient",
-                    "Album artwork gradient",
+                    "Album gradient",
                     true,
                     Some(s.album_gradient),
                 ),

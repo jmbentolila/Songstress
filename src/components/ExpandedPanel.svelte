@@ -603,7 +603,7 @@
     // panel's art-derived background while it closes.
     const theme = resolvedTheme();
     const id = displayId;
-    // The global kill switch (Appearance → Album artwork gradient): off
+    // The global kill switch (Appearance → Album gradient): off
     // means plain --panel-bg, overrides included — no half-state where a
     // custom color survives the switch its own toggle promised to kill.
     if (!ui.albumGradient) {

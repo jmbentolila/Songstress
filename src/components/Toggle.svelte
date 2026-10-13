@@ -62,12 +62,19 @@
     gap: 7px;
   }
 
-  /* Long labels wrap under the row's min-height instead of pushing the
-     track out: the track is flex-none, the caption takes the shrink — and
-     flex: 1 shoves the track to the trailing edge. The order flip is scoped
-     to :not(.small): the popover header keeps control-left. */
+  .toggle:not(.small) {
+    padding: 0 10px;
+  }
+
+  /* Row-tier captions stay single-line with ellipsis (Aina eyeball spec):
+     the track is flex-none, the caption takes the shrink — and flex: 1
+     shoves the track to the trailing edge. Scoped to :not(.small): the
+     popover header keeps control-left and its own wrapping. */
   .toggle:not(.small) .caption {
     order: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .toggle:not(.small) .track {
