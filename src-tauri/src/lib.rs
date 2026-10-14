@@ -2037,6 +2037,18 @@ async fn read_image(state: tauri::State<'_, AppState>, path: String) -> Result<S
     .map_err(|e| e.to_string())?
 }
 
+/// Resolve a picked music-root candidate to its canonical path (symlinks
+/// resolved, `.`/`..` normalized), mirroring the image flow's
+/// `stage_image_path`. Runs at ingress in `add_music_folder`, BEFORE
+/// `validate_new_root` / persistence, so a symlink dir is validated,
+/// stored, scanned and watched as its target: the lexical nesting check
+/// cannot be bypassed with an alias, and the stored root never points
+/// through a link. Falls back to the raw path when canonicalization
+/// fails (the `is_dir` gate below then reports it missing).
+fn resolve_new_root(picked: &Path) -> PathBuf {
+    std::fs::canonicalize(picked).unwrap_or_else(|_| picked.to_path_buf())
+}
+
 /// A new root must not sit inside an existing one or contain it — nested
 /// roots double-walk files and make "which root owns this track" ambiguous.
 fn validate_new_root(roots: &[PathBuf], path: &Path) -> Result<(), String> {
@@ -2124,7 +2136,7 @@ async fn add_music_folder(
     let Some(picked) = picked else {
         return Ok(None); // picker cancelled — no changes, no rescan
     };
-    let new_root = PathBuf::from(&picked);
+    let new_root = resolve_new_root(&PathBuf::from(&picked));
     if !new_root.is_dir() {
         return Err("that folder does not exist".into());
     }
@@ -3708,6 +3720,36 @@ mod tests {
         // empty root list → anything is ok
         let empty: Vec<std::path::PathBuf> = vec![];
         assert!(super::validate_new_root(&empty, Path::new("/music/anything")).is_ok());
+    }
+
+    #[test]
+    fn resolve_new_root_collapses_symlink_alias_before_validation() {
+        use std::path::PathBuf;
+        let base = std::env::temp_dir().join(format!("songstress-root-{}", std::process::id()));
+        let real = base.join("real");
+        let link = base.join("link");
+        std::fs::create_dir_all(&real).expect("real dir");
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        }
+        // The symlink input resolves to the same canonical path as its target.
+        let canon_real = std::fs::canonicalize(&real).expect("canon real");
+        assert_eq!(super::resolve_new_root(&link), canon_real);
+        // Lexically the alias looks disjoint, so the raw check passes (the
+        // bug); after resolution it is a duplicate and must be rejected.
+        let roots = vec![canon_real.clone()];
+        assert!(super::validate_new_root(&roots, &link).is_ok());
+        assert!(super::validate_new_root(&roots, &super::resolve_new_root(&link)).is_err());
+        // A `..`-spelled alias resolves to the same target too.
+        let dotted = real.join("sub").join("..");
+        std::fs::create_dir_all(real.join("sub")).expect("sub dir");
+        assert_eq!(super::resolve_new_root(&dotted), canon_real);
+        // Missing paths fall through untouched for the `is_dir` gate below.
+        let missing = PathBuf::from("/definitely/not/a/songstress/root");
+        assert_eq!(super::resolve_new_root(&missing), missing);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
