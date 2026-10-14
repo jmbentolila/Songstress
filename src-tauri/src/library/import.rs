@@ -501,6 +501,14 @@ fn prune_staged_dirs(root: &Path) {
     }
 }
 
+/// One staged file after the read-only decide pass. `plan` is `None` for a
+/// vanished file (row present, file absent); otherwise it is `plan_move`'s
+/// verdict, computed once and reused by the execute pass.
+struct DecidedSave {
+    src: PathBuf,
+    plan: Option<MovePlan>,
+}
+
 /// One file the save decided about: where it was and where it landed.
 /// `dest` is `None` for rows that left the dump without landing anywhere —
 /// a duplicate the library already held, or a staged file that vanished.
@@ -548,31 +556,57 @@ pub fn save_to_library(
     let root = import_dir(cache_dir);
     let total = staged.len();
     let mut report = SaveReport::default();
+    // DECIDE (read-only): per staged file, resolve where it would land and
+    // whether it lands at all. DB reads, stat, hash only — no write of any
+    // kind here (mkdir included), so suppressing afterwards still precedes
+    // the first write and the echo race stays closed. `plan_move` runs once
+    // per file; its verdict flows into the execute pass, never re-run.
     let mut by_album: HashMap<String, Destination> = HashMap::new();
-    // Silence our own echo BEFORE the first write lands. The watcher
+    let mut decided: Vec<DecidedSave> = Vec::with_capacity(total);
+    for src in staged {
+        let album_id = album_id_of_path(conn, src)?;
+        let dest = match by_album.get(&album_id) {
+            Some(d) => d.clone(),
+            None => {
+                let d = album_destination(conn, roots, music_dir, &album_id)?;
+                by_album.insert(album_id.clone(), d.clone());
+                d
+            }
+        };
+        if !src.exists() {
+            decided.push(DecidedSave { src: src.clone(), plan: None });
+            continue;
+        }
+        let name = src
+            .file_name()
+            .ok_or_else(|| format!("{src:?}: no file name"))?;
+        let plan = plan_move(src, &dest.folder.join(name))?;
+        decided.push(DecidedSave {
+            src: src.clone(),
+            plan: Some(plan),
+        });
+    }
+    // SUPPRESS: silence our own echo BEFORE the first write lands. The watcher
     // evaluates events at delivery — registering after the moves (or between
     // them) loses the race against the very first write, and the 2s debounce
     // cannot cover it: it delays the rescan, never the evaluation (measured
-    // live: an end-of-save registration still echoed). Resolving destinations
-    // is read-only, so planning the silence set up front moves nothing and
-    // changes no error the loop below would have raised first. Folder-level
-    // on purpose: `plan_move`'s ` (N)` suffix is unknowable before the move,
-    // but every name it can pick lives in the destination folder — as does
-    // every folder created on the way there. Roots themselves are never
-    // added: that would silence any top-level creation beside our move.
-    {
-        let mut seen: HashMap<String, PathBuf> = HashMap::new();
+    // live: an end-of-save registration still echoed). Only folders that gain
+    // at least one landed file are registered, plus their ancestors up to (not
+    // including) the roots — the predicted folders of duplicates and vanished
+    // files stay loud, so a real change there still rescans. Folder-level on
+    // purpose: `plan_move`'s ` (N)` suffix is unknowable before the move, but
+    // every name it can pick lives in the destination folder — as does every
+    // folder created on the way there. Roots themselves are never added: that
+    // would silence any top-level creation beside our move.
+    let silent: Vec<PathBuf> = {
         let mut silent = Vec::new();
-        for src in staged {
-            silent.push(src.clone());
-            let album_id = album_id_of_path(conn, src)?;
-            let folder = match seen.get(&album_id) {
-                Some(f) => f.clone(),
-                None => {
-                    let d = album_destination(conn, roots, music_dir, &album_id)?;
-                    seen.insert(album_id, d.folder.clone());
-                    d.folder
-                }
+        for d in &decided {
+            silent.push(d.src.clone());
+            let Some(MovePlan::Place(at)) = d.plan.as_ref() else {
+                continue;
+            };
+            let Some(folder) = at.parent().map(|p| p.to_path_buf()) else {
+                continue;
             };
             let under_root = roots.iter().any(|r| folder.starts_with(r));
             let is_root = roots.iter().any(|r| r == &folder);
@@ -590,64 +624,68 @@ pub fn save_to_library(
             }
         }
         crate::watcher::suppress_paths(&silent);
-    }
-    for (i, src) in staged.iter().enumerate() {
-        progress(i, total);
-        let album_id = album_id_of_path(conn, src)?;
-        let dest = match by_album.get(&album_id) {
-            Some(d) => d.clone(),
-            None => {
-                let d = album_destination(conn, roots, music_dir, &album_id)?;
-                by_album.insert(album_id, d.clone());
-                d
-            }
-        };
-        let name = src
-            .file_name()
-            .ok_or_else(|| format!("{src:?}: no file name"))?;
-        if !src.exists() {
-            forget_row(conn, src)?;
-            moves.push(SaveMove {
-                src: src.clone(),
-                dest: None,
-            });
-            report.vanished += 1;
-            continue;
-        }
-        match plan_move(src, &dest.folder.join(name))? {
-            MovePlan::Place(at) => {
-                if let Some(parent) = at.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("mkdir {parent:?}: {e}"))?;
-                }
-                move_into(src, &at)?;
-                // The row follows the file, keeping its id: a scan that gets
-                // there first sees "deleted + added" and hands back exactly the
-                // duplicate-with-missing-icon the user reported.
-                relink(conn, src, &at)?;
-                moves.push(SaveMove {
-                    src: src.clone(),
-                    dest: Some(at.clone()),
-                });
-                report.moved += 1;
-            }
-            // Same bytes already in the library. The user's ruling on this case:
-            // the file that was already ours is the one that stays, and the one
-            // they just pointed at is removed — the alternative is the same
-            // recording in the library twice over. Reported, never silent.
-            MovePlan::AlreadyHave => match std::fs::remove_file(src) {
-                Ok(()) => {
+        silent
+    };
+    // EXECUTE: mkdir/move/relink/forget as before, driven by the decide pass.
+    // Suppress-then-closure: every fallible step below runs inside the
+    // closure, so any Err first clears exactly the registered vec and then
+    // propagates — a future fallible step added here inherits the rule
+    // positionally. Pre-suppression errors need no clearing (nothing was
+    // registered yet); prune_staged_dirs below is infallible. Accepted edge:
+    // overlapping saves on one folder would clear a shared entry and fail
+    // open into one extra scan; saves serialize through one command path.
+    let outcome: Result<(), String> = (|| {
+        for (i, d) in decided.iter().enumerate() {
+            progress(i, total);
+            let src = &d.src;
+            match d.plan.as_ref() {
+                None => {
                     forget_row(conn, src)?;
                     moves.push(SaveMove {
                         src: src.clone(),
                         dest: None,
                     });
-                    report.duplicates += 1;
+                    report.vanished += 1;
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(format!("remove {src:?}: {e}")),
-            },
+                Some(MovePlan::Place(at)) => {
+                    if let Some(parent) = at.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+                    }
+                    move_into(src, at)?;
+                    // The row follows the file, keeping its id: a scan that gets
+                    // there first sees "deleted + added" and hands back exactly the
+                    // duplicate-with-missing-icon the user reported.
+                    relink(conn, src, at)?;
+                    moves.push(SaveMove {
+                        src: src.clone(),
+                        dest: Some(at.clone()),
+                    });
+                    report.moved += 1;
+                }
+                // Same bytes already in the library. The user's ruling on this case:
+                // the file that was already ours is the one that stays, and the one
+                // they just pointed at is removed — the alternative is the same
+                // recording in the library twice over. Reported, never silent.
+                Some(MovePlan::AlreadyHave) => match std::fs::remove_file(src) {
+                    Ok(()) => {
+                        forget_row(conn, src)?;
+                        moves.push(SaveMove {
+                            src: src.clone(),
+                            dest: None,
+                        });
+                        report.duplicates += 1;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(format!("remove {src:?}: {e}")),
+                },
+            }
         }
+        Ok(())
+    })();
+    if let Err(e) = outcome {
+        crate::watcher::unsuppress_paths(&silent);
+        return Err(e);
     }
     progress(total, total);
     prune_staged_dirs(&root);
@@ -1794,6 +1832,171 @@ mod tests {
         assert_eq!(staged_tracks(&conn, None, None).unwrap().len(), 1);
         // Idempotent: the second call has nothing left to do.
         assert_eq!(mark_legacy_staged(&conn, &import_dir(&cache)).unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// B1 AC1: a save holding one landed file, one duplicate, and one
+    /// vanished row returns Ok, and only the landed folder goes silent. Each
+    /// staged file belongs to its own album so the three predicted folders
+    /// are distinct: the duplicate's and the vanished file's folders must
+    /// stay loud (external writes count), while the landed file's folder
+    /// stays silent (AC3 regression side, same tree).
+    #[test]
+    fn b1_predicted_folders_stay_loud_while_landed_stays_silent() {
+        use crate::watcher::marks_library_dirty;
+        use notify::event::{CreateKind, EventKind};
+        use notify::Event;
+
+        let root = temp_dir("b1-ac1");
+        let cache = root.join("cache");
+        let music = root.join("music");
+        let downloads = root.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let conn = empty_db(&root);
+        // One anchor row per album so each staged album merges into a known,
+        // distinct folder under a shared collection home.
+        for (id, artist, title) in [
+            ("lib-a", "B1ArtistA", "B1AlbumA"),
+            ("lib-b", "B1ArtistB", "B1AlbumB"),
+            ("lib-c", "B1ArtistC", "B1AlbumC"),
+        ] {
+            seed_album(
+                &conn,
+                id,
+                artist,
+                title,
+                &[music.join(format!("Coll/{artist}/{title}/existing.mp3"))],
+            );
+        }
+        // The landed file.
+        let normal = downloads.join("normal.mp3");
+        seed_album(&conn, "st-a", "B1ArtistA", "B1AlbumA", &[normal.clone()]);
+        tiny_mp3(&normal, 11);
+        // The duplicate: same name, size, and bytes as a file already at the
+        // predicted dest, exercising the hash rule in `plan_move`.
+        let dup = downloads.join("dup.mp3");
+        seed_album(&conn, "st-b", "B1ArtistB", "B1AlbumB", &[dup.clone()]);
+        tiny_mp3(&dup, 12);
+        let dup_folder = music.join("Coll/B1ArtistB/B1AlbumB");
+        std::fs::create_dir_all(&dup_folder).unwrap();
+        std::fs::copy(&dup, dup_folder.join("dup.mp3")).unwrap();
+        // The vanished file: row present, file absent.
+        let ghost = downloads.join("ghost.mp3");
+        seed_album(&conn, "st-c", "B1ArtistC", "B1AlbumC", &[ghost.clone()]);
+        let vanished_folder = music.join("Coll/B1ArtistC/B1AlbumC");
+
+        let staged = vec![normal.clone(), dup.clone(), ghost.clone()];
+        let mut moves = Vec::new();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            &mut moves,
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(report.moved, 1);
+        assert_eq!(report.duplicates, 1, "reported, not swallowed");
+        assert_eq!(report.vanished, 1, "forgotten, not fatal");
+        assert_eq!(moves.len(), 3);
+        let landed = moves.iter().find_map(|m| m.dest.clone()).expect("one landing");
+        let landed_folder = landed.parent().unwrap().to_path_buf();
+        assert_eq!(
+            landed_folder,
+            music.join("Coll/B1ArtistA/B1AlbumA"),
+            "the normal file lands where its album lives"
+        );
+
+        // Assert promptly while the entries are fresh; unique temp dirs keep
+        // the process-global RECENT_SAVES ours alone.
+        let ev = |p: PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        assert!(
+            marks_library_dirty(&ev(dup_folder.join("external.mp3"))),
+            "AC1: the duplicate's predicted-but-unlanded folder still counts"
+        );
+        assert!(
+            marks_library_dirty(&ev(vanished_folder.join("external.mp3"))),
+            "AC1: the vanished file's predicted-but-unlanded folder still counts"
+        );
+        assert!(
+            !marks_library_dirty(&ev(landed_folder.join("sibling.mp3"))),
+            "AC3: a sibling of the landed file stays silent (no echo regression)"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// B2 AC4: a save that returns Err after suppression registered leaves
+    /// no attributable silence. The derived dest folder is pre-created
+    /// read-only (chmod 555, POSIX dev box, non-root): mkdir succeeds (it
+    /// exists), then move_into fails (rename plus copy-fallback), so the
+    /// failure lands after suppression registers and the wiring (not the
+    /// primitive alone) is what clears it. Permissions are restored before
+    /// asserting so cleanup never strands a read-only tree.
+    #[test]
+    fn b2_failed_save_leaves_no_silence() {
+        use crate::watcher::marks_library_dirty;
+        use notify::event::{CreateKind, EventKind};
+        use notify::Event;
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_dir("b2-ac4");
+        let cache = root.join("cache");
+        let music = root.join("music");
+        let downloads = root.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let conn = empty_db(&root);
+        let dest_folder = music.join("Coll/B2Artist/B2Album");
+        seed_album(
+            &conn,
+            "lib-b2",
+            "B2Artist",
+            "B2Album",
+            &[dest_folder.join("existing.mp3")],
+        );
+        let staged = downloads.join("new.mp3");
+        seed_album(&conn, "st-b2", "B2Artist", "B2Album", &[staged.clone()]);
+        tiny_mp3(&staged, 21);
+        // The fault: the save's own dest folder is unwritable.
+        std::fs::create_dir_all(&dest_folder).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&dest_folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let mut moves = Vec::new();
+        let result = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            std::slice::from_ref(&staged),
+            &mut moves,
+            |_, _| {},
+        );
+        // Restore before asserting: cleanup must never strand a read-only tree.
+        #[cfg(unix)]
+        std::fs::set_permissions(&dest_folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(
+            result.is_err(),
+            "the unwritable dest folder must fail the save (move_into rename plus copy-fallback)"
+        );
+
+        // Assert promptly while entries are fresh; unique temp dirs keep
+        // the process-global RECENT_SAVES ours alone.
+        let ev = |p: PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        assert!(
+            marks_library_dirty(&ev(dest_folder.join("external.mp3"))),
+            "AC4: after the Err, an external write in the silenced folder counts"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

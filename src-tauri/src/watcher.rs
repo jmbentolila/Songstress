@@ -66,6 +66,24 @@ pub fn suppress_paths(paths: &[PathBuf]) {
     }
 }
 
+/// Forget exactly the paths passed in, nothing wider: the error-path
+/// counterpart to [`suppress_paths`]. A failed save calls this with the
+/// vec it registered so no residual silence swallows a real change.
+/// Entries a live save still needs stay put — removal is per-path, so an
+/// overlapping save on a different folder keeps its own silence. (Two
+/// saves sharing one folder clear the shared entry and fail open into
+/// one extra scan; saves serialize through one command path, so that
+/// edge is documented, not handled.)
+pub fn unsuppress_paths(paths: &[PathBuf]) {
+    let Some(lock) = RECENT_SAVES.get() else {
+        return;
+    };
+    let mut map = lock.lock().unwrap();
+    for p in paths {
+        map.remove(p);
+    }
+}
+
 /// Whether every path in this event is one our own save just moved (and still
 /// inside its window). Folder-granular on the inside: a suppressed folder
 /// covers the names within it, because the ` (N)` suffix a collision earns
@@ -399,6 +417,117 @@ mod tests {
         assert!(
             marks_library_dirty(&mixed),
             "an external path in the burst still counts"
+        );
+    }
+
+    /// B1 AC2: with only landed paths suppressed, an event in a
+    /// predicted-but-unlanded folder counts — including a sibling-name path
+    /// of the kind the folder-cover rule would have hidden had that folder
+    /// been registered. Touches only the suppression-set input, never the
+    /// `is_own_save` rule itself.
+    #[test]
+    fn b1_unlanded_folder_counts_with_landed_only_suppression() {
+        use notify::event::CreateKind;
+        let base =
+            std::env::temp_dir().join(format!("songstress-b1-ac2-{}", std::process::id()));
+        let landed_dir = base.join("Landed Album");
+        let landed_file = landed_dir.join("01 - Landed.flac");
+        let unlanded_dir = base.join("Predicted Album");
+        // B1-shaped set: only what a save actually landed.
+        suppress_paths(&[landed_file.clone(), landed_dir.clone()]);
+        let ev = |p: std::path::PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        assert!(
+            marks_library_dirty(&ev(unlanded_dir.join("external.mp3"))),
+            "AC2: an event in a predicted-but-unlanded folder counts"
+        );
+        assert!(
+            marks_library_dirty(&ev(unlanded_dir.join("02 - Real.flac"))),
+            "AC2 via the folder-cover path: the parent was never registered"
+        );
+        // Coda: this sibling-name path IS one the cover hides — registering
+        // its folder flips it silent, proving the probe above ran through the
+        // cover rule and not around it.
+        suppress_paths(&[unlanded_dir.clone()]);
+        assert!(
+            !marks_library_dirty(&ev(unlanded_dir.join("02 - Real.flac"))),
+            "cover sanity: registering the folder covers its names"
+        );
+    }
+
+    /// B1 AC3: after a B1-shaped save, a sibling of a LANDED file is still
+    /// silent — the narrowed set must not regress echo suppression. The set
+    /// mirrors the ancestor rule (folder plus its parent), and the existing
+    /// `own_save_is_silent_per_path_with_folder_cover` stays unmodified.
+    #[test]
+    fn b1_landed_sibling_stays_silent() {
+        use notify::event::CreateKind;
+        let base =
+            std::env::temp_dir().join(format!("songstress-b1-ac3-{}", std::process::id()));
+        let parent = base.join("Coll").join("B1ArtistA");
+        let landed_dir = parent.join("B1AlbumA");
+        let landed_file = landed_dir.join("01 - Landed.flac");
+        let elsewhere = base.join("Elsewhere");
+        suppress_paths(&[landed_file.clone(), landed_dir.clone(), parent.clone()]);
+        let ev = |p: std::path::PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        assert!(
+            !marks_library_dirty(&ev(landed_file)),
+            "our own landed file must not echo"
+        );
+        assert!(
+            !marks_library_dirty(&ev(landed_dir.join("02 - Real.flac"))),
+            "AC3: a sibling of the landed file stays silent (cover applies)"
+        );
+        assert!(
+            marks_library_dirty(&ev(elsewhere.join("other.mp3"))),
+            "unsuppressed folders still count"
+        );
+    }
+
+    /// B2 unit probe: suppress then unsuppress the same set and the folder
+    /// counts again — the primitive clears exactly what it was given,
+    /// nothing wider. A second, unrelated registration survives the
+    /// clearing, proving removal is per-path.
+    #[test]
+    fn b2_unsuppress_clears_exactly_the_given_set() {
+        use notify::event::CreateKind;
+        let base =
+            std::env::temp_dir().join(format!("songstress-b2-unsuppress-{}", std::process::id()));
+        let failed_dir = base.join("Failed Album");
+        let failed_file = failed_dir.join("01 - Failed.flac");
+        let other_dir = base.join("Other Album");
+        let other_file = other_dir.join("01 - Other.flac");
+        let failed_set = vec![failed_file.clone(), failed_dir.clone()];
+        suppress_paths(&failed_set);
+        suppress_paths(&[other_file.clone(), other_dir.clone()]);
+        let ev = |p: std::path::PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        assert!(
+            !marks_library_dirty(&ev(failed_dir.join("02 - Real.flac"))),
+            "sanity: the folder is silent while registered"
+        );
+        unsuppress_paths(&failed_set);
+        assert!(
+            marks_library_dirty(&ev(failed_dir.join("external.mp3"))),
+            "B2 unit: after clearing, an event in that folder counts"
+        );
+        assert!(
+            marks_library_dirty(&ev(failed_file)),
+            "B2 unit: the cleared file itself counts too"
+        );
+        assert!(
+            !marks_library_dirty(&ev(other_dir.join("02 - Real.flac"))),
+            "exactness: an unrelated registration survives the clearing"
         );
     }
 
