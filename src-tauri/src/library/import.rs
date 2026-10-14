@@ -1931,6 +1931,98 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Gap 4: a save that lands nothing (staged set of only duplicates plus
+    /// vanished rows) silences no destination folder. Both predicted folders
+    /// stay loud: an external write in either one still counts. Scope guard
+    /// owns cleanup so an assert failure never strands the temp tree. No
+    /// sleeps: assertions run promptly inside the suppress window, and the
+    /// pid-tagged temp dir keeps the process-global suppression set ours.
+    #[test]
+    fn b1_zero_landed_save_leaves_every_predicted_folder_loud() {
+        use crate::watcher::marks_library_dirty;
+        use notify::event::{CreateKind, EventKind};
+        use notify::Event;
+
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let root = temp_dir("b1-zero-landed");
+        let _guard = Guard(root.clone());
+        let cache = root.join("cache");
+        let music = root.join("music");
+        let downloads = root.join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let conn = empty_db(&root);
+        // One anchor row per album so each staged album merges into a known,
+        // distinct folder under a shared collection home.
+        for (id, artist, title) in [
+            ("lib-b", "B1ArtistB", "B1AlbumB"),
+            ("lib-c", "B1ArtistC", "B1AlbumC"),
+        ] {
+            seed_album(
+                &conn,
+                id,
+                artist,
+                title,
+                &[music.join(format!("Coll/{artist}/{title}/existing.mp3"))],
+            );
+        }
+        // The duplicate: same name, size, and bytes as a file already at the
+        // predicted dest, exercising the hash rule in `plan_move`.
+        let dup = downloads.join("dup.mp3");
+        seed_album(&conn, "st-b", "B1ArtistB", "B1AlbumB", &[dup.clone()]);
+        tiny_mp3(&dup, 12);
+        let dup_folder = music.join("Coll/B1ArtistB/B1AlbumB");
+        std::fs::create_dir_all(&dup_folder).unwrap();
+        std::fs::copy(&dup, dup_folder.join("dup.mp3")).unwrap();
+        // The vanished file: row present, file absent.
+        let ghost = downloads.join("ghost.mp3");
+        seed_album(&conn, "st-c", "B1ArtistC", "B1AlbumC", &[ghost.clone()]);
+        let vanished_folder = music.join("Coll/B1ArtistC/B1AlbumC");
+
+        let staged = vec![dup.clone(), ghost.clone()];
+        let mut moves = Vec::new();
+        let report = save_to_library(
+            &conn,
+            &cache,
+            std::slice::from_ref(&music),
+            &music,
+            &staged,
+            &mut moves,
+            |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(report.moved, 0, "nothing lands in a dup-plus-vanished save");
+        assert_eq!(report.duplicates, 1, "reported, not swallowed");
+        assert_eq!(report.vanished, 1, "forgotten, not fatal");
+        assert_eq!(moves.len(), 2, "both decided files are reported");
+        assert!(
+            moves.iter().all(|m| m.dest.is_none()),
+            "zero landed means zero destinations: {moves:?}"
+        );
+
+        // No destination folder went silent: an external write in EVERY
+        // predicted folder still counts.
+        let ev = |p: PathBuf| {
+            let mut e = Event::new(EventKind::Create(CreateKind::File));
+            e.paths = vec![p];
+            e
+        };
+        for folder in [&dup_folder, &vanished_folder] {
+            assert!(
+                marks_library_dirty(&ev(folder.join("external.mp3"))),
+                "gap 4: the predicted-but-unlanded folder {folder:?} still counts"
+            );
+            assert!(
+                marks_library_dirty(&ev(folder.join("02 - Real.flac"))),
+                "gap 4 via the folder-cover path: {folder:?} was never registered"
+            );
+        }
+    }
+
     /// B2 AC4: a save that returns Err after suppression registered leaves
     /// no attributable silence. The derived dest folder is pre-created
     /// read-only (chmod 555, POSIX dev box, non-root): mkdir succeeds (it

@@ -2072,6 +2072,19 @@ fn validate_new_root(roots: &[PathBuf], path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The `add_music_folder` ingress as a pure function: resolve the picked
+/// path to its canonical form FIRST, then gate on existence and validate
+/// against the current roots. `add_music_folder` calls this below; tests
+/// call it too, so dropping the resolve from the ingress fails the test.
+fn checked_new_root(roots: &[PathBuf], picked: &str) -> Result<PathBuf, String> {
+    let new_root = resolve_new_root(&PathBuf::from(picked));
+    if !new_root.is_dir() {
+        return Err("that folder does not exist".into());
+    }
+    validate_new_root(roots, &new_root)?;
+    Ok(new_root)
+}
+
 fn persist_roots(state: &AppState, roots: &[PathBuf]) -> Result<(), String> {
     let list: Vec<String> = roots
         .iter()
@@ -2136,13 +2149,9 @@ async fn add_music_folder(
     let Some(picked) = picked else {
         return Ok(None); // picker cancelled — no changes, no rescan
     };
-    let new_root = resolve_new_root(&PathBuf::from(&picked));
-    if !new_root.is_dir() {
-        return Err("that folder does not exist".into());
-    }
+    let roots = music_roots(&state);
+    let new_root = checked_new_root(&roots, &picked)?;
     {
-        let roots = music_roots(&state);
-        validate_new_root(&roots, &new_root)?;
         let mut next = roots;
         next.push(new_root);
         persist_roots(&state, &next)?;
@@ -3750,6 +3759,114 @@ mod tests {
         let missing = PathBuf::from("/definitely/not/a/songstress/root");
         assert_eq!(super::resolve_new_root(&missing), missing);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Call-site probe for the picker ingress: `checked_new_root` (what
+    /// `add_music_folder` calls) resolves FIRST, so a symlink alias of an
+    /// existing root is rejected as a duplicate and the canonical path is
+    /// what gets persisted. POSIX-only: symlinks need a unix box. Removing
+    /// the resolve from the ingress while keeping the helper fails this
+    /// test (the alias then validates as disjoint).
+    #[test]
+    #[cfg(unix)]
+    fn add_ingress_persists_canonical_path_and_rejects_alias() {
+        use std::path::PathBuf;
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let base = std::env::temp_dir().join(format!(
+            "songstress-add-ingress-{}",
+            std::process::id()
+        ));
+        let _guard = Guard(base.clone());
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let link = base.join("link");
+        std::fs::create_dir_all(&real).expect("real dir");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        let canon = std::fs::canonicalize(&real).expect("canon real");
+
+        // The ingress resolves the alias to the canonical path.
+        let got = super::checked_new_root(&[], link.to_str().expect("utf8"))
+            .expect("alias of nothing existing passes");
+        assert_eq!(got, canon, "ingress stores the target, never the link");
+
+        // Persist exactly what the ingress returned, then read it back the
+        // way the app does: the stored root is canonical.
+        let dbp = base.join("ingress.db");
+        let conn = crate::library::db::open(&dbp).expect("open");
+        let state = super::AppState {
+            db_path: dbp.clone(),
+            db: std::sync::Mutex::new(conn),
+        };
+        super::persist_roots(&state, &[got]).expect("persist");
+        let stored = super::music_roots(&state);
+        assert_eq!(stored, vec![canon.clone()]);
+        assert!(
+            !stored.iter().any(|r| r == &link),
+            "no symlink path is ever persisted"
+        );
+
+        // The same target picked again, by either spelling, is a duplicate.
+        assert!(super::checked_new_root(&stored, real.to_str().expect("utf8")).is_err());
+        assert!(super::checked_new_root(&stored, link.to_str().expect("utf8")).is_err());
+    }
+
+    /// Nesting bypass through a symlink child: picking a link whose target
+    /// sits inside an existing root's subtree is rejected after resolution,
+    /// and a link whose target contains an existing root is rejected too.
+    /// POSIX-only: symlinks need a unix box. Lexically both aliases look
+    /// disjoint, so the raw check passes and only the resolved one rejects.
+    #[test]
+    #[cfg(unix)]
+    fn add_ingress_rejects_symlink_child_nesting() {
+        use std::path::PathBuf;
+        struct Guard(PathBuf);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let base = std::env::temp_dir().join(format!(
+            "songstress-add-nesting-{}",
+            std::process::id()
+        ));
+        let _guard = Guard(base.clone());
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let sub = real.join("sub");
+        std::fs::create_dir_all(&sub).expect("sub dir");
+        let link_in = base.join("alias-in");
+        std::os::unix::fs::symlink(&sub, &link_in).expect("symlink in");
+        let link_out = base.join("alias-out");
+        std::os::unix::fs::symlink(&real, &link_out).expect("symlink out");
+        let canon_real = std::fs::canonicalize(&real).expect("canon real");
+        let canon_sub = std::fs::canonicalize(&sub).expect("canon sub");
+
+        // Alias into an existing root's subtree: raw looks disjoint, the
+        // ingress (resolved) rejects as inside.
+        let roots = vec![canon_real.clone()];
+        assert!(super::validate_new_root(&roots, &link_in).is_ok());
+        let err = super::checked_new_root(&roots, link_in.to_str().expect("utf8"))
+            .expect_err("symlink child of a root must be rejected");
+        assert!(
+            err.contains("inside an existing music folder"),
+            "unexpected error: {err}"
+        );
+
+        // Alias whose target contains an existing root: the ingress rejects
+        // as containing.
+        let roots = vec![canon_sub.clone()];
+        assert!(super::validate_new_root(&roots, &link_out).is_ok());
+        let err = super::checked_new_root(&roots, link_out.to_str().expect("utf8"))
+            .expect_err("symlink parent of a root must be rejected");
+        assert!(
+            err.contains("contains an existing music folder"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
