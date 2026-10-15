@@ -113,6 +113,90 @@ pub fn migrate_panel_gradients(conn: &Connection) -> rusqlite::Result<usize> {
     Ok(moved)
 }
 
+/// One-time canonicalization of stored library roots (2026-10-15).
+/// Rows written before the ingress fix (c9362a9) may hold non-canonical
+/// aliases: symlinked dirs or `..`-spellings. Going forward ingress stores
+/// canonical paths, but existing rows were untouched. This resolves each
+/// stored root with the same semantics as `resolve_new_root`
+/// (symlinks resolved, raw kept when unresolvable so nothing deletes user
+/// data) and persists the row back only when something changed.
+/// Idempotent: canonical paths resolve to themselves, so a rerun migrates
+/// nothing. Returns what moved and what was kept raw (still reported).
+pub struct RootsMigration {
+    /// (before, after) display strings for every root that changed.
+    pub migrated: Vec<(String, String)>,
+    /// Raw stored values that failed to resolve — kept, never dropped.
+    pub kept_raw: Vec<String>,
+}
+
+pub fn migrate_music_roots(conn: &Connection) -> rusqlite::Result<RootsMigration> {
+    let mut out = RootsMigration {
+        migrated: Vec::new(),
+        kept_raw: Vec::new(),
+    };
+    let has_list: bool = conn
+        .query_row("SELECT 1 FROM settings WHERE key = 'musicDirs'", [], |_| {
+            Ok(true)
+        })
+        .unwrap_or(false);
+    if has_list {
+        let raw: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'musicDirs'", [], |r| {
+                r.get(0)
+            })?;
+        let list: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+        let mut next = list.clone();
+        let mut changed = false;
+        for entry in &mut next {
+            if entry.trim().is_empty() {
+                continue; // blank entries are inert; resolving "" would hit CWD
+            }
+            match std::fs::canonicalize(entry.as_str()) {
+                Ok(canon) => {
+                    let s = canon.to_string_lossy().into_owned();
+                    if s != *entry {
+                        out.migrated.push((entry.clone(), s.clone()));
+                        *entry = s;
+                        changed = true;
+                    }
+                }
+                Err(_) => out.kept_raw.push(entry.clone()),
+            }
+        }
+        if changed {
+            set(conn, "musicDirs", &serde_json::to_string(&next).unwrap_or(raw))?;
+        }
+    } else if let Ok(raw) = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'musicDir'",
+        [],
+        |r| r.get::<_, String>(0),
+    ) {
+        // Legacy single-root shape: same treatment, kept in its own key so
+        // the startup `musicDirs` materialization below copies the fixed value.
+        let stored: Option<String> = serde_json::from_str(&raw).unwrap_or(None);
+        if let Some(path) = stored {
+            if !path.trim().is_empty() {
+            match std::fs::canonicalize(path.as_str()) {
+                Ok(canon) => {
+                    let s = canon.to_string_lossy().into_owned();
+                    if s != path {
+                        out.migrated.push((path, s.clone()));
+                        let fixed: Option<String> = Some(s);
+                        set(
+                            conn,
+                            "musicDir",
+                            &serde_json::to_string(&fixed).unwrap_or(raw),
+                        )?;
+                    }
+                }
+                Err(_) => out.kept_raw.push(path),
+            }
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::db;
@@ -164,6 +248,59 @@ mod tests {
         set(&conn, "albumGradient:al-3", "[\"only-one\"]").expect("seed");
         assert_eq!(album_gradient(&conn, "al-3"), None);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn stored_root_alias_canonicalizes_once_and_keeps_unresolvable() {
+        let base = std::env::temp_dir().join(format!(
+            "songstress-migrate-roots-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let link = base.join("link");
+        std::fs::create_dir_all(&real).expect("real dir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        #[cfg(not(unix))]
+        let link = real.clone();
+        let canon = std::fs::canonicalize(&real)
+            .expect("canon real")
+            .to_string_lossy()
+            .into_owned();
+        let missing = "/definitely/not/a/songstress/root".to_string();
+
+        let path = base.join("settings.db");
+        let conn = db::open(&path).expect("open");
+        let seed = serde_json::to_string(&vec![
+            link.to_string_lossy().into_owned(),
+            missing.clone(),
+        ])
+        .expect("seed json");
+        set(&conn, "musicDirs", &seed).expect("seed musicDirs");
+
+        // First run: the alias resolves out, the missing root is kept raw.
+        let first = migrate_music_roots(&conn).expect("migrate");
+        assert_eq!(first.migrated.len(), 1, "only the alias moves");
+        assert_eq!(first.migrated[0].1, canon);
+        assert_eq!(first.kept_raw, vec![missing.clone()]);
+        let stored: Vec<String> = serde_json::from_str(
+            &all(&conn).expect("all")["musicDirs"],
+        )
+        .expect("stored json");
+        assert_eq!(stored, vec![canon.clone(), missing.clone()]);
+
+        // Second run: nothing left to do — idempotent.
+        let second = migrate_music_roots(&conn).expect("migrate again");
+        assert!(second.migrated.is_empty(), "rerun migrates nothing");
+        assert_eq!(second.kept_raw, vec![missing.clone()], "still reported");
+        let stored_again: Vec<String> = serde_json::from_str(
+            &all(&conn).expect("all")["musicDirs"],
+        )
+        .expect("stored json");
+        assert_eq!(stored_again, stored, "rerun writes nothing");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

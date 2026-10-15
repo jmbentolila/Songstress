@@ -3243,6 +3243,28 @@ pub fn run() {
                 }
             }
 
+            // One-time (2026-10-15): rows stored before the ingress fix
+            // (c9362a9) may hold alias spellings (symlinks, `..`); ingress
+            // now canonicalizes, but old rows were untouched. Resolve each
+            // stored root in place: unresolvable entries are kept raw and
+            // reported, never dropped. Idempotent — a rerun migrates nothing.
+            {
+                let st = app.state::<AppState>();
+                let conn = st.db.lock().unwrap();
+                match library::settings::migrate_music_roots(&conn) {
+                    Ok(r) if r.migrated.is_empty() && r.kept_raw.is_empty() => {}
+                    Ok(r) => {
+                        for (before, after) in &r.migrated {
+                            eprintln!("[settings] root canonicalized: {before} -> {after}");
+                        }
+                        for raw in &r.kept_raw {
+                            eprintln!("[settings] root kept as stored (unresolvable): {raw}");
+                        }
+                    }
+                    Err(e) => eprintln!("[settings] root canonicalization failed: {e}"),
+                }
+            }
+
             // Step 7d: live library watching — inotify over ALL music roots
             // (Step 7c: re-armed by add/remove_music_folder), debounced 2s;
             // a polling async loop turns the dirty flag into incremental
