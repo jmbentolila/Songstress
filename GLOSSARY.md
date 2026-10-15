@@ -1,0 +1,32 @@
+# GLOSSARY (proposal, trial/mare-glossary — terms only, one line each)
+
+- **save** — moving staged files into the library and re-pointing their rows. Not writing tags to files, not the dump patch that follows it.
+- **scan** — the full pipeline: walk roots, upsert rows, refresh artwork, sync sidecars, emit scan-finished. Not a targeted re-index, not the frontend reloading its dump.
+- **rescan** — re-running the scan pipeline over library roots, by hand or by watcher. Not rescan_written, which re-indexes only named files and skips the removal sweep.
+- **full** — full=true means reparse every file even when mtime+size are unchanged. Not a full dump read, which is the frontend re-reading everything.
+- **import** — the two-step flow: index files where they sit and flag them, then save or discard. Not copying; nothing is copied anymore.
+- **staged** — a row with tracks.staged=1, awaiting save or discard. Not a folder, not a path prefix; the copy era stored this as a location, the column replaced that.
+- **pending** — the UI word for the staged pile (badges, filters, doors). Same rows as staged, seen from the frontend; not a separate state.
+- **root** — one configured music dir. Not the primary root (the first one, the default save target), not the scan roots (all roots plus the legacy staging dir when present).
+- **folder** — a directory on disk: album folder, artist folder, destination folder. Not a root, not an album row.
+- **path** — one file's location as stored and compared. Not a folder, not an id; watcher events carry paths that are sometimes folders.
+- **dump** — the whole get_library payload as the frontend holds it. Not the store that holds it, not the database it was read from.
+- **store** — the frontend LibraryStore: the live snapshot plus its indexes. Not the database, not a single dump event.
+- **library** — the indexed collection itself: database rows over files under the roots. Not the store, not the dump, not the folders on disk.
+- **patch** — the save's targeted dump refresh (moved/removed id lists on scan-finished). Not a tag edit, not a file diff.
+- **rename** — a track row's oldId→newId identity change across a save. Not the filesystem move underneath it, which keeps filenames.
+- **relink** — the save updating a moved row's id, path, and staged flag together. Not relink_track, the locate flow that points a missing row at a user-found file.
+- **follow** — retag-follow moves the view to the regrouped album after a tag save; rename-follow (reanchor) moves playback context across a save's id changes. Same word, view vs playback.
+- **mirror** — sidecar mirror writes display state from database to disk; playback mirror reflects engine state into the frontend. Direction differs; check which one.
+- **ingress** — where outside input is canonicalized before validation and persistence (picker result in, stored root out). Not the validation, not the storing.
+- **echo** — the watcher firing on our own save's writes. Not a real change; suppression exists to swallow exactly this.
+- **suppress (silence)** — registering save-moved paths so the watcher ignores them for one window. Suppress is the act, silence is the resulting quiet; one mechanism.
+- **sidecar** — the per-album .songstress.json display-state file. Not library content; the watcher and the scan treat it as ours, not music.
+- **missing** — a row whose file vanished, kept and flagged so it can be located or deleted. Not vanished: a staged source gone before save, which is forgotten, never flagged.
+- **duplicate (already-have)** — bytes the library already holds; the staged row drops, no error. Not a tag conflict. Two named checks: resolve_collision (size-only, relink_track locate flow) vs plan_move (name+size+content-hash, save flow).
+- **destination** — the filesystem folder a staged album will move to, plus the rule that chose it. Not the retag-follow's destination album row.
+- **merge** — the destination rule joining the folder of the same album already on disk. Not the scan regrouping rows after a retag.
+- **plan** — the staged plan lists album-level destinations for the modal decision; a move plan verdicts one file (land here, drop as duplicate, gone). Two levels, one word.
+- **stable id** — track ids derive from file paths, album and artist ids from tags; equal inputs give equal ids so rescans upsert. Not the path, not a database rowid.
+- **collection home** — the folder holding most of the library's artist folders, learned by tally. Not the primary root; new artists land here.
+- **discard** — forgetting staged rows, deleting only files the app itself wrote. Not delete, which removes missing rows the user chose to drop; neither touches user files on disk.

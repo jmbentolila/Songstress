@@ -6081,3 +6081,9 @@ VERIFICATION: cargo check clean, cargo test --lib 154/154 (6 new), vitest 150/15
 
 CLOSE-OUT of the canonicalize gap: startup migration reads stored roots, canonicalizes each with ingress semantics, persists only changed rows, keeps unresolvable roots raw and reported, idempotent reruns. Legacy musicDir key covered too. Deliberately no dedup of two aliases sharing one target (dropping rows contradicts the never-drop rule; ingress validation blocks new ones). Out-of-band callers holding stale alias strings get "not a music folder" — frontend reads canonical via get_music_folders, stays consistent.
 VERIFICATION: cargo check clean, cargo test --lib 158/158 (1 new migration test), proposal in a disposable worktree under the standing CONSTRAINTS.md, applied to main after owner gate. No version change per standing owner order.
+
+### GLOSSARY.md + contradiction fixes (2026-10-15, domain-modeling trial, no bump)
+
+TRIAL: drafted the repo's first GLOSSARY.md (30 terms, terms-only) in a disposable worktree; the survey surfaced 4 comment-vs-code contradictions, fixed first per owner gate.
+FIXES: album-id comment corrected to tag-derived (scan.rs stable_id proves it; pure folder moves never strand entries), staged comment qualified for unhealed copy-era rows, copy/rename wording split (filesystem move vs row-identity rename), duplicate entry names both already-checks (size-only locate flow vs name+size+hash save flow).
+VERIFICATION: cargo check clean; glossary committed as GLOSSARY.md at repo root. No version change per standing owner order.

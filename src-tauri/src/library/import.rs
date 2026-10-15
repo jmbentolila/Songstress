@@ -759,7 +759,7 @@ pub fn resolve_collision(src: &Path, dest: &Path) -> Result<Option<PathBuf>, Str
 }
 
 /// The files an import request expands to: directories are walked, unsupported
-/// files dropped. Nothing is copied and nothing is renamed, so this is exactly
+/// files dropped. No file is moved and no row is renamed, so this is exactly
 /// what the user pointed at — which is also what gets indexed, flagged, and shown
 /// in the modal one by one.
 pub fn import_targets(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {

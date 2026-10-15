@@ -2212,6 +2212,9 @@ async fn remove_music_folder(
 // scan like anything else); save_imports MOVES them into the library and re-points
 // the rows; discard_imports forgets the rows and touches no file the app did not
 // write itself. What is pending lives in tracks.staged — not in a folder.
+// Going forward, that is the whole story; unhealed copy-era rows are the
+// exception, still sitting under the staging dir until the startup heal
+// (mark_legacy_staged) flags them.
 
 /// Multi-file picker for IMPORT staging. Returns None on cancel.
 #[tauri::command]

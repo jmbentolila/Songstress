@@ -229,8 +229,8 @@ class LibraryStore {
   }
 
   /** Drop panel-gradient overrides for albums no longer in the dump
-   *  (Step 9b prune): an album id derives from its path, so a
-   *  moved/renamed/regrouped album strands its entry. Drop them on every
+   *  (Step 9b prune): an album id derives from its tags, so a
+   *  retagged/regrouped album strands its entry. Drop them on every
    *  successful refresh — boot, rescans AND save patches — but only against
    *  a LIVE dump (the fake library's ids would wipe real overrides in dev).
    *  Assigns only when something actually died, so quiet loads never churn
