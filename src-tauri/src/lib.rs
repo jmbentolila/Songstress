@@ -3255,13 +3255,19 @@ pub fn run() {
                 let st = app.state::<AppState>();
                 let conn = st.db.lock().unwrap();
                 match library::settings::migrate_music_roots(&conn) {
-                    Ok(r) if r.migrated.is_empty() && r.kept_raw.is_empty() => {}
                     Ok(r) => {
                         for (before, after) in &r.migrated {
                             eprintln!("[settings] root canonicalized: {before} -> {after}");
                         }
                         for raw in &r.kept_raw {
                             eprintln!("[settings] root kept as stored (unresolvable): {raw}");
+                        }
+                        let c = r.reconcile;
+                        if c.rewritten + c.deduped > 0 {
+                            eprintln!(
+                                "[settings] track rows reconciled: {} rewritten, {} deduped, {} kept",
+                                c.rewritten, c.deduped, c.kept
+                            );
                         }
                     }
                     Err(e) => eprintln!("[settings] root canonicalization failed: {e}"),
@@ -3943,6 +3949,260 @@ mod tests {
             .expect("count");
         assert_eq!(left, 2, "/music/a and /music/bc tracks survive");
         let _ = std::fs::remove_file(&dbp);
+    }
+
+    /// Temp root + symlink alias + a DB seeded with one artist and one album:
+    /// the shape every root-reconcile test starts from. Returns (base, conn,
+    /// canonical root string). Caller writes files under `base/real` and drops
+    /// `base` when done.
+    fn alias_root_fixture(tag: &str) -> (std::path::PathBuf, rusqlite::Connection, String) {
+        let base = std::env::temp_dir().join(format!(
+            "songstress-reconcile-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).expect("real dir");
+        std::os::unix::fs::symlink(&real, base.join("link")).expect("symlink");
+        let canon = std::fs::canonicalize(&real)
+            .expect("canon real")
+            .to_string_lossy()
+            .into_owned();
+        let conn = crate::library::db::open(&base.join("reconcile.db")).expect("open");
+        conn.execute_batch(
+            "INSERT INTO artists VALUES ('ar-x','X','x');
+             INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);",
+        )
+        .expect("seed album");
+        (base, conn, canon)
+    }
+
+    fn seed_track(conn: &rusqlite::Connection, id: &str, path: &str, staged: i64) {
+        conn.execute(
+            "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size, staged)
+             VALUES (?1,'al-1',1,1,'t1',10.0,?2,1,1,?3)",
+            rusqlite::params![id, path, staged],
+        )
+        .expect("seed track");
+    }
+
+    /// The audit defect (Erde run-1): `migrate_music_roots` canonicalizes
+    /// `musicDirs` while the row keeps the pre-migration alias spelling, so
+    /// removing the canonical root purged none of them. Reconciliation at
+    /// migration time is what makes the removal contract hold.
+    #[test]
+    fn removing_a_canonicalized_root_drops_its_rows_with_the_reconcile() {
+        let base = std::env::temp_dir().join(format!(
+            "songstress-root-alias-proof-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        let link = base.join("link");
+        std::fs::create_dir_all(&real).expect("real dir");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        let canon = std::fs::canonicalize(&real)
+            .expect("canon real")
+            .to_string_lossy()
+            .into_owned();
+        // The defect only exists for rows whose file is really there: a row
+        // with no file is deliberately kept (see the unresolvable-path test).
+        std::fs::write(real.join("file.mp3"), b"x").expect("track file");
+
+        let conn = crate::library::db::open(&base.join("proof.db")).expect("open");
+        // The pre-fix state: the root is stored as the symlink alias.
+        crate::library::settings::set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![link.to_string_lossy().into_owned()]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        // ... and the pre-migration scan keyed its rows on that alias spelling.
+        conn.execute_batch(
+            "INSERT INTO artists VALUES ('ar-x','X','x');
+             INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);",
+        )
+        .expect("seed album");
+        conn.execute(
+            "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size)
+             VALUES ('tr-alias','al-1',1,1,'t1',10.0,?1,1,1)",
+            [link.join("file.mp3").to_string_lossy()],
+        )
+        .expect("seed track");
+
+        let moved = crate::library::settings::migrate_music_roots(&conn).expect("migrate");
+        assert_eq!(moved.migrated.len(), 1, "the alias root canonicalizes");
+        assert_eq!(moved.reconcile.rewritten, 1, "the alias row follows the root");
+        let stored: Vec<String> = serde_json::from_str(
+            &crate::library::settings::all(&conn).expect("all")["musicDirs"],
+        )
+        .expect("stored json");
+        assert_eq!(stored, vec![canon.clone()], "root is now canonical");
+        let row: (String, String) = conn
+            .query_row("SELECT id, path FROM tracks", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("row");
+        assert_eq!(row.1, format!("{canon}/file.mp3"), "row re-pointed, not dropped");
+
+        let dropped =
+            super::delete_tracks_under_root(&conn, std::path::Path::new(&canon)).expect("delete");
+        assert_eq!(dropped, 1);
+        let mut stmt = conn.prepare("SELECT path FROM tracks").expect("stmt");
+        let left: Vec<String> = stmt
+            .query_map([], |r| r.get(0))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect();
+        drop(stmt);
+        assert!(
+            left.is_empty(),
+            "alias rows survived removal of the canonical root: {left:?}"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn reconcile_dedupes_an_alias_row_into_the_canonical_row() {
+        let (base, conn, canon) = alias_root_fixture("dedupe");
+        std::fs::write(base.join("real/file.mp3"), b"x").expect("track file");
+        crate::library::settings::set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![canon.clone()]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        let canon_path = format!("{canon}/file.mp3");
+        let canon_id = crate::library::stable_id("tr", &[&canon_path]);
+        seed_track(&conn, "tr-alias", &format!("{}/file.mp3", base.join("link").display()), 0);
+        seed_track(&conn, &canon_id, &canon_path, 0);
+
+        let rep = crate::library::settings::reconcile_root_paths(&conn).expect("reconcile");
+        assert_eq!((rep.rewritten, rep.deduped, rep.kept), (0, 1, 1));
+        let rows: Vec<(String, String)> = {
+            let mut stmt = conn.prepare("SELECT id, path FROM tracks").expect("stmt");
+            let m = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .expect("query");
+            m.map(|r| r.expect("row")).collect()
+        };
+        assert_eq!(
+            rows,
+            vec![(canon_id.clone(), canon_path.clone())],
+            "the canonical row wins; the alias row is the duplicate"
+        );
+        let dropped =
+            super::delete_tracks_under_root(&conn, std::path::Path::new(&canon)).expect("delete");
+        assert_eq!(dropped, 1, "removal then drops the survivor");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn reconcile_keeps_the_alias_rows_staged_flag_on_the_survivor() {
+        let (base, conn, canon) = alias_root_fixture("staged");
+        std::fs::write(base.join("real/file.mp3"), b"x").expect("track file");
+        crate::library::settings::set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![canon.clone()]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        let canon_path = format!("{canon}/file.mp3");
+        let canon_id = crate::library::stable_id("tr", &[&canon_path]);
+        let alias_path = format!("{}/file.mp3", base.join("link").display());
+        seed_track(&conn, "tr-alias", &alias_path, 1);
+        seed_track(&conn, &canon_id, &canon_path, 0);
+
+        let rep = crate::library::settings::reconcile_root_paths(&conn).expect("reconcile");
+        assert_eq!(rep.deduped, 1);
+        let staged: i64 = conn
+            .query_row("SELECT staged FROM tracks WHERE id = ?1", [&canon_id], |r| {
+                r.get(0)
+            })
+            .expect("survivor");
+        assert_eq!(staged, 1, "an unsaved import must not become invisible");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn reconcile_leaves_rows_outside_every_root_alone() {
+        let (base, conn, canon) = alias_root_fixture("outside");
+        std::fs::create_dir_all(base.join("elsewhere")).expect("elsewhere");
+        std::fs::write(base.join("elsewhere/song.mp3"), b"x").expect("file");
+        crate::library::settings::set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![canon]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        let outside = base.join("elsewhere/song.mp3");
+        let outside_s = outside.to_string_lossy().into_owned();
+        seed_track(&conn, "tr-outside", &outside_s, 0);
+
+        let rep = crate::library::settings::reconcile_root_paths(&conn).expect("reconcile");
+        assert_eq!((rep.rewritten, rep.deduped, rep.kept), (0, 0, 1));
+        let row: (String, String) = conn
+            .query_row("SELECT id, path FROM tracks", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("row");
+        assert_eq!(row, ("tr-outside".to_string(), outside_s));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn reconcile_is_idempotent_on_a_second_startup() {
+        let (base, conn, canon) = alias_root_fixture("idempotent");
+        std::fs::write(base.join("real/file.mp3"), b"x").expect("track file");
+        std::fs::write(base.join("real/two.mp3"), b"x").expect("second file");
+        crate::library::settings::set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![canon.clone()]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        let link = base.join("link");
+        seed_track(&conn, "tr-alias", &format!("{}/file.mp3", link.display()), 0);
+        seed_track(
+            &conn,
+            "tr-canon",
+            &format!("{canon}/two.mp3"),
+            0,
+        );
+
+        let first = crate::library::settings::reconcile_root_paths(&conn).expect("first");
+        assert_eq!((first.rewritten, first.deduped), (1, 0));
+        let second = crate::library::settings::reconcile_root_paths(&conn).expect("second");
+        assert_eq!(
+            (second.rewritten, second.deduped),
+            (0, 0),
+            "nothing left to reconcile"
+        );
+        assert_eq!(second.kept, 2);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn reconcile_keeps_rows_whose_file_no_longer_resolves() {
+        let (base, conn, canon) = alias_root_fixture("missing");
+        crate::library::settings::set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![canon.clone()]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        let missing = format!("{canon}/gone.mp3");
+        seed_track(&conn, "tr-gone", &missing, 0);
+
+        let rep = crate::library::settings::reconcile_root_paths(&conn).expect("reconcile");
+        assert_eq!((rep.rewritten, rep.deduped, rep.kept), (0, 0, 1));
+        let row: (String, String) = conn
+            .query_row("SELECT id, path FROM tracks", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("row");
+        assert_eq!(row, ("tr-gone".to_string(), missing), "path is never invented");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

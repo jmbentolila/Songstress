@@ -127,12 +127,15 @@ pub struct RootsMigration {
     pub migrated: Vec<(String, String)>,
     /// Raw stored values that failed to resolve — kept, never dropped.
     pub kept_raw: Vec<String>,
+    /// Track-row reconciliation run after the write (see `reconcile_root_paths`).
+    pub reconcile: ReconcileReport,
 }
 
 pub fn migrate_music_roots(conn: &Connection) -> rusqlite::Result<RootsMigration> {
     let mut out = RootsMigration {
         migrated: Vec::new(),
         kept_raw: Vec::new(),
+        reconcile: ReconcileReport::default(),
     };
     let has_list: bool = conn
         .query_row("SELECT 1 FROM settings WHERE key = 'musicDirs'", [], |_| {
@@ -194,7 +197,120 @@ pub fn migrate_music_roots(conn: &Connection) -> rusqlite::Result<RootsMigration
             }
         }
     }
+    // The roots are now canonical, but track rows are keyed on the path the
+    // scan wrote (`id = stable_id("tr", path)`) — rows from before the fix
+    // still hold the alias spelling, so `delete_tracks_under_root(canonical)`
+    // would miss them. Reconcile in the same startup step; a database that
+    // was already migrated when this shipped heals here too.
+    out.reconcile = reconcile_root_paths(conn)?;
     Ok(out)
+}
+
+/// What one `reconcile_root_paths` pass did.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReconcileReport {
+    /// Alias rows re-pointed at their file's canonical path (id re-derived).
+    pub rewritten: usize,
+    /// Alias rows dropped because the canonical path was already a row.
+    pub deduped: usize,
+    /// Rows left alone: already canonical, outside every root, or unresolvable.
+    pub kept: usize,
+}
+
+/// `path` sits strictly UNDER `root` (component-boundary safe: `/music/b`
+/// never contains `/music/bc/...`).
+fn under_root(path: &str, root: &str) -> bool {
+    let root = root.trim_end_matches('/');
+    !root.is_empty()
+        && path.len() > root.len()
+        && path.starts_with(root)
+        && path.as_bytes()[root.len()] == b'/'
+}
+
+/// Re-align track rows with their roots' canonical spelling (owner decision
+/// 2026-10-22, option A: reconcile at migration time).
+///
+/// Identity here is the path, so an alias-keyed row is not a stale copy of a
+/// canonical row — it IS the row, just spelled the way the pre-fix scan saw
+/// it. Each row under a root is resolved once; a row that now resolves to a
+/// path another row already holds is a duplicate and drops (the canonical row
+/// wins, keeping the alias row's `staged` flag when it had one — an unsaved
+/// import must not become invisible). Every other column is preserved.
+///
+/// Idempotent by construction: canonical paths resolve to themselves, so a
+/// second call (every startup) changes nothing. Cost: one `canonicalize` per
+/// track row — measured 2026-10-22 against a synthetic 5000-row temp DB
+/// (debug build): 37 ms when nothing differs, 125 ms when all 5000 rows are
+/// rewritten. The catalog's few thousand rows is a one-time startup tick.
+pub fn reconcile_root_paths(conn: &Connection) -> rusqlite::Result<ReconcileReport> {
+    use rusqlite::OptionalExtension;
+
+    let mut report = ReconcileReport::default();
+    // `musicDirs` is authoritative and materialized before this runs. The
+    // roots are compared AS STORED: a row may still be spelled through the
+    // old alias while the setting already moved on, so the row's own
+    // resolution decides candidacy.
+    let roots: Vec<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'musicDirs'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| !r.trim().is_empty())
+        .collect();
+
+    let rows: Vec<(String, String, i64)> = {
+        let mut stmt = conn.prepare("SELECT id, path, staged FROM tracks")?;
+        let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        mapped.collect::<rusqlite::Result<_>>()?
+    };
+
+    let tx = conn.unchecked_transaction()?;
+    for (id, path, staged) in rows {
+        let Ok(canon) = std::fs::canonicalize(&path) else {
+            report.kept += 1; // missing file: never invent a path
+            continue;
+        };
+        let canon = canon.to_string_lossy().into_owned();
+        if canon == path
+            || !roots
+                .iter()
+                .any(|r| under_root(&path, r) || under_root(&canon, r))
+        {
+            report.kept += 1;
+            continue;
+        }
+        let survivor: Option<(String, i64)> = tx
+            .query_row(
+                "SELECT id, staged FROM tracks WHERE path = ?1",
+                [&canon],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        match survivor {
+            Some((survivor_id, survivor_staged)) => {
+                if staged != 0 && survivor_staged == 0 {
+                    tx.execute("UPDATE tracks SET staged = 1 WHERE id = ?1", [&survivor_id])?;
+                }
+                tx.execute("DELETE FROM tracks WHERE id = ?1", [&id])?;
+                report.deduped += 1;
+            }
+            None => {
+                let new_id = crate::library::stable_id("tr", &[&canon]);
+                tx.execute(
+                    "UPDATE tracks SET path = ?1, id = ?2 WHERE id = ?3",
+                    rusqlite::params![canon, new_id, id],
+                )?;
+                report.rewritten += 1;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(report)
 }
 
 #[cfg(test)]
