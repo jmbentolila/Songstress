@@ -3,8 +3,9 @@
 Instructions for AI agents (and humans) working on this codebase. Read this file
 fully before changing anything. The measurements behind its rules live in
 `docs/gotchas/` and are read on demand from the index at the bottom. `PLAN.md`
-carries the roadmap and the implementation log: read its status head before
-starting and update it when you finish.
+carries the current state, the owner decisions and the next-up list; the
+landed-work record sits in `docs/plan-archive/`, indexed by its README. Read
+PLAN.md before starting and update it when you finish.
 
 This file must stay under 18,000 chars. Check with `wc -c` before a large
 addition; overflow goes to `docs/gotchas/<area>.md` and one line stays here.
@@ -228,7 +229,8 @@ plus the DOM probe, not a headless browser, and keep critique snapshots under
    band-clip glitch. The current box is GNOME, where `spectacle`, `qdbus-qt6`
    and `gnome-screenshot` are absent and the `devctl` DOM probe is the tool that
    works; the Mutter focus rule is unverified.
-6. Update PLAN.md (status table + implementation log)
+6. Update PLAN.md: its Status row, and a dated `## YYYY-MM-DD — title` entry at
+the top of `docs/plan-archive/work-log.md`
 
 ### Claim hygiene — from the Step 0b post-mortem (2026-09-19)
 
@@ -247,7 +249,8 @@ plus the DOM probe, not a headless browser, and keep critique snapshots under
 5. **Flag the assumption you did not verify.** An unstated assumption becomes a
    fact in the next pass's hands.
 
-The full post-mortem, with the four-week cost, is in `PLAN.md`.
+The full post-mortem, with the four-week cost, is in
+`docs/plan-archive/remaining-work.md` (Step 0b).
 
 ## Versioning at commit time
 
