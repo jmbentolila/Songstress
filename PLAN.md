@@ -87,7 +87,7 @@ Nothing here is pre-approved; each item needs the owner's go.
 | Scan ring, waveform backfill, light contrast, tag-editor open | ✅ 2026-09-29 · 0.16.1, 0.16.2 |
 | GNOME window frame and window shadow | ✅ 2026-10-02, 2026-10-04 · 0.16.3, 0.16.6 |
 | Playbar drag, transport gap, edge shadows, corner resize | ✅ 2026-10-05 · 0.16.7 to 0.16.11 |
-| Expanded-panel choreography and retune | ✅ 2026-10-09 · 0.16.14, 0.16.15 |
+| Expanded-panel choreography and retune | ✅ 2026-10-09 · shipped as 0.16.14 (the 0.16.15 to 0.16.17 chain was consolidated into it, `0161cf4`) |
 
 ## Archive
 
