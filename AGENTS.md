@@ -1,47 +1,39 @@
 # AGENTS.md — Songstress
 
-Instructions for AI agents (and humans) working on this codebase. Read this fully
-before changing anything. The roadmap + full implementation record lives in
-**PLAN.md** — read that too, and update it when you finish work.
+Instructions for AI agents (and humans) working on this codebase. Read this file
+fully before changing anything. The measurements behind its rules live in
+`docs/gotchas/` and are read on demand from the index at the bottom. `PLAN.md`
+carries the roadmap and the implementation log: read its status head before
+starting and update it when you finish.
+
+This file must stay under 18,000 chars. Check with `wc -c` before a large
+addition; overflow goes to `docs/gotchas/<area>.md` and one line stays here.
 
 ## What this is
 
-Songstress — a local music player for Fedora 44 (Plasma 6.7 and GNOME, Wayland).
+Songstress, a local music player for Fedora 44 (Plasma 6.7 and GNOME, Wayland).
 Album-grid-centric, MusicBee-style browsing, glassmorphism UI. Personal use first.
 
-Stack: **Tauri 2 (Rust) + Svelte 5 + TypeScript** frontend, **MPV via JSON IPC** as
-audio engine (Phase 3), **SQLite + lofty** for the library (Phase 2). No router, no
-CSS framework — hand-rolled CSS with custom properties.
+Stack: Tauri 2 (Rust) + Svelte 5 + TypeScript, MPV via JSON IPC as the audio
+engine, SQLite + lofty for the library. No router, no CSS framework, hand-rolled
+CSS with custom properties.
 
-Single RPM, both desktops (2026-09-23): one package serves Plasma and GNOME —
-DE differences are runtime fallbacks, never build variants. Plasma is the
-reference desktop (kdialog pickers, Global Menu, KWin force-blur); on GNOME the
-same portal-first picker takes over, the menu bar moves into the titlebar
-(`wayland_appmenu` skips with STATE=2), and the chrome goes OPAQUE
-(`html[data-de="gnome"]` pins the glass tokens
-solid — KDE keeps the glass; GNOME gets GRAIN instead of glass on every opaque
-field: the grid backdrop, the sidebar, the playbar, EVERY `.glass` (that one
-class is the chrome/popover/modal tier: EQ + queue popovers, context menu, the
-four scrim panels), and the expanded album panel. One fine-grain SVG-noise
-background layer per field, soft-light in dark / multiply in light, tiles and
-text untouched on top. Two traps here: `.glass::after` cannot do this (it paints
-over text), and the expanded panel sets its background INLINE (album gradient +
-base) — an inline `background` shorthand beats every stylesheet, so its grain
-lives in ExpandedPanel's own layer stack, not in the app.css rule.
-One noise scale only: a second, low-frequency layer was tried twice and removed
-(tiles read as "grain pictures", finer mottling read as DIRT — the tooth alone
-is the material).
-`--tex` lives in app.css next to the GNOME block, with "The Matte Rule" in
-DESIGN.md; the tile's SVG filter needs `color-interpolation-filters='sRGB'` or
-the whole field washes ~10 RGB lighter (linearRGB default). RPM deps: **`mpv`
-only** — the pickers are XDG-portal-first (`portal_files.rs`) with a `kdialog`
-fallback, so no picker package is required (verified 2026-09-26: `rpm -qpR` on
-Songstress-0.13.4-1 requires mpv + libwebkit2gtk-4.1 + libgtk-3 and nothing
-else; `zenity` appears nowhere in the source). GNOME-only box right now:
-the kdialog branch is verified by argv-identity (byte-identical args), never by
-a live pick — say so, don't claim it. Waveform peaks decode with **symphonia**
-(pure Rust, statically linked), which adds NO system package — so
-`depends = ["mpv"]` still holds; do not reach for ffmpeg/gstreamer for decode.
+One RPM serves both desktops (2026-09-23). DE differences are runtime fallbacks,
+never build variants. Plasma is the reference desktop (kdialog pickers, Global
+Menu, KWin force-blur). On GNOME the same portal-first picker takes over, the
+menu bar moves into the titlebar (`wayland_appmenu` skips with STATE=2), the
+chrome goes opaque (`html[data-de="gnome"]` pins the glass tokens solid) and
+GRAIN replaces glass on every opaque field, with "The Matte Rule" in DESIGN.md.
+
+RPM deps: **`mpv` only** (`rpm -qpR`, verified 2026-09-26 on 0.13.4-1: mpv +
+libwebkit2gtk-4.1 + libgtk-3, nothing else). Pickers are XDG-portal-first
+(`portal_files.rs`) with a `kdialog` fallback, so no picker package is required;
+there is no `zenity` path. Waveform peaks decode with **symphonia** (pure Rust,
+statically linked, adds no system package), so `depends = ["mpv"]` still holds:
+do not reach for ffmpeg or gstreamer for decode.
+
+This box is GNOME-only right now: the kdialog branch is verified by argv
+identity, never by a live pick. Say so, do not claim it.
 
 ## Commands
 
@@ -60,48 +52,31 @@ systemctl --user restart songstress-dev     # start/refresh the app
 journalctl --user -u songstress-dev -f      # logs
 ```
 
-Closing the app window kills `tauri dev` by design — restart the unit.
+Closing the app window kills `tauri dev` by design; restart the unit.
 
-**Restart protocol (owner-set, 2026-09-01; size-restored 2026-09-05).** A restart brings
-the window back AT THE REMEMBERED SIZE (see below) at a KWin-picked position — measured
-2026-09-05: center-ish, biased down-right (~150 logical px off true center; the spawn is
-anchored as if still 1280×800 because KWin places from the client's early commit and the
-xdg protocol cannot reposition after map — the builder's `.center()` is a hint, not a
-placement). Not where he keeps it — his tile is the **bottom-left quarter**
-(last measured: `x=0 y=690`, 1200×660 logical, in a 3-part grid: terminal + app in
-the left column, browser in the right). Nothing can put it back programmatically:
-a Wayland client cannot see its own position (measured — Tauri's `outer_position()`
-returns `(0,0)` while KWin reports `x=560 y=290`), and KWin exposes no DBus
-move/resize on Plasma 6.7. So after ANY restart: **stop, tell him the window is
-misplaced, and wait for his green light that he has moved it back** before driving
-or measuring anything in it. Do NOT add a KWin window rule, seed
-`.window-state.json`, or call `set_position` to work around this — he declined all
-three; the manual move IS the protocol.
+**Restart protocol (owner-set, 2026-09-01).** A restart brings the window back
+at the remembered SIZE (`window_state.rs`) at a KWin-picked position. It is not
+where he keeps it: his tile is the bottom-left quarter of a three-part grid, and
+nothing can put it back programmatically, because a Wayland client cannot see
+its own position and KWin exposes no move/resize on Plasma 6.7. So after ANY
+restart: **stop, tell him the window is misplaced, and wait for his green light
+that he has moved it back** before driving or measuring anything in it. Do NOT
+add a KWin window rule, seed `.window-state.json`, or call `set_position`; he
+declined all three and the manual move IS the protocol. Never save position;
+size is saved on every Resized event. Measurements and history:
+`docs/gotchas/desktop.md`.
 
-Nothing persists the POSITION, on purpose (2026-09-01): `tauri-plugin-window-state` was added,
-measured and **reverted**. A Wayland client cannot see where the compositor put it — Tauri's
-`outer_position()` returns `(0,0)` while KWin reports the real `x/y` — so a client-side
-"remember position" is not just unavailable, saving `(0,0)` and restoring it would shove the
-window into the corner. The plugin also writes only on a clean exit (a `systemctl restart` /
-`tauri dev` rebuild kills the process, nothing is saved). No KWin rule, no seeded state file
-(both offered, both declined; they still are for position). SIZE, however, the owner asked for
-(2026-09-05) — that ships as `window_state.rs`: the last size is saved on every `Resized` event
-(tempfile+rename, survives the kill) and restored at startup. Do not save position, and do not
-swap the module back to the plugin.
-
-Frontend work needs no restart at all: `tauri dev` hot-reloads Svelte components, stores and
-CSS. Restart only for Rust changes (cargo rebuilds anyway) or `contain:`/containing-block
-changes — and remember the **version files are watched too**: bumping `tauri.conf.json` /
-`Cargo.toml` restarts the app and costs him a drag. Bump before he places the window, or warn
-him.
+Frontend work needs no restart: `tauri dev` hot-reloads Svelte, stores and CSS.
+Restart only for Rust changes or `contain:` changes, and remember the version
+files are watched too: bumping `tauri.conf.json` or `Cargo.toml` restarts the app
+and costs him a drag. Bump before he places the window, or warn him.
 
 **Reviewing a loading state without a scan.** `node tools/devctl.mjs eval "__skel(true)"`
-holds the grid + artist-list skeletons in place (`main.ts`, DEV-only, sets
-`library.devLoading`; `__skel(false)` releases them). Do NOT try to re-enter the state by
-clicking Rescan after a reload: a *parked* scan (`SONGSTRESS_SCAN_STALL_MS`, PLAN.md) still
-holds the backend's `SCAN_RUNNING`, so the retry fails instantly with "scan already running"
-and only the console knows. Re-parking needs a unit restart — i.e. his window drag again — so
-park once, then iterate with `__skel`.
+holds the grid and artist-list skeletons (`main.ts`, DEV-only, sets
+`library.devLoading`); `__skel(false)` releases them. Do not re-enter the state
+by clicking Rescan after a reload: a parked scan (`SONGSTRESS_SCAN_STALL_MS`)
+still holds `SCAN_RUNNING`, and re-parking needs a unit restart, which costs a
+window drag. Park once, then iterate with `__skel`.
 
 ## Layout
 
@@ -124,344 +99,116 @@ src-tauri/src/lib.rs      commands: album_colors (dominant-color extraction)
 public/covers/            album art for the fake library (real folder.jpg files)
 ```
 
-## Hard-won gotchas — do not rediscover these
+## Rules that bite
 
-- **Svelte 5 runes stores** live in `*.svelte.ts`. `$effect`/`$derived` rules apply.
-- **HMR rots.** After a long series of hot edits the webview degrades: stale
-  `bind:clientWidth`, dropped component CSS, phantom layouts. Non-atomic writes to
-  watched files (sed/python rewrite of app.css) make it worse. Fix = cold restart:
-  `systemctl --user restart songstress-dev`. Don't debug phantoms before restarting.
-- **A COLD start can also drop component CSS — and a reload will not fix it.**
-  The webview can request `X.svelte?svelte&type=style&lang.css` before the plugin
-  has compiled its parent; the plugin has no metadata for that id, Vite falls
-  through to the static-file handler (which ignores the query) and the "CSS" is
-  served as the component's RAW SOURCE, so the style tag never injects. Result:
-  the shell renders layout-less (full-width grid, playbar stacked vertically)
-  while components requested a moment later are fine — it reads as "only one
-  pane broke". Diagnose: `curl -s 'localhost:1420/src/App.svelte?svelte&type=style&lang.css' | head -c 200`
-  — raw `<script>` means uncached. Fix: `server.warmup.clientFiles` (added to
-  vite.config.js); `touch`ing the file is the manual version. `location.reload()`
-  does NOTHING here — the id stays uncached, so don't waste a restart cycle on it.
-  **The global sheet rots the same way, silently:** `src/app.css` can keep serving a
-  module whose `__vite__css` is the EMPTY string (2026-09-02, after a long edit
-  series). Nothing 404s and the components still look styled, but every theme token
-  reads empty — the tell is `getComputedStyle(document.documentElement)
-  .getPropertyValue('--gap')` coming back `""`, or a `.sk`/`.glass` probe returning
-  nothing. `touch src/app.css` re-emits it in one second; a screenshot would take a
-  restart cycle and show you a page that merely looks a bit flat.
-- **`overflow: hidden` is still a scroll port.** Programmatic `.focus()` on an
-  element inside a layer that is `translateX(100%)` SCROLLS the clipper
-  (`.stack.scrollLeft` → ~202) and nothing ever scrolls it back: every layer
-  shifts sideways at once, so pane titles print over each other and the deeper
-  layer's controls leak into view. The 4-layer stack therefore uses
-  `overflow: clip` AND `focus({ preventScroll: true })` (`focusFirst`) — the
-  layer is animating into place anyway, so it never needs the scroll. If the
-  settings panes ever look "printed twice", read `.stack.scrollLeft` first.
-- **Component CSS can be emitted unscoped.** TitleBar once emitted a global sheet,
-  leaking `.title { text-align: center }` into every component. (TitleBar was
-  deleted in Step 8 — its `tb-*` traffic lights now live in Sidebar; the
-  namespace lesson stands.) If styles leak again, namespace the classes — don't
-  fight the compiler. Audit served sheets:
-  `curl 'http://localhost:1420/src/components/X.svelte?svelte&type=style&lang.css'`
-  and check every selector carries a `.s-…` hash.
-- **Debug Rust panics on integer overflow** and a panic inside a Tauri command
-  aborts the whole app. Use `u16`/`saturating_*` for pixel math (see the `+8`
-  bucket-center incident in git-less history / PLAN.md).
-- **Covers live in `public/covers/`** (plain Vite — `static/` is a SvelteKitism).
-  `tauri.conf.json` `frontendDist` is `../dist`.
-- **lofty 0.22.4's `write_id3v1` PANICS truncating legacy fields** — it cuts
-  title/artist/album at 30 bytes and comment at 28 with `split_at` (a BYTE
-  slice), so any v1 field whose cut lands inside a multi-byte char kills the
-  save task mid-write (owner data: a cp1251 ID3v1 comment, album Road To The
-  Unknown). The message reads `end byte index 28 is not a char boundary` —
-  blame the ID3v1 WRITER, not the string's reader (the first diagnosis here
-  fingered parse_ini; wrong — see PLAN.md 2026-09-05). `tags::write_file` is
-  armored: temp+rename under catch_unwind, char-boundary pre-trim of v1
-  fields, retry-once-with-v1-dropped. Upstream fix is lofty ≥0.23.
-- **Probes never compute paths on owner-owned files.** A scratch scheme derived
-  from the target's own path (`path.with_extension("tmp")` → a sibling that can
-  collide with the original, cleanup that deletes "the temp") cost the owner a
-  real mp3 in 2026-09-04 (backup saved it; a temp test's rename landed on the
-  original and its cleanup deleted it). Rule: copy the file to /tmp FIRST and
-  probe the copy; never rename onto, write in, or remove_file a path under
-  ~/Music from test or debug code. Same energy as the panic gotchas: user data
-  gets character ops, char boundaries, and temp+rename — always.
-- **mpv must be spawned with `--no-config`** — the user's `~/.config/mpv/mpv.conf`
-  is a broken Windows config (d3d11, C:\ fonts).
-- **No GTK dialogs. Pickers are portal-first, then `kdialog`.** `pick_directory`/
-  `pick_image` call the XDG desktop portal (`portal_files.rs`), so the picker is
-  compositor-native on BOTH desktops; if the portal is unavailable they fall back
-  to `kdialog` (spawn-NotFound only), cancel stays Ok(None) on either. Don't
-  reintroduce tauri-plugin-dialog / rfd — its GTK chooser looks GNOME-ish (user
-  rejected it). There is **no `zenity` path** (verified 2026-09-26:
-  `grep -rn zenity src-tauri/src` → nothing): the 0.12.1 "zenity picker stack"
-  was a detour built on a wrong assumption and reverted by the 0.12.0 merge
-  `a0e03ea` — PLAN.md keeps it as history, not as design. Packaging consequence:
-  the RPM carries no picker dependency (`depends = ["mpv"]`), so a picker
-  failure surfaces as an error naming the missing helper rather than being
-  unreachable by construction.
-- **A cancelled kdialog folder pick stores JSON `null` as musicDir.** `music_root`
-  must treat null/empty as unset (→ ~/Music) — the old `unwrap_or(v)` made the
-  scan root a RELATIVE path `null`, so every scan failed instantly and silently
-  ("music root null does not exist"): no progress events, no error, menu clicks
-  "did nothing". Scan command errors only reach the webview console.
-- **Scan errors are near-invisible — but not any more, on one condition.**
-  `scan_inner` now emits `scan-finished` on EVERY path, carrying `error: Some(..)`
-  (2026-09-02), and the empty state renders that string in the caution hue. Before
-  it, the emit sat below a `?`, so a failed run announced itself only in the
-  webview console — and because `scan-finished` is the SOLE thing that clears
-  `library.scanning`, a failed FIRST scan shimmered its skeleton forever. Any new
-  early-return in that function must still emit. The journal side is now greppable:
-  `[scan] FAILED: <reason>` (and `[scan] files …` for success). Remember
-  incremental scans SKIP unchanged files entirely (they never re-enter grouping).
-  After changing grouping/tag-consensus logic, use Library → Full Rescan (rebuild)
-  or nudge `tracks.mtime_ns` in the DB.
-- **The inotify watcher must ignore read traffic.** notify's inotify backend
-  watches IN_OPEN too, so the scan's own walkdir reads arrive as
-  Access(Open)/Access(Close(Read)) events — counting them made the watcher
-  feed on itself (one 60ms rescan every 5s, 24h straight; 7723 in a day).
-  Filter through `watcher::marks_library_dirty`: Access is noise; Create/
-  Remove/Name/Data/Metadata count (a plain `touch` = Metadata, and the scan
-  keys on mtime+size). Also: DROPping a WatchHandle stops its thread (the
-  channel Disconnect IS the stop signal) — `rewatch` relies on exactly that.
-- **NEVER await IPC commands in the mpv reader task** (mpv.rs `spawn_reader`).
-  It is the task that reads responses off the socket — awaiting a command
-  there stalls all reads until the 10s timeout fires (mpv executed instantly;
-  only we were blind). Reader-task side effects are fire-and-forget (`fire()`).
-- **mpv playlist is a rolling 32-track window** (`PLAYLIST_WINDOW`), never the
-  whole play order — all-artists shuffle pools are thousands of entries and
-  per-entry IPC floods mpv (later commands queue past their timeout).
-- **KWin force blur** (Plasma only — no Mutter equivalent; on GNOME the glass
-  simply loses its wallpaper blur) = Better Blur DX, **now a source build of `728307f`, not the COPR
-  package** (`infinality/kwin-effects-better-blur-dx` was deliberately removed; `dnf update`
-  will not restore it, and a kwin/Plasma upgrade breaks blur until rebuilt against the exact
-  running kwin). Config group is `[Effect-better-blur-dx]` — **dashes, not underscores**
-  (plugin id is `better_blur_dx`; the mismatch cost hours). `WindowClasses` must be a
-  **single line** (`songstress`); multi-entry newline lists silently never match — a KCM
-  write preserved it on 6.7.5, verified 2026-09-19. Stock blur must stay disabled
-  (`blurEnabled=false`).
-  **Config changes need only `reconfigureEffect` — NOT unload+load** (the old advice here
-  caused avoidable blackouts): `qdbus-qt6 org.kde.KWin /Effects
-  org.kde.kwin.Effects.reconfigureEffect better_blur_dx`. Proven to re-read kwinrc. Helper:
-  `~/src/bbdx-ab.sh {show|A|B|C|D|set|unset}`.
-  **Unloading still kills blur SYSTEM-WIDE**, and it cannot swap a rebuilt `.so` anyway —
-  that needs **logout+login** (KWin holds the mapping; Wayland has no `--replace`).
-  `kwriteconfig6` wants `--key K --delete`, never `--delete K` (the latter exits 0 having
-  done nothing). Blur is **intentionally absent** in the Overview and during
-  minimize/maximize — upstream design, not a bug to chase (see PLAN.md Step 0b S3).
-- **Window resourceClass is `songstress`** (binary name, NOT the app-id). Verify with
-  `qdbus-qt6 org.kde.KWin /KWin org.kde.KWin.getWindowInfo <uuid>` (uuid via
-  `/WindowsRunner` `Match` — which implements **`org.kde.krunner1`**, NOT
-  `org.kde.KWin.WindowsRunner`; and `Match` needs `--literal` to print its struct array).
-  KWin scripting console is useless on 6.7 (no output).
-- **Screenshots lie when the game is fullscreen.** Raise our window first:
-  WindowsRunner `Match` → `Run(matchId, "activate")`. Never minimize/kill the
-  user's windows or change their wallpaper without asking.
-- **Confirmations inside a modal drop from the top edge of the surface that
-  raised them** — the modal normally, the LIGHTBOX when the expanded artwork
-  view is what asked (rendered into whichever is innermost; a box on the panel
-  behind the image reads as a bug) — as
-  notification boxes (`.glass`, safe action first, destructive in caution), and
-  the modal's own surface DIMS under them — the window's scrim wash
-  (`rgba(0,0,0,.35)`) and timing, scoped to the panel, press-to-cancel. Never a
-  modal on top of a modal, never a native dialog. Shared entrance/dim:
-  `notifyDrop` + `notifyVeil` (src/lib/notifyDrop.ts). Two traps, both measured:
-  `position: fixed` is what lands on the panel (`.te-body` is
-  `position: relative`, so `absolute` anchors 64px down at the artwork section),
-  and Escape must be handled in CAPTURE with `stopImmediatePropagation` —
-  the modal's own Escape listener is on `window` too, and `stopPropagation`
-  cannot quiet a listener on the same target. Example: the artwork delete
-  confirmation in ArtSelector.
-- **A track's ALBUM is grouping output, not identity.** A retag rewrites the
-  file, the scan re-groups it, and the row moves to another album while its
-  PATH (and so its id, `stable_id("tr", path)`) stays put. So never resolve "the
-  playing track" through `playback.current.albumId` — `currentTrack()` looks the
-  `trackId` up library-wide via `library.trackById`, and `reanchorCurrent()`
-  re-points the context after each dump (`library.dumpVersion`, wired in
-  App.svelte). Resolving through the album is how the playbar read "Nothing
-  playing" over audio that was still going (2026-09-26). The engine is
-  unaffected: mpv's order is materialized by path at album start.
-- **This WebKitGTK ignores some modern CSS that computes cleanly.** Measured
-  2026-09-05: unprefixed `user-select` is a no-op (every `none` in the app was
-  dead code — `-webkit-user-select` is mandatory), and the INDIVIDUAL transform
-  properties (`translate:`/`rotate:`/`scale:`) mis-resolve percentage
-  centering on some svg elements — getComputedStyle reports the right value,
-  layout is 4px off (the search-clear ×; traffic lights using the same rule
-  measured fine, so it is per-element, no rule of thumb). Dialect that never
-  lies on this engine: prefixed `user-select`, plain `transform`. Audit with
-  `grep 'user-select' src/ ; grep -rnE '^\s*(translate|rotate|scale):' src/`.
-  **`transform` on a RANGE INPUT is a third bite (2026-09-28):** the straight-line
-  seek had `top: 50%` + `translateY(-50%)`; getComputedStyle reported the matrix
-  while the box ignored it, so the line sat 2px low. Center such a box with
-  `top: 0; bottom: 0; margin: auto 0`, never a transform.
-- **Animating an INHERITED registered custom property is a document-wide tax
-  (2026-09-28).** The playbar-style toggle eased `--playbar-h` (a `@property` of
-  syntax `<length>`) and ran at **~36ms/frame (~27fps)** because every frame
-  invalidated computed styles across the whole tree; pinning individual layers
-  did NOT help — the cost was the property itself. Fix: change the token
-  INSTANTLY and let each consumer transition its OWN concrete property
-  (`height` / `bottom`) on a shared duration token (`--playbar-dur`, 0ms under
-  reduced motion) — same visual, ~50–60fps. Reach for `@property` animation only
-  when nothing inherits the property.
-- **A transparent absolutely-positioned layer still HIT-TESTS (2026-09-28).** The
-  waveform and the straight line are stacked variants; the inactive `.wave` at
-  `opacity: 0` swallowed every pointer event, so the line could not be dragged or
-  clicked. The inactive variant needs `pointer-events: none` — `opacity: 0` is
-  not `display: none`.
-- **WebKitGTK backdrop-filter does NOT blur in-window content** (verified
-  2026-08-27, 2.52/DMABUF): a 32px-bold probe element under the playbar
-  stayed pixel-sharp through `blur(80px)` — radius changes are invisible.
-  All the visible frost is KWin's force blur on the wallpaper (on GNOME there is
-  no compositor blur at all — the glass is unblurred translucency). Consequence:
-  don't try to make scrolling content blur under the playbar via
-  backdrop-filter; dim it with the `.grid-fade` veil in App.svelte instead.
-  If you ever test backdrop-filter again, probe with content UNDER the glass,
-  never with the wallpaper. **Re-verify on 2.54**: the Skia compositor notes
-  claim filters no longer need offscreen surfaces, so in-window blur may now
-  be real (this claim was measured on 2.52 only).
-- **WebKitGTK 2.54 (installed 2026-09-25) broke two things, unrelated to each
-  other.** (1) `thumb://` subresources from `http://` pages: the Rust handler
-  is never called (probe-verified; `tauri://` origins are fine, so the RPM
-  never lost artwork). Dev fix: `src/lib/artSrc.ts` + the `vite.thumb-dev.js`
-  middleware (`/thumb-http/…` served from the cache dir) — never "fix" this
-  by touching the Rust protocol handler. (2) The new Skia compositor stutters
-  on this box (radeonsi + GNOME/Mutter): FPS 3–47 on hover/populate in BOTH
-  dev and the RPM, main thread clean (rAF probe). Every env lever
-  (`WEBKIT_DISABLE_DMABUF_RENDERER`, `…_COMPOSITING_MODE`,
-  `WEBKIT_USE_SKIA_FOR_COMPOSITION=0`) MISPAINTS worse — black window except
-  the damage rect around the pointer. Do not chase these: (2) is
-  **confirmed 2.54 and fixed by 2.52.1** — the box is pinned by hand, so a
-  plain `dnf upgrade` brings the stutter back; check `rpm -q webkit2gtk4.1`
-  before blaming the app, and revert/upgrade deliberately with
-  `sudo dnf upgrade webkit2gtk4.1 webkit2gtk4.1-devel webkitgtk6.0`.
-  Instrument trap when re-measuring: 2.52 names the FPS var
-  `WEBKIT_SHOW_FPS`, 2.54 `WEBKIT_DRAW_FPS` — the wrong name prints nothing
-  (a blind counter reads as "no drops"). See PLAN.md 2026-09-26.
-  A long-running instance is a fossil: `rpm -q --last webkit2gtk4.1` dated
-  the outage; "the RPM was fine yesterday" meant a process started Sep 24.
-- **UI alphas** (user-tuned): grid backdrop 0.8 (`--bg-grid`), chrome 0.7
-  (`--bg-chrome`), expanded panel gradient alpha 0.36 dark / 0.30 light. Don't
-  drift from these without being asked.
-- **Switch animation contract**: album switch = instant content swap + 160 ms
-  fade-in of the NEW album *(overridden 2026-10-09 for the expanded-panel
-  surface only: the same-row swap reveal runs 320ms fade / 380ms travel with
-  the 0/+80ms two-beat stagger — the 160ms contract still holds everywhere
-  else)*; height changes in ONE step (no per-frame relayout).
-  The outgoing album must NEVER render at the new row (user calls it "ghost").
-  Expand/collapse keeps the eased `grid-template-rows` animation *(stale since
-  0.16.14, corrected 2026-10-09: the panel drives px height inline per phase
-  with settle-to-auto at rest — grid-template-rows left the tree rewrites ago
-  and the sentence survived by inertia)*.
-- **Cover decode is expensive** (some art is 3000px). Panel art uses
-  `decoding="async"`; `AlbumGrid.toggleExpand` pre-decodes via `img.decode()`.
-- **`.songstress.json` is per-album display state, not library content.** One
-  file per FOLDER, a map of album id → `{colors, gradient}` (a flat folder can
-  hold several albums — measured: three album tags in one compilation folder).
-  A SCAN adopts it (gradient always wins; `colors` only fills in when there is
-  no artwork to derive from), while an in-app change MIRRORS the DB into it —
-  `sync_album`/`sync_entry` take an explicit `adopt` flag, and getting that
-  direction backwards silently reverts the user's edit (it did, once). The
-  watcher ignores the filename: without that, every colour edit schedules a
-  rescan. Per-album gradient overrides are settings keys
-  `albumGradient:<album id>` (one per album, not the retired `panelGradients`
-  blob), written together with the file by `set_album_gradient`, and re-read by
-  `refreshPanelGradients()` after each scan. Never write into an album folder by
-  any name other than this one (plus its own temp) — see the 2026-09-04 rule.
-- **Tag editor suggestions are DB-backed, and the DB only knows what a scan
-  stored.** The seven completable fields read `tag_vocabulary`
-  (`library/vocab.rs`, migration v6), so `genre`/`composer`/`label`/`grouping`
-  return **nothing until a Full Rescan** has backfilled the columns —
-  incremental scans skip unchanged files, and a tag SAVE only fills its own row
-  (mtime changed). Don't "fix" an empty genre list by re-reading files at editor
-  open: that was the design the schema route replaced. Also: counts arrive from
-  the DB but do NOT rank the list (closeness does: earliest inclusion, then
-  shortest value — owner ruling); the **first row is always armed**, even when
-  it equals the query (type `dawn`, the library holds `DAWN`: completing must be
-  able to give back the stored spelling), so with a list open the first Tab/Enter
-  completes and the second moves on / saves; Tab/Enter complete only a
-  **highlighted** item (Enter
-  otherwise stays Save); Escape closes the list, not the modal; and the list is
-  `position: absolute` inside the field cell because a `fixed` child of a
-  `.glass` panel anchors to the PANEL (backdrop-filter is a containing block)
-  while the modal body also clips. Ranking rules live in `lib/suggest.ts` with
-  their tests — change the order there, not in the component.
+Data and user files. **Probes never compute paths on owner-owned files.** Copy
+the file to `/tmp` first and probe the copy; never rename onto, write in, or
+`remove_file` a path under `~/Music` from test or debug code. A temp scheme
+derived from the target path (a `with_extension("tmp")` sibling that collided
+with the original) deleted a real mp3 on 2026-09-04. User data gets
+character ops, char boundaries and temp+rename, always.
+**lofty 0.22.4's `write_id3v1` PANICS** on a byte cut through a multi-byte char
+(`end byte index 28 is not a char boundary`): blame the v1 WRITER, not the
+reader. `tags::write_file` is armored with temp+rename under `catch_unwind`, a
+char-boundary pre-trim and retry-once-without-v1. Upstream fix is lofty >=0.23.
+**Rust panics on integer overflow**, and a panic inside a Tauri command aborts
+the app: use `u16` and `saturating_*` for pixel math.
 
-## Import staging (read before touching `library/import.rs`)
+Engine. Spawn mpv with **`--no-config`** (the user's `mpv.conf` is a broken
+Windows config). **NEVER await IPC commands in the mpv reader task**: it reads
+responses off the socket, so awaiting stalls all reads until the 10s timeout.
+Side effects there are fire-and-forget (`fire()`). The playlist is a **rolling
+32-track window** (`PLAYLIST_WINDOW`), never the whole play order.
 
-- **Staging is a row flag, not a folder.** `tracks.staged` (migration v2) is the entire definition of "pending": `import_music` indexes the
-  user's files **where they are** — no copy, no cache dir, no second scan root — so a pending import gets artwork, waveforms, play counts and
-  scan-safety the moment it lands, and importing a 400-file folder costs a scan instead of 400 writes. The scan flags exactly the files that
-  were requested (`run_scan_files(.., only: Some(&set), ..)`), which is why importing one file out of a 400-file folder stages one.
-- The flow: import flags → the user decides per album → `save_imports` **moves** the file into its resolved folder and re-points the row
-  (`scan::relink_track`, keeping play history; id derives from path, so id and path change together or the next re-import hits UNIQUE),
-  `discard_imports` **forgets the row and deletes nothing**. `album_destination` resolves the folder: the album's own folder → the artist's
-  layout → the directory the majority of the library's albums live in → the primary root.
-- **Three rules, all about ownership.** At Apply, a file whose resolved name the destination folder already holds **byte for byte** is a
-  duplicate: **the file the user just pointed at is deleted**, the library's copy stays, and the receipt says so — a silent deletion of
-  someone's file is not acceptable even when it is a copy of one they own. (Same name, different bytes ⇒ a ` (2)` name, never an overwrite.
-  This is a collision rule, not library-wide content dedupe: the same track on a compilation and on an album is legitimate, so a hash column
-  would delete files the user wants twice over.) A file the library already indexes is **not staged at all** and is reported under
-  "Already in your library". And the app **never removes a folder it did not write**: it prunes only directories under its own staging root,
-  and the folder you imported from is left alone even when it is now empty.
-- **Import reports what it did.** `import_music` returns `ImportReport { staged, already }`; `imports.report` renders it in the window the
-  import opens, and `imports.applied` renders Save/Discard counts after Apply — including the deletion above. A progress ring that ends with
-  the screen unchanged reads as a failure, and "turns out you already own this" is the most likely outcome of importing music.
-- Legacy: rows whose path sits under the cache `import/` dir are flagged at startup, so a copy-era pile survives the upgrade and its next Save
-  is a rename out of the app's own directory. The copy importer (`import_paths`, `KnownFiles`, name+size dedupe) is gone; identity is **path**
-  (import), **blake3 hash** (save), and `(artist, album, disc, track)` (scan), each covered by a test.
+Library and watcher. `scan_inner` must emit `scan-finished` on EVERY path,
+carrying `error: Some(..)`: it is the only thing that clears `library.scanning`,
+so an early return without it shimmers the skeleton forever. Incremental scans
+skip unchanged files entirely, so after changing grouping use Full Rescan or
+nudge `mtime_ns`. The **watcher must ignore Access events**
+(`marks_library_dirty`): counting them made it feed on itself, 7,723 rescans in
+a day. `music_root` treats null or empty as unset (→ `~/Music`); a cancelled
+kdialog pick once stored the literal `null` and every scan failed silently. **A
+track's ALBUM is grouping output, not identity**: resolve the playing track by
+`trackId` (`currentTrack()`, `reanchorCurrent()`), never through `albumId`.
+`.songstress.json` is per-folder display state: a scan adopts it, an in-app
+change mirrors the DB into it (`adopt` flag), and getting the direction
+backwards silently reverts the user's edit; the watcher ignores the filename.
+Tag suggestions read `tag_vocabulary`, so genre, composer, label and grouping
+stay empty until a Full Rescan backfills them; ranking lives in
+`lib/suggest.ts`.
 
-## Svelte 5 gotchas learned the hard way
+Frontend. Svelte 5 runes stores live in `*.svelte.ts`. A `${}` in a plain
+attribute is not an interpolation (use a template literal), and a `$derived`
+that early-returns on a plain `let` never wakes up (its gate must be `$state`).
+**HMR rots**: stale `bind:clientWidth`, dropped CSS and phantom layouts after a
+long edit series, so cold-restart the unit before debugging phantoms; a cold
+start and `app.css` can also serve empty CSS, and the tells and one-second fixes
+are in `docs/gotchas/frontend.md`. `opacity: 0` still hit-tests, and
+`overflow: hidden` is still a scroll port: use `pointer-events: none`,
+`overflow: clip` and `focus({ preventScroll: true })`. Unprefixed `user-select` is a no-op, the
+individual `translate:`/`rotate:`/`scale:` properties mis-resolve percentage
+centering, and `transform` on a range input is ignored: use prefixed
+`user-select`, plain `transform`, and center with
+`top: 0; bottom: 0; margin: auto 0`. Animating an INHERITED registered custom property costs the whole document
+(~27fps): change the token instantly and let each consumer transition its own
+concrete property. `backdrop-filter` does NOT blur in-window content on this
+engine (measured on 2.52, re-verify on 2.54): the visible frost is KWin blur, on
+GNOME the glass is unblurred, and scrolling content is dimmed with `.grid-fade`.
+**WebKitGTK 2.54** broke `thumb://` subresources (dev fix in `artSrc.ts` plus
+`vite.thumb-dev.js`, never touch the Rust handler) and stutters on this box,
+fixed by 2.52.1: the box is pinned by hand, so check `rpm -q webkit2gtk4.1`
+before blaming the app. UI alphas are user-tuned: grid 0.8 (`--bg-grid`), chrome 0.7
+(`--bg-chrome`), panel gradient 0.36 dark / 0.30 light. Do not drift without
+being asked.
+Confirmations inside a modal drop from that surface's top edge, as `.glass`
+boxes with the safe action first, and the surface dims under them; Escape is
+handled in CAPTURE with `stopImmediatePropagation`, never modal-on-modal and
+never a native dialog. Album switch is an instant content swap plus a 160 ms
+fade of the new album (expanded-panel same-row swap: 320 ms fade / 380 ms travel
+with a two-beat stagger), and the outgoing album never renders at the new row.
+Cover decode is expensive: `decoding="async"` and pre-decode in
+`AlbumGrid.toggleExpand` with `img.decode()`.
 
-- **A `${}` in a plain attribute is not an interpolation.** Svelte reads the `$` as
-  text and only the braces as the tag, so `style:transform="scaleX(${pct/100})"`
-  emits the declaration `scaleX($0.4)` — invalid CSS, dropped with no error, and
-  `el.style` ends up empty so the stylesheet's `scaleX(0)` wins. Interpolated
-  attribute values need a template literal: ``style:transform={`scaleX(${pct/100})`}``.
-  The tell (this is how EmptyState's first-scan bar sat still for whole scans):
-  the counter *text* next to it is right, `style` is `""`, console says nothing.
-- **A `$derived` that early-returns on a plain `let` never wakes up.** Svelte 5
-  tracks only what a derived body ACTUALLY reads before it returns. A blast-
-  radius derived opened with `if (!snapshot) return null` where `snapshot` was
-  a plain script `let` — first pass (before the load finished) early-returned,
-  so `touched`/`census` were never registered as dependencies, and the derived
-  stayed null through every later edit. Symptom: every input is right, the
-  value is `null`, no error. The gate variable of a derived must be `$state`
-  (here: `snapshotJson = $state("")`), full stop.
-- **A class forwarded into a child component is unscoped.** `<SurfaceClose
-  class="ab-close" />` puts the class on an element compiled in another file, so
-  the parent's scoped rule `.ab-close { … }` is reported as *unused* and does
-  nothing. Use `:global(.ab-close)` — and give it one more class of specificity
-  (`:global(.ab .ab-close)`) when the child sets the same property, because the
-  child's stylesheet loads later and an equal-specificity tie goes to it.
-- **A parent's scoped CSS does not reach a child component's root element.** Two
-  bites: About needed `:global(.ab .ab-close)` to position `<SurfaceClose>`, and a
-  `.group > * + * { margin-top }` rule silently gave `<Toggle>` no separation
-  (0px, no warning). Put box/spacing rules on the **container** (`gap` works
-  whoever compiled the child) and use `:global()` only for per-element offsets.
-- **Child effects run before parent effects.** Never capture `document.activeElement`
-  in a parent `$effect` to remember "who opened this" — by then the child's
-  autofocus has already moved focus inside. Record the trigger at open time
-  (`openAbout(e.currentTarget)`), and read it back on unmount.
+Desktop. KWin force blur is **Better Blur DX built from source at `728307f`**,
+not the removed COPR package, and a kwin upgrade breaks it until rebuilt. Config
+group is `[Effect-better-blur-dx]` (dashes), `WindowClasses` must be a **single
+line** (`songstress`), stock blur stays off, and a config change needs only
+`reconfigureEffect` (unload kills blur system-wide; a rebuilt `.so` needs
+logout). `kwriteconfig6 --key K --delete`, never `--delete K`. The window
+resourceClass is `songstress` (binary name, not app-id). Screenshots lie when a
+game is fullscreen: activate our window first, and never minimize or kill his
+windows or change his wallpaper without asking. No GTK dialogs: pickers are
+portal-first then kdialog, and a picker failure surfaces as an error naming the
+missing helper.
+
+## Import staging
+
+**Staging is a row flag, not a folder**: `tracks.staged` is the whole definition
+of pending, and `import_music` indexes the user's files where they are, so there
+is no copy and no second scan root. `save_imports` MOVES the file and re-points
+the row (`relink_track`, id derives from path, so id and path move together);
+`discard_imports` forgets the row and deletes nothing. At Apply, a file whose
+resolved name the destination already holds **byte for byte** is a duplicate:
+**the file the user just pointed at is deleted**, the library copy stays, and
+the receipt says so. Same name, different bytes gets a ` (2)` name, never an
+overwrite. The app **never removes a folder it did not write**, and the folder a
+file came from is left alone even when empty. `ImportReport { staged, already }`
+is rendered in the window the import opens, because a ring that ends unchanged
+reads as failure. Identity is **path** for import, **blake3** for save and
+`(artist, album, disc, track)` for scan. The full contract, including legacy
+cache rows and the removed copy importer, is `docs/gotchas/import.md`.
 
 ## UI work: impeccable + apple-design are the default tools
 
-Any UI tweak goes through the **impeccable** skill (run its `context.mjs`
-setup once per session — it loads PRODUCT.md + DESIGN.md as the brief; then
-the one playbook for the command at hand: critique / polish / animate /
-harden / new-work…) and **apple-design** for the motion + material rules
-( respond on pointer-down; animate from the presentation value; enter and
-exit along the same path; springs over fixed-duration tweens where a gesture
-can interrupt; size-specific tracking; translucency conveys hierarchy).
-
-Two overrides, because this repo is older and more constrained than the
-skills' defaults:
-- **DESIGN.md's tuned values win** (two-tier glass 0.8/0.7, panel gradient
-  0.36/0.30, one accent, the motion tokens `--ease-out` / `--ease-drawer`,
-  the No-Lift Rule). Where apple-design says `backdrop-filter` for in-window
-  frost, we clip + cast light instead — see the WebKitGTK gotcha above.
-- The immersive verification loop is the devtools bridge (`tools/devctl.mjs`)
-  + spectacle, not a headless browser; prefer critique/audit snapshots under
-  `.impeccable/critique/` over open-ended screenshot loops.
+Any UI tweak goes through the **impeccable** skill (run its `context.mjs` setup
+once per session, it loads PRODUCT.md and DESIGN.md as the brief, then the
+playbook for the command at hand) and **apple-design** for motion and material.
+Two overrides: **DESIGN.md's tuned values win** (two-tier glass 0.8/0.7, panel
+gradient 0.36/0.30, one accent, the motion tokens, the No-Lift Rule), and where
+apple-design says `backdrop-filter` for in-window frost, this repo clips and
+casts light instead. Verify through the devtools bridge (`tools/devctl.mjs`)
+plus the DOM probe, not a headless browser, and keep critique snapshots under
+`.impeccable/critique/`.
 
 ## Verification before saying done
 
@@ -469,100 +216,72 @@ skills' defaults:
 2. `npm test` → all green
 3. `cargo test --lib` (in src-tauri) → all green
 4. `npm run build` → succeeds
-5. Visual pass if UI touched — **only when the owner asks for it, or when the change
-   is not something he can check faster himself.** He drives the app and tests the UI
-   (rule set 2026-09-01): do NOT walk the surfaces one screenshot at a time — activate,
-   capture, crop, read. That is slower than him pressing the keys and it spends the
-   session's budget. Do the mechanical gates (1-4), one cheap DOM probe if a measurement
-   is the thing at issue (geometry, computed style — no screenshot), then hand it over
-   with what to look at. When he DOES ask for a visual pass, the rules below are
-   non-negotiable — they are why a screenshot can lie.
-   RAISE IT FOR REAL: WebKit stops repainting the Songstress window while it is
-   unfocused, so `spectacle` hands back a frame from BEFORE your last action and
-   you will debug a UI bug that does not exist. Activate first
-   (`qdbus-qt6 org.kde.KWin /WindowsRunner org.kde.krunner1.Run "$ID" activate`),
-   then screenshot — and when a screenshot contradicts a DOM probe, trust the
-   probe and re-shoot.
-   ACTIVATE ONLY — never resize, move or maximize the window to make a layout
-   "fit the screenshot". It lives in the user's 3-part grid (terminal + app in the
-   left column, browser in the right) at **1200×660**, and a size change is both a
-   broken desktop and the known trigger of the WebKitGTK band-clip glitch. Verify
-   the UI at his size (see PLAN.md → Environment quick facts).
-   GNOME (current box; the 2026-09-23 note is STALE — re-measured 2026-09-26:
-   `songstress-dev` IS loaded and running, and `tools/devctl.mjs eval`+`tail`
-   bridge into the page fine, so DOM/texture probes work on GNOME too. Of the
-   screenshot tooling, `spectacle`, `qdbus-qt6` AND `gnome-screenshot` are all
-   absent (`gdbus` is present), so there is no established screenshot path here —
-   the DOM probe is the tool that works; if a shot is ever needed, the Mutter
-   focus/stale-frame rule is UNVERIFIED (it was measured on KWin) and the portal
-   route would have to be probed first. The restart protocol above is
-   KWin-specific; Mutter centers new windows — re-measure placement/size behavior
-   before writing a GNOME protocol here.
+5. Visual pass **only when the owner asks for it, or when the change is not
+   something he can check faster himself**. He drives the app and tests the UI
+   (2026-09-01): do not walk the surfaces one screenshot at a time. Run the
+   mechanical gates, take one cheap DOM probe if a measurement is at issue, then
+   hand it over with what to look at. When he DOES ask, activate the window
+   first (WebKit stops repainting while unfocused and a screenshot then shows a
+   frame from before your action), trust a DOM probe over a contradicting
+   screenshot, and **never resize or move the window** to make a layout fit: it
+   lives at 1200×660 in his grid and a size change triggers the WebKitGTK
+   band-clip glitch. The current box is GNOME, where `spectacle`, `qdbus-qt6`
+   and `gnome-screenshot` are absent and the `devctl` DOM probe is the tool that
+   works; the Mutter focus rule is unverified.
 6. Update PLAN.md (status table + implementation log)
 
 ### Claim hygiene — from the Step 0b post-mortem (2026-09-19)
 
-A prior pass wrote a wrong fact into PLAN.md and it cost four weeks of the wrong
-investigation. The failure wasn't carelessness — it was four specific habits, and each one
-is repeatable anywhere else in this repo:
+1. **Never read a version string as a date.** A build stamp names build and
+   commit, not release date; reading one as a release date once cost four weeks
+   of the wrong investigation. Check the commit (`git log -1 --format=%cs <sha>`)
+   and prove containment with `git merge-base --is-ancestor` or `compare/a...b`;
+   author dates lie too, containment is proof.
+2. **A check that returns 0 for everything proves nothing.** Run positive
+   controls in the same command (`strings -el` for UTF-16 keys, `nm | wc -l`
+   before trusting an absence).
+3. **Absence of a record is not absence of a fact.** Ask and record the
+   provenance; "owner-observed, no prior record" is a real category.
+4. **Record the lever you ruled out, not just the one you used** (`unloadEffect`
+   was documented and `reconfigureEffect` existed all along).
+5. **Flag the assumption you did not verify.** An unstated assumption becomes a
+   fact in the next pass's hands.
 
-1. **Never read a version string as a date.** `2.5.1-1.20260910_063354gite8475d0` was
-   *built* 2026-09-10 *from* `e8475d0`, which is the 2.5.1 release commit dated 2026-06-23.
-   The pass read the build stamp as the commit date, concluded "already contains the
-   July/Aug fixes", and closed off rebuilding from source — the single experiment that
-   eventually answered the question. Check the commit: `git log -1 --format=%cs <sha>`, and
-   for containment use `git merge-base --is-ancestor` or `compare/<a>...<b>`. Author dates
-   lie about release membership too; containment is proof, dates are not.
-2. **A check that returns 0 for everything proves nothing — run positive controls in the
-   same command.** `strings x.so | grep -c SomeKey` returns 0 for EVERY kcfg key, because
-   KConfigXT emits them as `QStringLiteral` (UTF-16; use `strings -el`). The "local proof"
-   that the build was old was therefore blind and happened to be right by luck. Same trap:
-   `nm` on a stripped binary finds no symbols at all — check `nm | wc -l` before trusting an
-   absence. If the controls read 0, the method is broken, not the artifact.
-3. **Absence of a record is not absence of a fact.** Blur being suppressed in the Overview
-   and during minimize/maximize had been observed by the owner for months and written down
-   nowhere, so on first sighting it reads as a fresh regression. When a symptom lives only
-   in his head, ask and record the provenance — "owner-observed, no prior record" is a real
-   category and it changes what you file.
-4. **Record the lever you ruled out, not just the one you used.** The pass documented
-   `unloadEffect` — which blacks out blur SYSTEM-WIDE — as *the* way to apply a config
-   change, and never looked for a narrower instrument. `reconfigureEffect` existed the whole
-   time; finding it is what made a per-key differential possible without a logout. Five
-   minutes on the interface first: `qdbus-qt6 org.kde.KWin /Effects` lists its methods.
-5. **Flag the assumption you did not verify.** The "exactly one device pixel" measurement
-   rests on the screenshot being cropped, not resized — unverified, and stated as such next
-   to the number. An unstated assumption becomes a fact in the next pass's hands.
+The full post-mortem, with the four-week cost, is in `PLAN.md`.
 
 ## Versioning at commit time
 
 Every time a commit gets the green light: quantify the change since the last
-bump (what shipped — fixes/polish vs. features vs. breaking; dev-only vs.
-user-visible) and bump the version accordingly in ALL THREE places, together
-(`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` — they
-drift if bumped independently):
+bump and bump the version in ALL THREE places together (`package.json`,
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` — they drift if bumped
+independently):
 
 - **patch** (0.x.y → 0.x.y+1): bug fixes, motion/polish, copy changes
-- **minor** (0.x.y → 0.(x+1).0): a meaningful user-visible feature or a
-  PLAN.md step that ships new capability
+- **minor** (0.x.y → 0.(x+1).0): a meaningful user-visible feature or a PLAN.md
+  step that ships new capability
 - **major**: breaking change (DB schema, config format, command interface)
 
-Include the bump in the same commit as the work. If a batch of commits
-already shipped, make a follow-up "Version 0.x.y" commit whose message
-quantifies what the version contains. A commit batch that is dev-only
-(absent from the prod build) does not need a bump — say so in the commit
-message. Never leave the version files disagreeing with each other, and
-never leave a bump uncommitted across work commits: the version must always
-describe what HEAD contains.
+Include the bump in the same commit as the work. If a batch already shipped,
+make a follow-up "Version 0.x.y" commit whose message quantifies what it
+contains. A dev-only batch (absent from the prod build) needs no bump; say so in
+the message. Never leave the version files disagreeing, and never leave a bump
+uncommitted across work commits: the version must describe what HEAD contains.
 
 ## Shared memory (this repo has no memory of its own)
-Vault: `/home/yossi/Projects/Arkadia` (private git, Obsidian-readable).
-- Session start: read the vault `AGENTS.md` boot section,
-  `agents/open-loops.md`, `wiki/index.md`, tail `wiki/log.md`. Never
-  re-derive what the vault knows.
-- Session end: a fix isn't done until its note exists in the vault
-  (`agents/incidents/`, same-session agent, with commit/file links).
-  Update `open-loops.md`, `wiki/index.md`, `wiki/log.md`. Pushes to the
-  vault are gated on its janitor pre-push hook.
-- Declare the boot: open your first reply with what you read (open-loop
-  count, index date, log tail). Skipped it? Say so — honestly late beats
-  silently never.
+
+Vault: `/home/yossi/Projects/Arkadia` (private git, Obsidian-readable). Sessions
+start in `~/Projects` behind the router there, so vault work is a deliberate
+move: when a fix here is hard-won, go to the vault and file it the same session
+(`agents/incidents/`, commit and file links), then update `agents/open-loops.md`,
+`wiki/index.md` and `wiki/log.md`. Never re-derive what the vault knows.
+
+## Derived detail (read the area file before working in it)
+
+| before touching | read |
+|---|---|
+| any Svelte component, CSS, motion, modals | `docs/gotchas/frontend.md` |
+| CSS that computes but does not paint, WebKit behaviour | `docs/gotchas/webkitgtk.md` |
+| KWin blur, window placement, screenshots, pickers | `docs/gotchas/desktop.md` |
+| `library/scan.rs`, `watcher.rs`, tags, album state | `docs/gotchas/library.md` |
+| `library/import.rs` | `docs/gotchas/import.md` |
+| mpv, playback, engine IPC | `docs/gotchas/mpv.md` |
