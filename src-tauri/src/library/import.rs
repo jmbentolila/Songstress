@@ -1,12 +1,15 @@
-//! Import staging (PLAN.md Step 2a): a two-step flow where importing COPIES
-//! files into a staging area under the cache dir (playable immediately, kept
-//! until the user saves them into the library dir or discards them).
+//! Import staging (PLAN.md Step 2a), redesigned 2026-08-31 to stage IN PLACE:
+//! `import_music` indexes the user's files where they are and `tracks.staged`
+//! (migration v2) marks them pending. `save_imports` MOVES a file into its
+//! resolved folder and re-points the row; `discard_imports` forgets the row and
+//! deletes nothing.
 //!
-//! Staging layout mirrors the save layout: `<import>/<sourceFolderName>/…`,
-//! so "save to library" is a straight re-rooting of the relative path into
-//! `<musicDir>/`. The scanner walks the import root as a second root; the
-//! frontend learns which albums/tracks are staged via path prefixes in the
-//! library dump (no schema change).
+//! The ownership rules below are the reason this file is dangerous to change:
+//! a byte-identical file already in the destination deletes the file the user
+//! pointed at (never the library copy), a same-name different-bytes file gets a
+//! " (2)" name instead of overwriting, and the app never removes a folder it
+//! did not write. Read `docs/gotchas/import.md` before editing; the data-loss
+//! rules are also repeated in `AGENTS.md`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};

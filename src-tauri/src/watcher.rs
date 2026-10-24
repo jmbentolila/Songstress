@@ -2,6 +2,8 @@
 //!
 //! One recursive watcher per root on a dedicated thread; raw events are
 //! debounced (fires only after a 2s quiet period), then a callback runs.
+//! Read `docs/gotchas/library.md` before changing these filters: the Access
+//! noise that made them necessary cost 7,723 rescans in one day.
 //! Only MUTATING event kinds count — see [`marks_library_dirty`], without that
 //! filter the scanner's own directory reads feed the watcher forever.
 //! The callback merely raises a DIRTY flag — the actual rescan happens on a

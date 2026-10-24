@@ -5,6 +5,10 @@
 //! JSON IPC unix socket: newline-delimited JSON, requests carry a numeric
 //! `request_id`, responses echo it, everything else is an event.
 //!
+//! Read `docs/gotchas/mpv.md` before touching the reader task or the playlist
+//! window: awaiting IPC inside the reader stalls every read until the 10s
+//! timeout, and the playlist is a rolling 32-track window by design.
+//!
 //! Rust owns the album context `{albumId, trackIndex}` (no queue — an album
 //! click replaces it entirely). The remaining tracks are appended to mpv's
 //! internal playlist for native gapless advance. State changes are forwarded
