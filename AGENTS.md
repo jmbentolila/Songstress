@@ -270,13 +270,13 @@ contains. A dev-only batch (absent from the prod build) needs no bump; say so in
 the message. Never leave the version files disagreeing, and never leave a bump
 uncommitted across work commits: the version must describe what HEAD contains.
 
-## Shared memory (this repo has no memory of its own)
+## Memory (this repo keeps its own)
 
-Vault: `/home/yossi/Projects/Arkadia` (private git, Obsidian-readable). Sessions
-start in `~/Projects` behind the router there, so vault work is a deliberate
-move: when a fix here is hard-won, go to the vault and file it the same session
-(`agents/incidents/`, commit and file links), then update `agents/open-loops.md`,
-`wiki/index.md` and `wiki/log.md`. Never re-derive what the vault knows.
+Durable facts about this repo live in `docs/gotchas/<area>.md`, one file per
+area, created with its first entry, and the index at the bottom of this file
+names the areas. Read the area file before working in that area, and land a
+distilled rule there in the same commit as the fix: the failure, the evidence,
+the rule. Session notes and task threads are not memory.
 
 ## Derived detail (read the area file before working in it)
 
