@@ -122,6 +122,7 @@ pub fn migrate_panel_gradients(conn: &Connection) -> rusqlite::Result<usize> {
 /// data) and persists the row back only when something changed.
 /// Idempotent: canonical paths resolve to themselves, so a rerun migrates
 /// nothing. Returns what moved and what was kept raw (still reported).
+#[derive(Debug)]
 pub struct RootsMigration {
     /// (before, after) display strings for every root that changed.
     pub migrated: Vec<(String, String)>,
@@ -131,7 +132,33 @@ pub struct RootsMigration {
     pub reconcile: ReconcileReport,
 }
 
-pub fn migrate_music_roots(conn: &Connection) -> rusqlite::Result<RootsMigration> {
+/// Why a startup roots migration stopped. The startup journal prints this, so
+/// a rolled-back reconcile names its half and its row: a clean pass and a
+/// failed one must not read alike.
+#[derive(Debug)]
+pub enum RootsMigrationError {
+    /// Reading or rewriting the `musicDirs` (or legacy `musicDir`) setting.
+    Settings(rusqlite::Error),
+    /// The track-row reconcile; its message already names the track id.
+    Reconcile(String),
+}
+
+impl From<rusqlite::Error> for RootsMigrationError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Settings(e)
+    }
+}
+
+impl std::fmt::Display for RootsMigrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Settings(e) => write!(f, "musicDirs update: {e}"),
+            Self::Reconcile(e) => write!(f, "track reconcile aborted: {e}"),
+        }
+    }
+}
+
+pub fn migrate_music_roots(conn: &Connection) -> Result<RootsMigration, RootsMigrationError> {
     let mut out = RootsMigration {
         migrated: Vec::new(),
         kept_raw: Vec::new(),
@@ -202,7 +229,7 @@ pub fn migrate_music_roots(conn: &Connection) -> rusqlite::Result<RootsMigration
     // still hold the alias spelling, so `delete_tracks_under_root(canonical)`
     // would miss them. Reconcile in the same startup step; a database that
     // was already migrated when this shipped heals here too.
-    out.reconcile = reconcile_root_paths(conn)?;
+    out.reconcile = reconcile_root_paths(conn).map_err(RootsMigrationError::Reconcile)?;
     Ok(out)
 }
 
@@ -242,8 +269,16 @@ fn under_root(path: &str, root: &str) -> bool {
 /// track row — measured 2026-10-22 against a synthetic 5000-row temp DB
 /// (debug build): 37 ms when nothing differs, 125 ms when all 5000 rows are
 /// rewritten. The catalog's few thousand rows is a one-time startup tick.
-pub fn reconcile_root_paths(conn: &Connection) -> rusqlite::Result<ReconcileReport> {
+///
+/// A DB failure rolls the transaction back and returns `track <id>: <error>`
+/// (or `begin:`/`commit:`) — the row that broke the pass must be in the
+/// startup journal, not just the constraint text.
+pub fn reconcile_root_paths(conn: &Connection) -> Result<ReconcileReport, String> {
     use rusqlite::OptionalExtension;
+
+    fn row_err(id: &str, e: rusqlite::Error) -> String {
+        format!("track {id}: {e}")
+    }
 
     let mut report = ReconcileReport::default();
     // `musicDirs` is authoritative and materialized before this runs. The
@@ -256,7 +291,8 @@ pub fn reconcile_root_paths(conn: &Connection) -> rusqlite::Result<ReconcileRepo
             [],
             |r| r.get::<_, String>(0),
         )
-        .optional()?
+        .optional()
+        .map_err(|e| e.to_string())?
         .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
         .unwrap_or_default()
         .into_iter()
@@ -264,12 +300,20 @@ pub fn reconcile_root_paths(conn: &Connection) -> rusqlite::Result<ReconcileRepo
         .collect();
 
     let rows: Vec<(String, String, i64)> = {
-        let mut stmt = conn.prepare("SELECT id, path, staged FROM tracks")?;
-        let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        mapped.collect::<rusqlite::Result<_>>()?
+        let mut stmt = conn
+            .prepare("SELECT id, path, staged FROM tracks")
+            .map_err(|e| e.to_string())?;
+        let mapped = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| e.to_string())?;
+        mapped
+            .collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())?
     };
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("begin: {e}"))?;
     for (id, path, staged) in rows {
         let Ok(canon) = std::fs::canonicalize(&path) else {
             report.kept += 1; // missing file: never invent a path
@@ -290,13 +334,16 @@ pub fn reconcile_root_paths(conn: &Connection) -> rusqlite::Result<ReconcileRepo
                 [&canon],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .optional()?;
+            .optional()
+            .map_err(|e| row_err(&id, e))?;
         match survivor {
             Some((survivor_id, survivor_staged)) => {
                 if staged != 0 && survivor_staged == 0 {
-                    tx.execute("UPDATE tracks SET staged = 1 WHERE id = ?1", [&survivor_id])?;
+                    tx.execute("UPDATE tracks SET staged = 1 WHERE id = ?1", [&survivor_id])
+                        .map_err(|e| row_err(&id, e))?;
                 }
-                tx.execute("DELETE FROM tracks WHERE id = ?1", [&id])?;
+                tx.execute("DELETE FROM tracks WHERE id = ?1", [&id])
+                    .map_err(|e| row_err(&id, e))?;
                 report.deduped += 1;
             }
             None => {
@@ -304,12 +351,13 @@ pub fn reconcile_root_paths(conn: &Connection) -> rusqlite::Result<ReconcileRepo
                 tx.execute(
                     "UPDATE tracks SET path = ?1, id = ?2 WHERE id = ?3",
                     rusqlite::params![canon, new_id, id],
-                )?;
+                )
+                .map_err(|e| row_err(&id, e))?;
                 report.rewritten += 1;
             }
         }
     }
-    tx.commit()?;
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
     Ok(report)
 }
 
@@ -455,5 +503,66 @@ mod tests {
             "idempotent"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The startup journal must say which half failed and which row broke it:
+    /// a rolled-back reconcile must not read like a clean pass (2026-10-30).
+    #[test]
+    fn reconcile_abort_names_the_track_and_leaves_the_rows_untouched() {
+        let base =
+            std::env::temp_dir().join(format!("songstress-reconcile-abort-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).expect("real dir");
+        std::fs::write(real.join("file.mp3"), b"x").expect("track file");
+        std::fs::write(real.join("other.mp3"), b"x").expect("second file");
+        let canon = std::fs::canonicalize(&real)
+            .expect("canon")
+            .to_string_lossy()
+            .into_owned();
+        let conn = db::open(&base.join("abort.db")).expect("open");
+        set(
+            &conn,
+            "musicDirs",
+            &serde_json::to_string(&vec![canon.clone()]).expect("json"),
+        )
+        .expect("seed musicDirs");
+        conn.execute_batch(
+            "INSERT INTO artists VALUES ('ar-x','X','x');
+             INSERT INTO albums VALUES ('al-1','ar-x','A',2020,NULL,NULL,NULL);",
+        )
+        .expect("seed album");
+        let alias_path = format!("{canon}/../real/file.mp3");
+        let canon_path = format!("{canon}/file.mp3");
+        let alias_id = crate::library::stable_id("tr", &[alias_path.as_str()]);
+        // Row B already holds the id A's rewrite derives, at another path: the
+        // drifted shape that makes an unguarded rewrite hit the PRIMARY KEY.
+        let stolen_id = crate::library::stable_id("tr", &[canon_path.as_str()]);
+        let other_path = format!("{canon}/other.mp3");
+        conn.execute(
+            "INSERT INTO tracks(id, album_id, disc, track, title, duration_sec, path, mtime_ns, size)
+             VALUES (?1,'al-1',1,1,'a',10.0,?2,1,1), (?3,'al-1',1,2,'b',10.0,?4,1,1)",
+            rusqlite::params![alias_id, alias_path, stolen_id, other_path],
+        )
+        .expect("seed tracks");
+
+        let err = migrate_music_roots(&conn)
+            .expect_err("the collision must abort the pass")
+            .to_string();
+        assert!(
+            err.starts_with(&format!("track reconcile aborted: track {alias_id}: ")),
+            "the id that broke it must be in the message: {err}"
+        );
+        // The transaction rolled back: neither row moved.
+        let (rows, id): (i64, String) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(id) FROM tracks WHERE path = ?1",
+                [&alias_path],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("alias row");
+        assert_eq!((rows, id), (1, alias_id), "the failed pass changed nothing");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

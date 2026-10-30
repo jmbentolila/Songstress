@@ -2265,6 +2265,20 @@ async fn choose_relink_file(start: String) -> Result<Option<String>, String> {
     .and_then(|mut v| v.pop()))
 }
 
+/// Move a track row to `to`, deriving its id from the path it actually stores.
+/// The id is not independent of the path: `stable_id("tr", path)` is the id a
+/// scan derives for that file, so a row left on the old id holds that id
+/// hostage and the next insert for the path dies on the PRIMARY KEY — the
+/// scan's upsert only handles path conflicts (`ON CONFLICT(path)`). mtime is
+/// zeroed so the next scan re-parses the file's tags.
+fn relink_row(conn: &rusqlite::Connection, id: &str, to: &Path) -> rusqlite::Result<usize> {
+    let to = to.to_string_lossy().into_owned();
+    conn.execute(
+        "UPDATE tracks SET id = ?1, path = ?2, mtime_ns = 0 WHERE id = ?3",
+        rusqlite::params![library::stable_id("tr", &[to.as_str()]), to, id],
+    )
+}
+
 /// Point a missing track's row at a file the user located. Files outside the
 /// library roots are COPIED IN first (the scan only walks the library +
 /// staging roots, so an external path would be swept as an orphan on the
@@ -2335,18 +2349,13 @@ async fn relink_track(
         };
 
     let conn = state.db.lock().unwrap();
-    let changed = conn
-        .execute(
-            "UPDATE tracks SET path = ?1, mtime_ns = 0 WHERE id = ?2",
-            rusqlite::params![final_path.to_string_lossy(), track_id],
-        )
-        .map_err(|e| {
-            if e.to_string().contains("UNIQUE") {
-                "that file is already linked to another track".to_string()
-            } else {
-                e.to_string()
-            }
-        })?;
+    let changed = relink_row(&conn, &track_id, &final_path).map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            "that file is already linked to another track".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
     if changed == 0 {
         return Err("unknown track".into());
     }
@@ -3270,7 +3279,7 @@ pub fn run() {
                             );
                         }
                     }
-                    Err(e) => eprintln!("[settings] root canonicalization failed: {e}"),
+                    Err(e) => eprintln!("[settings] roots migration failed: {e}"),
                 }
             }
 
@@ -4201,6 +4210,56 @@ mod tests {
             .query_row("SELECT id, path FROM tracks", [], |r| Ok((r.get(0)?, r.get(1)?)))
             .expect("row");
         assert_eq!(row, ("tr-gone".to_string(), missing), "path is never invented");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The relink bug (2026-10-30): the path moved, the id stayed behind. The
+    /// stale id is `stable_id(old path)`, so putting a file back at the old
+    /// path makes the scan insert its row under that id — and the scan dies on
+    /// the PRIMARY KEY, because its upsert only handles `ON CONFLICT(path)`.
+    #[test]
+    fn relinking_moves_the_id_with_the_path_so_the_old_path_can_be_scanned() {
+        let fixture = std::path::Path::new("fixtures/library/sample/untitled-song.wav");
+        let (base, mut conn, canon) = alias_root_fixture("relink-id");
+        let old_path = format!("{canon}/old.wav");
+        let new_path = format!("{canon}/new.wav");
+        std::fs::copy(fixture, &new_path).expect("copy fixture to the new path");
+        let old_id = crate::library::stable_id("tr", &[old_path.as_str()]);
+        seed_track(&conn, &old_id, &old_path, 0);
+
+        super::relink_row(&conn, &old_id, std::path::Path::new(&new_path)).expect("relink");
+
+        let (id, path): (String, String) = conn
+            .query_row("SELECT id, path FROM tracks", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("relinked row");
+        assert_eq!(id, crate::library::stable_id("tr", &[new_path.as_str()]));
+        assert_eq!(path, new_path, "the id follows the path it stores");
+
+        // The old path gets a file again: its derived id must be free, or the
+        // scan's INSERT for it collides with the row that borrowed it.
+        std::fs::copy(fixture, &old_path).expect("file back at the old path");
+        crate::library::scan::run_scan_roots(
+            &mut conn,
+            &[std::path::PathBuf::from(&canon)],
+            |_, _| {},
+            false,
+        )
+        .expect("scan over the old path no longer dies on the primary key");
+        let (rows, id): (i64, String) = conn
+            .query_row(
+                "SELECT COUNT(*), MAX(id) FROM tracks WHERE path = ?1",
+                [&old_path],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("old-path row");
+        assert_eq!(
+            (rows, id),
+            (1, old_id),
+            "the old path scans under its own id"
+        );
         drop(conn);
         let _ = std::fs::remove_dir_all(&base);
     }

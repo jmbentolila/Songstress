@@ -53,6 +53,12 @@ measurements and the reproduction.
   App.svelte). Resolving through the album is how the playbar read "Nothing
   playing" over audio that was still going (2026-09-26). The engine is
   unaffected: mpv's order is materialized by path at album start.
+- **A path write moves the id with it.** A track id IS `stable_id("tr", path)`,
+  which is the id a scan derives for that file, so a relink that wrote only
+  `path` left the old id behind and the next scan insert for that path died on
+  the PRIMARY KEY — the upsert only handles `ON CONFLICT(path)` (relink fixed
+  2026-10-30; the row write is `relink_row` in `lib.rs`, derived from the exact
+  stored path).
 - **`.songstress.json` is per-album display state, not library content.** One
   file per FOLDER, a map of album id → `{colors, gradient}` (a flat folder can
   hold several albums — measured: three album tags in one compilation folder).

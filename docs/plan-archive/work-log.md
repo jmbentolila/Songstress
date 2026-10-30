@@ -5,6 +5,31 @@ This is the record, not the state: current state lives in `PLAN.md`, and this
 file is the evidence behind it. Sections are kept verbatim, in their original
 order. The index of every section is `README.md` next to this file.
 
+## 2026-10-30 — relink moves the track id with the path
+
+- `relink_track` wrote `path` and left `id` behind. The id is
+  `stable_id("tr", path)` (`src-tauri/src/library/mod.rs`), the scan's identity, so
+  a file back at the old path made the scan insert collide on the `tracks.id`
+  PRIMARY KEY — its upsert only has `ON CONFLICT(path)`. Fixed by `relink_row`
+  (`src-tauri/src/lib.rs`), which derives the id from the exact string it stores.
+  Import's path-keyed `relink` is unchanged: it also clears `staged`, which a
+  relink of a missing row must not do.
+- Test: `relinking_moves_the_id_with_the_path_so_the_old_path_can_be_scanned`
+  (temp DB + a real scan of the old path). Pre-fix it fails on both halves: first
+  the id assert, then `UNIQUE constraint failed: tracks.id`.
+- Task 3: `migrate_music_roots` returns `RootsMigrationError` (`Settings` vs
+  `Reconcile`), reconcile aborts return `track <id>: <error>`, and the startup
+  line reads `[settings] roots migration failed: {e}`. The success line is
+  unchanged. Test: `reconcile_abort_names_the_track_and_leaves_the_rows_untouched`,
+  which also pins the rollback.
+- Gates: `cargo test --lib` 166 passed · `npm run check` 0 errors · `npm test` 150
+  passed · `npm run build` ok. No version bump: the version files are watched and
+  a bump restarts the running app.
+- Blocker found and moved aside: `/home/yossi/Projects/Cargo.toml` (13 bytes,
+  `blake3 = "1"`, born 13:33 the same day) made cargo read it as a workspace root
+  and broke every Rust build under `Projects`. Moved to
+  `/tmp/Projects-Cargo.toml.stray-20261030`.
+
 ## Implementation log (build order)
 
 ### Phase 0 — done (2026-08-21)
