@@ -90,5 +90,21 @@ measurements and the reproduction.
   `.glass` panel anchors to the PANEL (backdrop-filter is a containing block)
   while the modal body also clips. Ranking rules live in `lib/suggest.ts` with
   their tests — change the order there, not in the component.
+- **A save refreshes, it does not rescan or reload.** The save path is the one
+  place that can update the library without paying a full pass: `save_imports`
+  reports the moves as `SaveMove`, `scan-finished` carries an optional
+  `savePatch`, and the frontend applies it in place (`lib/savePatch.ts`). Three
+  costs made that necessary, measured 2026-10-13 on the owner's library (4,594
+  files, 252 albums): the watcher echoed our own move about 2 s later for a
+  second full scan plus a second dump, `get_library` is a 937 KB dump taking
+  443-467 ms, and an unscoped post-save rescan walked every file (58.9 ms against
+  13.5 ms scoped). The rule for anything new on this path: register the moved
+  paths in `RECENT_SAVES` in a read-only pre-pass BEFORE the first write lands
+  (post-hoc registration loses the race; the 2 s debounce delays the rescan but
+  never the evaluation), and refresh through the patch rather than the dump.
+  Suppression is path-scoped and time-scoped: an external change in the same
+  burst still rescans. Cross-instance echo stays out of scope, separate
+  processes. Owner confirmed in real use 2026-11-17: saving new songs and albums
+  no longer lags.
 
 
